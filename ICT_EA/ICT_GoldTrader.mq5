@@ -1,25 +1,28 @@
 //+------------------------------------------------------------------+
-//|  ICT_GoldTrader.mq5 — ICT Method Expert Advisor for XAU/USD      |
-//|  v1.1 Fixes: session wired, partial-close done-flag, ticket prune,|
-//|              signal type capture, OnTradeTransaction precedence,  |
-//|              BacktestFramework included                           |
+//|  ICT_GoldTrader.mq5 — ICT Method EA for XAU/USD                  |
+//|  v1.2 — Profitability pass: TradeFilter (D1 EMA + RSI + ATR       |
+//|          regime + day-of-week), confidence bonus from environment, |
+//|          time-based exit, performance CSV logger                  |
 //+------------------------------------------------------------------+
 #property copyright "FK Bot Distribution"
-#property version   "1.10"
-#property description "ICT EA v1.1: OBs, FVGs, Liquidity Sweeps, Silver Bullet"
+#property version   "1.20"
+#property description "ICT EA v1.2: OBs, FVGs, Liquidity Sweeps, Silver Bullet"
 #property strict
 
 #include "ICT_SignalEngine.mqh"
 #include "../Shared/NewsAPI/NewsConnector.mqh"
 #include "../Shared/RiskManagement/RiskManager.mqh"
 #include "../Shared/Utils/AdaptiveLearning.mqh"
-#include "../Backtesting/BacktestFramework.mqh"   // FIX A2: now included
+#include "../Shared/Utils/TradeFilter.mqh"
+#include "../Shared/Utils/PerformanceLogger.mqh"
+#include "../Backtesting/BacktestFramework.mqh"
 
 //=== Inputs ===========================================================
 input string     InpSymbol        = "XAUUSD";
 input ENUM_TIMEFRAMES InpExecTF   = PERIOD_M15;
 input ENUM_TIMEFRAMES InpHTF      = PERIOD_H4;
 
+//--- Risk
 input double     InpRiskPct       = 1.0;
 input double     InpMaxDailyLoss  = 3.0;
 input double     InpMaxDrawdown   = 8.0;
@@ -30,11 +33,26 @@ input double     InpATR_TP1       = 2.0;
 input double     InpATR_TP2       = 4.0;
 input double     InpPartialClose  = 50.0;
 input double     InpBEtrigger     = 1.0;
-input double     InpBEbuffer      = 5.0;     // FIX M1: BE buffer in points
+input double     InpBEbuffer      = 5.0;
 input double     InpTrailATR      = 1.5;
 input double     InpMaxSpread     = 35.0;
 input int        InpMaxPositions  = 2;
 
+//--- Time-based exit: close losing position after N bars if not at TP1
+input int        InpMaxBarsHeld   = 96;       // e.g. 96 x M15 = 24 hours
+input bool       InpUseTimeExit   = true;
+
+//--- Trade filter
+input int        InpD1EmaPeriod   = 50;       // D1 EMA for macro trend
+input int        InpRSIPeriod     = 14;
+input double     InpRSI_OB        = 70.0;     // overbought → no long
+input double     InpRSI_OS        = 30.0;     // oversold → no short
+input double     InpATRRegimePct  = 0.90;     // suppress above 90th ATR percentile
+input bool       InpAllowMonday   = true;
+input bool       InpAllowFridayPM = false;
+input bool       InpUseTrendFilter= true;     // require D1 EMA alignment
+
+//--- News
 input string     InpNewsAPIKey    = "";
 input string     InpFREDKey       = "";
 input bool       InpUseNewsFilter = true;
@@ -42,17 +60,19 @@ input int        InpNewsBlkBefore = 20;
 input int        InpNewsBlkAfter  = 15;
 input double     InpMinSentiment  = -1;
 
-// FIX A4: session inputs now wired into signal engine
+//--- Sessions
 input bool       InpAllowAsian    = false;
 input bool       InpAllowLondon   = true;
 input bool       InpAllowNYOpen   = true;
 input bool       InpAllowNYPM     = false;
 input int        InpGMToffset     = 0;
 
+//--- Adaptive
 input bool       InpAdaptive      = true;
 input double     InpMinConfidence = 0.55;
 input int        InpAdaptWindow   = 50;
 
+//--- Magic
 input ulong      InpMagic         = 10001;
 
 //=== Globals ===========================================================
@@ -60,37 +80,49 @@ CICTSignalEngine  g_signal;
 CNewsConnector    g_news;
 CRiskManager      g_risk;
 CAdaptiveLearning g_adapt;
+CTradeFilter      g_filter;
+CPerformanceLogger g_logger;
 CTrade            g_trade;
 
 datetime g_last_bar = 0;
 
 struct TicketState
 {
-   ulong ticket;
-   bool  tp1_done;    // FIX B1: flag prevents repeated partial closes
-   int   signal_type; // FIX A4: store the signal type for adaptive learning
-   double confidence;
+   ulong    ticket;
+   bool     tp1_done;
+   int      signal_type;
+   double   confidence;
+   double   env_score;
    datetime open_time;
+   bool     is_long;
+   double   entry_price;
+   double   stop_loss;
+   double   take_profit;
+   string   description;
+   int      bars_held;
 };
-TicketState g_open_positions[];
+TicketState g_positions[];
 int         g_pos_count = 0;
 
 //=======================================================================
 int OnInit()
 {
-   Print("ICT_GoldTrader v1.1: Initialising...");
+   Print("ICT_GoldTrader v1.2: Initialising...");
 
    if(!g_signal.Init(InpSymbol, InpExecTF, InpHTF))
-   {
-      Print("ERROR: SignalEngine init failed"); return INIT_FAILED;
-   }
+   { Print("ERROR: SignalEngine init failed"); return INIT_FAILED; }
 
-   // FIX A4: wire session inputs into the signal engine's session filter
    g_signal.ConfigureSession(InpAllowAsian, InpAllowLondon,
                               InpAllowNYOpen, InpAllowNYPM, InpGMToffset);
 
    if(InpUseNewsFilter)
       g_news.Init(InpNewsAPIKey, InpFREDKey, InpSymbol);
+
+   if(!g_filter.Init(InpSymbol, InpExecTF,
+                     InpD1EmaPeriod, InpRSIPeriod,
+                     InpRSI_OB, InpRSI_OS, InpATRRegimePct,
+                     InpAllowMonday, InpAllowFridayPM))
+   { Print("ERROR: TradeFilter init failed"); return INIT_FAILED; }
 
    RiskParams rp;
    rp.risk_pct_per_trade    = InpRiskPct;
@@ -110,9 +142,7 @@ int OnInit()
    rp.use_news_filter       = InpUseNewsFilter;
 
    if(!g_risk.Init(InpSymbol, rp))
-   {
-      Print("ERROR: RiskManager init failed"); return INIT_FAILED;
-   }
+   { Print("ERROR: RiskManager init failed"); return INIT_FAILED; }
    g_risk.SetMagic(InpMagic);
 
    g_adapt.Init(InpAdaptWindow, InpMinConfidence);
@@ -122,15 +152,17 @@ int OnInit()
    g_trade.SetDeviationInPoints(20);
    g_trade.SetTypeFillingBySymbol(InpSymbol);
 
-   ArrayResize(g_open_positions, 20);
+   g_logger.Init("ICT", InpSymbol);
 
-   Print("ICT_GoldTrader v1.1: Ready. Magic=", InpMagic);
+   ArrayResize(g_positions, 20);
+   Print("ICT_GoldTrader v1.2: Ready. Magic=", InpMagic);
    return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
    g_adapt.SaveToFile("ICT_" + InpSymbol + "_AdaptData.bin");
+   g_logger.Close();
    Print("ICT_GoldTrader: Deinit reason=", reason);
 }
 
@@ -141,8 +173,12 @@ void OnTick()
    if(current_bar == g_last_bar) return;
    g_last_bar = current_bar;
 
+   // Increment bar counters for time-based exit
+   for(int i = 0; i < g_pos_count; i++) g_positions[i].bars_held++;
+
    g_risk.ManageOpenPositions(InpMagic);
    ProcessPartialCloses();
+   ProcessTimeBasedExits();
    ScanClosedTrades();
 
    if(!g_risk.IsTradingAllowed())            return;
@@ -151,9 +187,7 @@ void OnTick()
 
    if(InpUseNewsFilter &&
       g_news.IsNewsBlackout(InpNewsBlkBefore, InpNewsBlkAfter))
-   {
-      Print("ICT: News blackout — skip"); return;
-   }
+   { Print("ICT: News blackout"); return; }
 
    if(InpUseNewsFilter && InpNewsAPIKey != "")
    {
@@ -167,10 +201,36 @@ void OnTick()
    ICTSignal sig;
    if(!g_signal.GetBestSignal(sig)) return;
 
+   // TradeFilter evaluation
+   FilterResult flt = g_filter.Evaluate(sig.is_long);
+   if(!flt.allowed)
+   {
+      Print("ICT: TradeFilter blocked — ", flt.reason); return;
+   }
+
+   // D1 trend alignment as hard gate (configurable)
+   if(InpUseTrendFilter)
+   {
+      bool bull_d1 = g_filter.IsDailyTrendBullish();
+      bool bear_d1 = g_filter.IsDailyTrendBearish();
+      if(sig.is_long  && !bull_d1)
+      { Print("ICT: D1 trend bearish — skip long"); return; }
+      if(!sig.is_long && !bear_d1)
+      { Print("ICT: D1 trend bullish — skip short"); return; }
+   }
+
+   // Boost confidence with environment quality
+   double env_bonus = g_filter.GetConfidenceBonus(sig.is_long);
+   double final_conf = sig.confidence + env_bonus;
+
    double min_conf = InpAdaptive
                      ? g_adapt.GetAdaptedThreshold(sig.type)
                      : InpMinConfidence;
-   if(sig.confidence < min_conf) return;
+   if(final_conf < min_conf)
+   {
+      Print("ICT: conf=", DoubleToString(final_conf, 3),
+            " < ", DoubleToString(min_conf, 3), " — skip"); return;
+   }
 
    if(g_risk.GetTotalOpenRiskPct(InpMagic) >= InpMaxOpenRisk) return;
 
@@ -187,17 +247,26 @@ void OnTick()
    if(ok)
    {
       ulong ticket = g_trade.ResultOrder();
-      if(g_pos_count < ArraySize(g_open_positions))
+      if(g_pos_count < ArraySize(g_positions))
       {
-         g_open_positions[g_pos_count].ticket      = ticket;
-         g_open_positions[g_pos_count].tp1_done    = false;     // FIX B1
-         g_open_positions[g_pos_count].signal_type = sig.type;  // FIX A4
-         g_open_positions[g_pos_count].confidence  = sig.confidence;
-         g_open_positions[g_pos_count].open_time   = TimeCurrent();
+         g_positions[g_pos_count].ticket      = ticket;
+         g_positions[g_pos_count].tp1_done    = false;
+         g_positions[g_pos_count].signal_type = sig.type;
+         g_positions[g_pos_count].confidence  = final_conf;
+         g_positions[g_pos_count].env_score   = flt.quality_score;
+         g_positions[g_pos_count].open_time   = TimeCurrent();
+         g_positions[g_pos_count].is_long     = sig.is_long;
+         g_positions[g_pos_count].entry_price = sig.entry_price;
+         g_positions[g_pos_count].stop_loss   = sig.stop_loss;
+         g_positions[g_pos_count].take_profit = sig.take_profit_2;
+         g_positions[g_pos_count].description = sig.description;
+         g_positions[g_pos_count].bars_held   = 0;
          g_pos_count++;
       }
       Print("ICT: ", (sig.is_long ? "BUY" : "SELL"),
-            " lots=", lots, " conf=", DoubleToString(sig.confidence, 3),
+            " lots=", lots,
+            " conf=", DoubleToString(final_conf, 3),
+            " env=",  DoubleToString(flt.quality_score, 2),
             " SL=", sig.stop_loss, " TP=", sig.take_profit_2,
             " | ", sig.description);
    }
@@ -206,13 +275,12 @@ void OnTick()
 }
 
 //=======================================================================
-// FIX B1: uses tp1_done flag — fires only ONCE per position
 void ProcessPartialCloses()
 {
    for(int i = 0; i < g_pos_count; i++)
    {
-      if(g_open_positions[i].tp1_done) continue;
-      if(!PositionSelectByTicket(g_open_positions[i].ticket)) continue;
+      if(g_positions[i].tp1_done) continue;
+      if(!PositionSelectByTicket(g_positions[i].ticket)) continue;
 
       double entry  = PositionGetDouble(POSITION_PRICE_OPEN);
       double price  = PositionGetDouble(POSITION_PRICE_CURRENT);
@@ -231,25 +299,45 @@ void ProcessPartialCloses()
       {
          double close_lots = NormalizeDouble(volume * InpPartialClose / 100.0, 2);
          double min_lot    = SymbolInfoDouble(InpSymbol, SYMBOL_VOLUME_MIN);
-         if(close_lots >= min_lot)
+         if(close_lots >= min_lot &&
+            g_trade.PositionClosePartial(g_positions[i].ticket, close_lots))
          {
-            if(g_trade.PositionClosePartial(g_open_positions[i].ticket, close_lots))
-            {
-               g_open_positions[i].tp1_done = true;   // FIX B1: mark done
-               Print("ICT: TP1 partial close ", close_lots, " lots ticket=",
-                     g_open_positions[i].ticket);
-            }
+            g_positions[i].tp1_done = true;
+            Print("ICT: TP1 partial close ", close_lots,
+                  " lots ticket=", g_positions[i].ticket);
          }
       }
    }
 }
 
 //=======================================================================
-// FIX A4: capture actual signal type from g_open_positions (not hardcoded)
-// FIX: prune fully-closed tickets from the tracking array
+// Time-based exit: close position if held > InpMaxBarsHeld and not at TP1
+void ProcessTimeBasedExits()
+{
+   if(!InpUseTimeExit) return;
+
+   for(int i = 0; i < g_pos_count; i++)
+   {
+      if(g_positions[i].tp1_done) continue;  // runner — don't force close
+      if(g_positions[i].bars_held < InpMaxBarsHeld) continue;
+      if(!PositionSelectByTicket(g_positions[i].ticket)) continue;
+
+      double profit = PositionGetDouble(POSITION_PROFIT);
+      // Only force-close if in loss — let winners run
+      if(profit < 0.0)
+      {
+         Print("ICT: Time exit — ticket=", g_positions[i].ticket,
+               " bars=", g_positions[i].bars_held,
+               " P&L=", DoubleToString(profit, 2));
+         g_trade.PositionClose(g_positions[i].ticket);
+      }
+   }
+}
+
+//=======================================================================
 void ScanClosedTrades()
 {
-   datetime from = TimeCurrent() - 86400;
+   datetime from = TimeCurrent() - 86400 * 2;
    if(!HistorySelect(from, TimeCurrent())) return;
    int deals = HistoryDealsTotal();
    static int last_deal_count = 0;
@@ -259,31 +347,43 @@ void ScanClosedTrades()
    {
       ulong deal_ticket = HistoryDealGetTicket(i);
       if(HistoryDealGetInteger(deal_ticket, DEAL_MAGIC) != (long)InpMagic) continue;
-      if(HistoryDealGetInteger(deal_ticket, DEAL_ENTRY) != DEAL_ENTRY_OUT) continue;
+      if(HistoryDealGetInteger(deal_ticket, DEAL_ENTRY) != DEAL_ENTRY_OUT)  continue;
 
       double   profit   = HistoryDealGetDouble (deal_ticket, DEAL_PROFIT);
-      datetime open_t   = (datetime)HistoryDealGetInteger(deal_ticket, DEAL_TIME);
+      double   exit_px  = HistoryDealGetDouble (deal_ticket, DEAL_PRICE);
+      double   vol      = HistoryDealGetDouble (deal_ticket, DEAL_VOLUME);
+      datetime close_t  = (datetime)HistoryDealGetInteger(deal_ticket, DEAL_TIME);
       ulong    pos_id   = (ulong)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
 
-      // Find matching position state to get signal type
-      int  sig_type = ICT_OB_BULLISH;  // fallback
-      double conf   = InpMinConfidence;
+      int    sig_type   = ICT_OB_BULLISH;
+      double conf       = InpMinConfidence;
+      double env_score  = 0.5;
+
       for(int j = 0; j < g_pos_count; j++)
       {
-         if(g_open_positions[j].ticket == pos_id)
+         if(g_positions[j].ticket == pos_id)
          {
-            sig_type = g_open_positions[j].signal_type;
-            conf     = g_open_positions[j].confidence;
-            // FIX: remove closed ticket from array
+            sig_type  = g_positions[j].signal_type;
+            conf      = g_positions[j].confidence;
+            env_score = g_positions[j].env_score;
+
+            g_logger.LogTrade(pos_id,
+                              g_positions[j].is_long,
+                              g_positions[j].entry_price, exit_px,
+                              g_positions[j].stop_loss,
+                              g_positions[j].take_profit,
+                              vol, profit,
+                              g_positions[j].open_time, close_t,
+                              sig_type, conf, env_score,
+                              g_positions[j].description);
+
             for(int k = j; k < g_pos_count - 1; k++)
-               g_open_positions[k] = g_open_positions[k + 1];
+               g_positions[k] = g_positions[k + 1];
             g_pos_count--;
             break;
          }
       }
-
-      g_adapt.RecordTrade(open_t, TimeCurrent(), profit,
-                          sig_type, conf);
+      g_adapt.RecordTrade(close_t, TimeCurrent(), profit, sig_type, conf);
    }
    last_deal_count = deals;
 }
@@ -293,7 +393,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
 {
-   // FIX H9: correct operator precedence with explicit parentheses
    if(trans.type == TRADE_TRANSACTION_DEAL_ADD &&
       (trans.deal_type == DEAL_TYPE_BUY || trans.deal_type == DEAL_TYPE_SELL))
    {
