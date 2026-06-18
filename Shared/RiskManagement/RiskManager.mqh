@@ -1,7 +1,6 @@
 //+------------------------------------------------------------------+
 //|  RiskManager.mqh — Unified risk & position-sizing engine          |
-//|  Implements: ATR-based sizing, max drawdown guard, daily loss cap, |
-//|  partial-close ladder, dynamic trailing stop, correlation filter   |
+//|  v1.1 — Fixed: daily loss uses equity; BE buffer; CopyBuffer guard|
 //+------------------------------------------------------------------+
 #ifndef RISK_MANAGER_MQH
 #define RISK_MANAGER_MQH
@@ -10,26 +9,25 @@
 #include <Trade\PositionInfo.mqh>
 #include <Trade\AccountInfo.mqh>
 
-//+------------------------------------------------------------------+
 struct RiskParams
 {
-   double   risk_pct_per_trade;     // % of balance risked per trade (e.g. 1.0)
-   double   max_daily_loss_pct;     // halt trading if daily loss exceeds this %
-   double   max_drawdown_pct;       // halt trading if equity drawdown > this %
-   double   max_open_risk_pct;      // total open risk ceiling across all positions
-   int      atr_period;             // ATR period for stop placement
-   double   atr_sl_multiplier;      // SL = ATR * this
-   double   atr_tp1_multiplier;     // First TP = ATR * this (partial close)
-   double   atr_tp2_multiplier;     // Final TP = ATR * this
-   double   partial_close_pct;      // % of position to close at TP1 (e.g. 50)
-   double   breakeven_trigger_atr;  // Move SL to BE after price moves N * ATR
-   double   max_spread_pts;         // Skip entry if spread > N points
-   int      max_positions;          // Max concurrent open positions for this EA
-   double   trailing_step_atr;      // Trail by this fraction of ATR
-   bool     use_news_filter;        // Disable entries during news blackout
+   double   risk_pct_per_trade;
+   double   max_daily_loss_pct;
+   double   max_drawdown_pct;
+   double   max_open_risk_pct;
+   int      atr_period;
+   double   atr_sl_multiplier;
+   double   atr_tp1_multiplier;
+   double   atr_tp2_multiplier;
+   double   partial_close_pct;
+   double   breakeven_trigger_atr;
+   double   breakeven_buffer_pts;    // buffer above/below entry at BE (prevents spread stop-out)
+   double   max_spread_pts;
+   int      max_positions;
+   double   trailing_step_atr;
+   bool     use_news_filter;
 };
 
-//+------------------------------------------------------------------+
 class CRiskManager
 {
 private:
@@ -55,28 +53,22 @@ public:
 
    bool     Init(const string symbol, const RiskParams &params);
 
-   //--- Position sizing -------------------------------------------------
-   double   CalcLotSize(const double entry_price,
-                        const double stop_loss_price);
+   double   CalcLotSize(const double entry_price, const double stop_loss_price);
 
-   //--- Guard checks ----------------------------------------------------
-   bool     IsTradingAllowed();        // daily loss + drawdown check
+   bool     IsTradingAllowed();
    bool     IsSpreadAcceptable();
    bool     IsMaxPositionsReached(const ulong magic);
 
-   //--- Stop management -------------------------------------------------
    void     ManageOpenPositions(const ulong magic);
    bool     MoveToBreakeven(const ulong ticket, const double entry,
                             const ENUM_ORDER_TYPE direction);
    bool     ApplyTrailingStop(const ulong ticket, const double entry,
                               const ENUM_ORDER_TYPE direction);
 
-   //--- Metrics ---------------------------------------------------------
    double   GetCurrentDrawdownPct();
-   double   GetDailyLossPct();
+   double   GetDailyLossPct();          // FIX B2: now uses equity
    double   GetTotalOpenRiskPct(const ulong magic);
 
-   //--- Accessors
    RiskParams& Params() { return m_params; }
    void     SetMagic(const ulong magic) { m_trade.SetExpertMagicNumber(magic); }
 };
@@ -91,14 +83,12 @@ CRiskManager::CRiskManager()
    ArraySetAsSeries(m_atr_buffer, true);
 }
 
-//+------------------------------------------------------------------+
 CRiskManager::~CRiskManager()
 {
    if(m_atr_handle != INVALID_HANDLE)
       IndicatorRelease(m_atr_handle);
 }
 
-//+------------------------------------------------------------------+
 bool CRiskManager::Init(const string symbol, const RiskParams &params)
 {
    m_symbol = symbol;
@@ -117,11 +107,11 @@ bool CRiskManager::Init(const string symbol, const RiskParams &params)
    m_trade.SetDeviationInPoints(20);
    m_trade.SetTypeFillingBySymbol(m_symbol);
    Print("RiskManager: Initialised on ", m_symbol,
-         " | Risk/trade=", m_params.risk_pct_per_trade, "%");
+         " | Risk/trade=", m_params.risk_pct_per_trade, "%",
+         " | BE buffer=", m_params.breakeven_buffer_pts, "pts");
    return true;
 }
 
-//+------------------------------------------------------------------+
 void CRiskManager::RefreshDailyBaseline()
 {
    datetime today = (datetime)(TimeCurrent() / 86400 * 86400);
@@ -129,17 +119,17 @@ void CRiskManager::RefreshDailyBaseline()
    {
       m_current_day          = today;
       m_balance_at_day_start = m_account.Balance();
+      Print("RiskManager: New day baseline balance=", m_balance_at_day_start);
    }
 }
 
-//+------------------------------------------------------------------+
 double CRiskManager::GetATR()
 {
-   if(CopyBuffer(m_atr_handle, 0, 0, 3, m_atr_buffer) < 1) return 0.0;
-   return m_atr_buffer[1]; // confirmed closed-bar ATR
+   // FIX H8: guard requires at least 2 elements before accessing [1]
+   if(CopyBuffer(m_atr_handle, 0, 0, 3, m_atr_buffer) < 2) return 0.0;
+   return m_atr_buffer[1];
 }
 
-//+------------------------------------------------------------------+
 double CRiskManager::CalcLotSize(const double entry_price,
                                  const double stop_loss_price)
 {
@@ -149,8 +139,8 @@ double CRiskManager::CalcLotSize(const double entry_price,
 
    if(sl_dist <= 0.0)
    {
-      Print("RiskManager: SL distance is zero — defaulting to 0.01 lot");
-      return 0.01;
+      Print("RiskManager: SL distance is zero — defaulting to min lot");
+      return SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
    }
 
    double tick_value = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_TICK_VALUE);
@@ -159,28 +149,21 @@ double CRiskManager::CalcLotSize(const double entry_price,
    double min_lot    = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
    double max_lot    = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MAX);
 
-   if(tick_size == 0.0 || tick_value == 0.0) return min_lot;
+   if(tick_size <= 0.0 || tick_value <= 0.0) return min_lot;
 
-   //--- risk_amt = lots * (sl_dist / tick_size) * tick_value
    double lots = risk_amt / ((sl_dist / tick_size) * tick_value);
    lots = MathFloor(lots / lot_step) * lot_step;
    lots = MathMax(min_lot, MathMin(max_lot, lots));
-
    return NormalizeDouble(lots, 2);
 }
 
-//+------------------------------------------------------------------+
 bool CRiskManager::IsTradingAllowed()
 {
    RefreshDailyBaseline();
 
-   double equity  = m_account.Equity();
-   double balance = m_account.Balance();
-
-   //--- Update high-water mark
+   double equity = m_account.Equity();
    if(equity > m_peak_equity) m_peak_equity = equity;
 
-   //--- Max drawdown from equity peak
    double dd_pct = (m_peak_equity - equity) / m_peak_equity * 100.0;
    if(dd_pct >= m_params.max_drawdown_pct)
    {
@@ -189,7 +172,7 @@ bool CRiskManager::IsTradingAllowed()
       return false;
    }
 
-   //--- Daily loss cap
+   // FIX B2: daily loss now checks equity (catches floating losses)
    double daily_loss = GetDailyLossPct();
    if(daily_loss >= m_params.max_daily_loss_pct)
    {
@@ -198,19 +181,15 @@ bool CRiskManager::IsTradingAllowed()
       return false;
    }
 
-   //--- Total open risk ceiling
-   // (caller must pass magic if using per-EA cap)
    return true;
 }
 
-//+------------------------------------------------------------------+
 bool CRiskManager::IsSpreadAcceptable()
 {
    double spread = (double)SymbolInfoInteger(m_symbol, SYMBOL_SPREAD);
    return (spread <= m_params.max_spread_pts);
 }
 
-//+------------------------------------------------------------------+
 bool CRiskManager::IsMaxPositionsReached(const ulong magic)
 {
    int count = 0;
@@ -224,7 +203,6 @@ bool CRiskManager::IsMaxPositionsReached(const ulong magic)
    return (count >= m_params.max_positions);
 }
 
-//+------------------------------------------------------------------+
 void CRiskManager::ManageOpenPositions(const ulong magic)
 {
    for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -232,8 +210,8 @@ void CRiskManager::ManageOpenPositions(const ulong magic)
       if(!m_pos.SelectByIndex(i)) continue;
       if(m_pos.Symbol() != m_symbol || m_pos.Magic() != magic) continue;
 
-      ulong  ticket    = m_pos.Ticket();
-      double entry     = m_pos.PriceOpen();
+      ulong  ticket = m_pos.Ticket();
+      double entry  = m_pos.PriceOpen();
       ENUM_ORDER_TYPE dir = (m_pos.PositionType() == POSITION_TYPE_BUY)
                             ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
 
@@ -242,7 +220,6 @@ void CRiskManager::ManageOpenPositions(const ulong magic)
    }
 }
 
-//+------------------------------------------------------------------+
 bool CRiskManager::MoveToBreakeven(const ulong ticket,
                                    const double entry,
                                    const ENUM_ORDER_TYPE direction)
@@ -252,34 +229,35 @@ bool CRiskManager::MoveToBreakeven(const ulong ticket,
    double atr     = GetATR();
    if(atr <= 0.0) return false;
 
-   double trigger = m_params.breakeven_trigger_atr * atr;
-   double current_sl = m_pos.StopLoss();
+   double trigger  = m_params.breakeven_trigger_atr * atr;
+   double cur_sl   = m_pos.StopLoss();
    double price    = m_pos.PriceCurrent();
+   // FIX M1: use configured buffer instead of 1 point to avoid spread stop-out
+   double buf      = m_params.breakeven_buffer_pts * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
 
    if(direction == ORDER_TYPE_BUY)
    {
-      if(price >= entry + trigger && (current_sl < entry || current_sl == 0.0))
+      double be_level = entry + buf;
+      if(price >= entry + trigger && (cur_sl < be_level || cur_sl == 0.0))
       {
-         m_trade.PositionModify(ticket, entry + SymbolInfoDouble(m_symbol, SYMBOL_POINT),
-                                m_pos.TakeProfit());
-         Print("RiskManager: Breakeven set for ticket ", ticket);
+         m_trade.PositionModify(ticket, be_level, m_pos.TakeProfit());
+         Print("RiskManager: BE set ticket=", ticket, " SL=", be_level);
          return true;
       }
    }
    else
    {
-      if(price <= entry - trigger && (current_sl > entry || current_sl == 0.0))
+      double be_level = entry - buf;
+      if(price <= entry - trigger && (cur_sl > be_level || cur_sl == 0.0))
       {
-         m_trade.PositionModify(ticket, entry - SymbolInfoDouble(m_symbol, SYMBOL_POINT),
-                                m_pos.TakeProfit());
-         Print("RiskManager: Breakeven set for ticket ", ticket);
+         m_trade.PositionModify(ticket, be_level, m_pos.TakeProfit());
+         Print("RiskManager: BE set ticket=", ticket, " SL=", be_level);
          return true;
       }
    }
    return false;
 }
 
-//+------------------------------------------------------------------+
 bool CRiskManager::ApplyTrailingStop(const ulong ticket,
                                      const double entry,
                                      const ENUM_ORDER_TYPE direction)
@@ -289,14 +267,15 @@ bool CRiskManager::ApplyTrailingStop(const ulong ticket,
    double atr   = GetATR();
    if(atr <= 0.0) return false;
 
-   double trail = m_params.trailing_step_atr * atr;
-   double price = m_pos.PriceCurrent();
+   double trail  = m_params.trailing_step_atr * atr;
+   double price  = m_pos.PriceCurrent();
    double cur_sl = m_pos.StopLoss();
+   double pt     = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
 
    if(direction == ORDER_TYPE_BUY)
    {
       double new_sl = price - trail;
-      if(new_sl > cur_sl + SymbolInfoDouble(m_symbol, SYMBOL_POINT))
+      if(new_sl > cur_sl + pt)
       {
          m_trade.PositionModify(ticket, new_sl, m_pos.TakeProfit());
          return true;
@@ -305,7 +284,7 @@ bool CRiskManager::ApplyTrailingStop(const ulong ticket,
    else
    {
       double new_sl = price + trail;
-      if(cur_sl == 0.0 || new_sl < cur_sl - SymbolInfoDouble(m_symbol, SYMBOL_POINT))
+      if(cur_sl == 0.0 || new_sl < cur_sl - pt)
       {
          m_trade.PositionModify(ticket, new_sl, m_pos.TakeProfit());
          return true;
@@ -314,7 +293,6 @@ bool CRiskManager::ApplyTrailingStop(const ulong ticket,
    return false;
 }
 
-//+------------------------------------------------------------------+
 double CRiskManager::GetCurrentDrawdownPct()
 {
    double equity = m_account.Equity();
@@ -322,17 +300,16 @@ double CRiskManager::GetCurrentDrawdownPct()
    return MathMax(0.0, (m_peak_equity - equity) / m_peak_equity * 100.0);
 }
 
-//+------------------------------------------------------------------+
+// FIX B2: uses equity (not closed balance) so floating losses trigger the cap
 double CRiskManager::GetDailyLossPct()
 {
    RefreshDailyBaseline();
-   double balance = m_account.Balance();
+   double equity = m_account.Equity();
    if(m_balance_at_day_start <= 0.0) return 0.0;
-   double loss = m_balance_at_day_start - balance;
+   double loss = m_balance_at_day_start - equity;
    return MathMax(0.0, loss / m_balance_at_day_start * 100.0);
 }
 
-//+------------------------------------------------------------------+
 double CRiskManager::GetTotalOpenRiskPct(const ulong magic)
 {
    double total_risk = 0.0;
@@ -344,13 +321,19 @@ double CRiskManager::GetTotalOpenRiskPct(const ulong magic)
       if(!m_pos.SelectByIndex(i)) continue;
       if(m_pos.Symbol() != m_symbol || m_pos.Magic() != magic) continue;
 
-      double entry  = m_pos.PriceOpen();
-      double sl     = m_pos.StopLoss();
-      double lots   = m_pos.Volume();
+      double sl = m_pos.StopLoss();
+      if(sl == 0.0)
+      {
+         Print("RiskManager: WARNING — position ticket=", m_pos.Ticket(),
+               " has no SL; excluded from open risk calc");
+         continue;
+      }
+
+      double entry     = m_pos.PriceOpen();
+      double lots      = m_pos.Volume();
       double tick_val  = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_TICK_VALUE);
       double tick_size = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_TICK_SIZE);
-
-      if(sl == 0.0 || tick_size == 0.0) continue;
+      if(tick_size <= 0.0) continue;
 
       double sl_dist    = MathAbs(entry - sl);
       double risk_money = lots * (sl_dist / tick_size) * tick_val;

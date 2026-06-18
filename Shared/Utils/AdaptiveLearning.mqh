@@ -1,37 +1,38 @@
 //+------------------------------------------------------------------+
-//|  AdaptiveLearning.mqh — Lightweight performance tracker that      |
-//|  adjusts signal confidence thresholds based on recent win rate.   |
-//|  Uses a rolling window of the last N closed trades.               |
+//|  AdaptiveLearning.mqh — Rolling performance tracker              |
+//|  v1.1 — Fixed: binary file versioning to survive struct changes  |
 //+------------------------------------------------------------------+
 #ifndef ADAPTIVE_LEARNING_MQH
 #define ADAPTIVE_LEARNING_MQH
+
+// Increment this when TradeRecord struct layout changes
+#define ADAPTIVE_FILE_VERSION 2
 
 struct TradeRecord
 {
    datetime open_time;
    datetime close_time;
-   double   profit_pips;
+   double   profit_usd;        // renamed from profit_pips (was storing USD, not pips)
    bool     was_winner;
-   int      signal_type;   // strategy-specific tag (e.g. OB_BULL = 1)
-   double   confidence_at_entry; // 0.0–1.0
+   int      signal_type;
+   double   confidence_at_entry;
 };
 
 class CAdaptiveLearning
 {
 private:
    TradeRecord m_history[];
-   int         m_window_size;   // rolling window length
+   int         m_window_size;
    int         m_count;
-   int         m_head;          // circular buffer head
+   int         m_head;
 
-   //--- Per-signal-type stats
-   double   m_win_rate[16];     // indexed by signal_type (up to 16 types)
+   double   m_win_rate[16];
    int      m_signal_trades[16];
    int      m_signal_wins[16];
 
-   double   m_confidence_floor; // never go below this threshold
-   double   m_confidence_ceil;  // never go above this
-   double   m_base_threshold;   // starting minimum confidence
+   double   m_confidence_floor;
+   double   m_confidence_ceil;
+   double   m_base_threshold;
 
    void     RecalcStats();
 
@@ -43,28 +44,21 @@ public:
                  const double floor          = 0.40,
                  const double ceil           = 0.85);
 
-   //--- Record outcome of a closed trade
    void     RecordTrade(const datetime open_time,
                         const datetime close_time,
-                        const double   profit_pips,
+                        const double   profit_usd,
                         const int      signal_type,
                         const double   confidence_at_entry);
 
-   //--- Query adapted minimum confidence for a signal type
    double   GetAdaptedThreshold(const int signal_type);
-
-   //--- Overall rolling win rate
    double   GetOverallWinRate();
-
-   //--- Suggested lot scale factor [0.5 – 1.5] based on recent performance
    double   GetLotScaleFactor();
 
-   //--- Persist to / restore from a file (survives restarts)
+   // FIX: versioned binary persistence — bad file version returns false gracefully
    bool     SaveToFile(const string filename);
    bool     LoadFromFile(const string filename);
 };
 
-//+------------------------------------------------------------------+
 CAdaptiveLearning::CAdaptiveLearning()
    : m_window_size(50), m_count(0), m_head(0),
      m_confidence_floor(0.40), m_confidence_ceil(0.85),
@@ -75,7 +69,6 @@ CAdaptiveLearning::CAdaptiveLearning()
    ArrayInitialize(m_signal_wins,   0);
 }
 
-//+------------------------------------------------------------------+
 void CAdaptiveLearning::Init(const int window_size,
                              const double base_threshold,
                              const double floor,
@@ -88,7 +81,6 @@ void CAdaptiveLearning::Init(const int window_size,
    ArrayResize(m_history, m_window_size);
 }
 
-//+------------------------------------------------------------------+
 void CAdaptiveLearning::RecalcStats()
 {
    ArrayInitialize(m_signal_trades, 0);
@@ -102,26 +94,22 @@ void CAdaptiveLearning::RecalcStats()
    }
 
    for(int i = 0; i < 16; i++)
-   {
-      if(m_signal_trades[i] > 0)
-         m_win_rate[i] = (double)m_signal_wins[i] / m_signal_trades[i];
-      else
-         m_win_rate[i] = 0.5; // prior
-   }
+      m_win_rate[i] = (m_signal_trades[i] > 0)
+                      ? (double)m_signal_wins[i] / m_signal_trades[i]
+                      : 0.5;
 }
 
-//+------------------------------------------------------------------+
 void CAdaptiveLearning::RecordTrade(const datetime open_time,
                                     const datetime close_time,
-                                    const double   profit_pips,
+                                    const double   profit_usd,
                                     const int      signal_type,
                                     const double   confidence_at_entry)
 {
    if(m_count < m_window_size) m_count++;
    m_history[m_head].open_time           = open_time;
    m_history[m_head].close_time          = close_time;
-   m_history[m_head].profit_pips         = profit_pips;
-   m_history[m_head].was_winner          = (profit_pips > 0.0);
+   m_history[m_head].profit_usd          = profit_usd;
+   m_history[m_head].was_winner          = (profit_usd > 0.0);
    m_history[m_head].signal_type         = MathMin(signal_type, 15);
    m_history[m_head].confidence_at_entry = confidence_at_entry;
 
@@ -129,21 +117,15 @@ void CAdaptiveLearning::RecordTrade(const datetime open_time,
    RecalcStats();
 }
 
-//+------------------------------------------------------------------+
 double CAdaptiveLearning::GetAdaptedThreshold(const int signal_type)
 {
    int st = MathMin(signal_type, 15);
    double wr = m_win_rate[st];
-
-   //--- If win rate is above 60% → lower the threshold (take more trades)
-   //--- If win rate is below 45% → raise the threshold (be more selective)
-   double adjustment = (wr - 0.50) * 0.3;  // ±15% max swing
+   double adjustment = (wr - 0.50) * 0.3;
    double threshold  = m_base_threshold - adjustment;
-
    return MathMax(m_confidence_floor, MathMin(m_confidence_ceil, threshold));
 }
 
-//+------------------------------------------------------------------+
 double CAdaptiveLearning::GetOverallWinRate()
 {
    if(m_count == 0) return 0.5;
@@ -153,42 +135,65 @@ double CAdaptiveLearning::GetOverallWinRate()
    return (double)wins / m_count;
 }
 
-//+------------------------------------------------------------------+
 double CAdaptiveLearning::GetLotScaleFactor()
 {
-   double wr = GetOverallWinRate();
-   //--- Scale between 0.5 (cold streak) and 1.5 (hot streak)
-   //--- Neutral at 50% win rate → factor 1.0
+   double wr     = GetOverallWinRate();
    double factor = 1.0 + (wr - 0.50) * 2.0;
    return MathMax(0.5, MathMin(1.5, factor));
 }
 
-//+------------------------------------------------------------------+
+// FIX: writes magic version bytes first; rejects mismatched versions
 bool CAdaptiveLearning::SaveToFile(const string filename)
 {
    int fh = FileOpen(filename, FILE_WRITE | FILE_BIN | FILE_COMMON);
-   if(fh == INVALID_HANDLE) { Print("AdaptiveLearning: Cannot save to ", filename); return false; }
+   if(fh == INVALID_HANDLE)
+   {
+      Print("AdaptiveLearning: Cannot save to ", filename); return false;
+   }
+   FileWriteInteger(fh, ADAPTIVE_FILE_VERSION);   // version header
+   FileWriteInteger(fh, m_window_size);           // saved window size
    FileWriteInteger(fh, m_count);
    FileWriteInteger(fh, m_head);
    for(int i = 0; i < m_window_size; i++)
       FileWriteStruct(fh, m_history[i]);
    FileClose(fh);
+   Print("AdaptiveLearning: Saved ", m_count, " records to ", filename,
+         " (v", ADAPTIVE_FILE_VERSION, ")");
    return true;
 }
 
-//+------------------------------------------------------------------+
 bool CAdaptiveLearning::LoadFromFile(const string filename)
 {
    if(!FileIsExist(filename, FILE_COMMON)) return false;
+
    int fh = FileOpen(filename, FILE_READ | FILE_BIN | FILE_COMMON);
    if(fh == INVALID_HANDLE) return false;
+
+   int file_version = FileReadInteger(fh);
+   if(file_version != ADAPTIVE_FILE_VERSION)
+   {
+      Print("AdaptiveLearning: Version mismatch (file=", file_version,
+            " code=", ADAPTIVE_FILE_VERSION, ") — ignoring saved data");
+      FileClose(fh);
+      return false;
+   }
+
+   int saved_window = FileReadInteger(fh);
+   if(saved_window != m_window_size)
+   {
+      Print("AdaptiveLearning: Window size mismatch (file=", saved_window,
+            " current=", m_window_size, ") — ignoring saved data");
+      FileClose(fh);
+      return false;
+   }
+
    m_count = FileReadInteger(fh);
    m_head  = FileReadInteger(fh);
    for(int i = 0; i < m_window_size; i++)
       FileReadStruct(fh, m_history[i]);
    FileClose(fh);
    RecalcStats();
-   Print("AdaptiveLearning: Loaded ", m_count, " trade records from ", filename);
+   Print("AdaptiveLearning: Loaded ", m_count, " records from ", filename);
    return true;
 }
 

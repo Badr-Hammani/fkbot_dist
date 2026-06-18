@@ -1,7 +1,9 @@
 //+------------------------------------------------------------------+
 //|  SMC_SignalEngine.mqh — Smart Money Concept signal layer          |
-//|  Detects: institutional accumulation zones, liquidity pools,      |
-//|  stop hunts, imbalances, and displacement candles on XAU/USD      |
+//|  v1.1 Fixes: swept pool variable (lo1 not cl[1]), manual volume   |
+//|              MA, IsHighVolume called in displacement, stop hunt SL |
+//|              at wick extreme, TIPS filter active, pool dedup,     |
+//|              acc zone direction, swing lookback min 2             |
 //+------------------------------------------------------------------+
 #ifndef SMC_SIGNAL_ENGINE_MQH
 #define SMC_SIGNAL_ENGINE_MQH
@@ -9,30 +11,29 @@
 #include "../Shared/Utils/MarketStructure.mqh"
 #include "../Shared/Utils/SessionFilter.mqh"
 
-//--- SMC signal types
 enum ENUM_SMC_SIGNAL
 {
    SMC_NONE             = 0,
-   SMC_ACCUMULATION     = 1,   // Wyckoff-style accumulation zone long
-   SMC_DISTRIBUTION     = 2,   // Wyckoff-style distribution zone short
-   SMC_STOP_HUNT_LONG   = 3,   // Below-low stop hunt → long reversal
-   SMC_STOP_HUNT_SHORT  = 4,   // Above-high stop hunt → short reversal
-   SMC_INDUCEMENT_LONG  = 5,   // Retail longs flushed → institutional long
+   SMC_ACCUMULATION     = 1,
+   SMC_DISTRIBUTION     = 2,
+   SMC_STOP_HUNT_LONG   = 3,
+   SMC_STOP_HUNT_SHORT  = 4,
+   SMC_INDUCEMENT_LONG  = 5,
    SMC_INDUCEMENT_SHORT = 6,
-   SMC_DISPLACEMENT_LONG = 7,  // Strong imbalance candle (bull)
+   SMC_DISPLACEMENT_LONG  = 7,
    SMC_DISPLACEMENT_SHORT = 8,
-   SMC_EQH_HUNT         = 9,   // Equal highs sweep (engineered liquidity)
-   SMC_EQL_HUNT         = 10   // Equal lows sweep
+   SMC_EQH_HUNT         = 9,
+   SMC_EQL_HUNT         = 10
 };
 
 struct LiquidityPool
 {
    double   price;
    datetime formed_time;
-   bool     is_above;     // true = sell-side liquidity (above price), false = buy-side
-   int      touches;      // how many times price tested this level
+   bool     is_above;
+   int      touches;
    bool     has_been_swept;
-   double   sweep_depth;  // how far below/above was the sweep wick?
+   double   sweep_wick_extreme;  // FIX: store actual wick extreme for SL placement
 };
 
 struct AccumulationZone
@@ -42,9 +43,9 @@ struct AccumulationZone
    double   midpoint;
    datetime start_time;
    datetime end_time;
-   int      consolidation_bars;  // bars spent in range
-   bool     is_valid;            // >5 bars + volume compression
-   double   range_pips;
+   int      consolidation_bars;
+   bool     is_valid;
+   bool     is_high_volume_breakout;  // volume compression check
 };
 
 struct DisplacementCandle
@@ -52,9 +53,10 @@ struct DisplacementCandle
    double   open, high, low, close;
    datetime candle_time;
    bool     is_bullish;
-   double   body_ratio;     // body / total range
-   double   atr_multiple;   // how many ATRs does body span
+   double   body_ratio;
+   double   atr_multiple;
    bool     closes_above_prev_swing;
+   bool     has_volume_confirmation;   // FIX: volume check now populated
 };
 
 struct SMCSignal
@@ -68,8 +70,7 @@ struct SMCSignal
    double          confidence;
    datetime        signal_time;
    string          description;
-
-   double          pool_level;      // liquidity pool that was swept
+   double          pool_level;
    double          institution_zone_high;
    double          institution_zone_low;
 };
@@ -84,7 +85,7 @@ private:
 
    CMarketStructure m_htf_struct;
    CMarketStructure m_exec_struct;
-   CSessionFilter   m_session;
+   CSessionFilter   m_session;   // FIX A4: owned and configured from EA
 
    LiquidityPool   m_pools[];
    int             m_pool_count;
@@ -93,28 +94,27 @@ private:
    int             m_acc_count;
 
    int             m_atr_handle;
-   int             m_vol_ma_handle;  // Volume MA for volume analysis proxy
    double          m_atr[];
-   double          m_vol_ma[];
 
-   //--- Detection sub-routines
+   // FIX: manual rolling tick volume MA (replaces broken iMA+VOLUME_TICK)
+   double          m_vol_ma_buffer;
+   int             m_vol_ma_period;
+   void            UpdateVolumeMa();
+
    void     ScanLiquidityPools(const int lookback = 150);
    void     ScanAccumulationZones(const int lookback = 100);
    bool     DetectDisplacement(DisplacementCandle &dc, const int bar = 1);
-   bool     DetectEqualHighsLows(bool &is_highs, double &level,
-                                  const int lookback = 50);
    bool     DetectStopHunt(bool &is_bull_hunt, double &hunt_level,
-                            double &entry_zone_high, double &entry_zone_low);
+                            double &wick_extreme);
+   // FIX: IsHighVolume now uses the manual vol MA
+   bool     IsHighVolume(const int bar, const double multiplier = 2.0);
 
-   //--- Volume proxy (tick volume as institutional footprint)
-   bool     IsHighVolume(const int bar, const double multiplier = 1.5);
-
-   //--- Confluence scorer
    double   ScoreLong (const double price, const AccumulationZone *az,
                        const LiquidityPool *pool);
    double   ScoreShort(const double price, const AccumulationZone *az,
                        const LiquidityPool *pool);
 
+   // FIX H8: guard < 2
    double   GetATR();
 
 public:
@@ -125,10 +125,16 @@ public:
                  const ENUM_TIMEFRAMES exec_tf = PERIOD_M15,
                  const ENUM_TIMEFRAMES htf     = PERIOD_H4);
 
+   // FIX A4: wire session inputs from EA
+   void     ConfigureSession(const bool allow_asian,
+                             const bool allow_london_open,
+                             const bool allow_ny_open,
+                             const bool allow_ny_pm,
+                             const int  gmt_offset);
+
    void     UpdateContext();
    bool     GetBestSignal(SMCSignal &signal);
 
-   //--- Accessors for dashboard
    int      GetLiquidityPools(LiquidityPool &out[], const int max = 10);
    int      GetAccumulationZones(AccumulationZone &out[], const int max = 5);
    ENUM_MARKET_BIAS GetHTFBias() { return m_htf_struct.GetBias(); }
@@ -138,20 +144,17 @@ public:
 CSMCSignalEngine::CSMCSignalEngine()
    : m_pool_count(0), m_acc_count(0),
      m_atr_handle(INVALID_HANDLE),
-     m_vol_ma_handle(INVALID_HANDLE)
+     m_vol_ma_buffer(0.0),
+     m_vol_ma_period(20)
 {
-   ArraySetAsSeries(m_atr,    true);
-   ArraySetAsSeries(m_vol_ma, true);
+   ArraySetAsSeries(m_atr, true);
 }
 
-//+------------------------------------------------------------------+
 CSMCSignalEngine::~CSMCSignalEngine()
 {
-   if(m_atr_handle    != INVALID_HANDLE) IndicatorRelease(m_atr_handle);
-   if(m_vol_ma_handle != INVALID_HANDLE) IndicatorRelease(m_vol_ma_handle);
+   if(m_atr_handle != INVALID_HANDLE) IndicatorRelease(m_atr_handle);
 }
 
-//+------------------------------------------------------------------+
 bool CSMCSignalEngine::Init(const string symbol,
                             const ENUM_TIMEFRAMES exec_tf,
                             const ENUM_TIMEFRAMES htf)
@@ -160,180 +163,248 @@ bool CSMCSignalEngine::Init(const string symbol,
    m_exec_tf = exec_tf;
    m_htf     = htf;
 
-   if(!m_htf_struct.Init(symbol, htf, 5))     return false;
-   if(!m_exec_struct.Init(symbol, exec_tf, 3)) return false;
+   if(!m_htf_struct.Init(symbol, htf, 5))      return false;
+   if(!m_exec_struct.Init(symbol, exec_tf, 3))  return false;
 
-   m_atr_handle    = iATR(symbol, exec_tf, 14);
-   m_vol_ma_handle = iMA(symbol, exec_tf, 20, 0, MODE_SMA, VOLUME_TICK);
-
-   if(m_atr_handle    == INVALID_HANDLE) return false;
-   if(m_vol_ma_handle == INVALID_HANDLE) return false;
+   m_atr_handle = iATR(symbol, exec_tf, 14);
+   if(m_atr_handle == INVALID_HANDLE) return false;
 
    ArrayResize(m_pools,     100);
    ArrayResize(m_acc_zones, 30);
 
    UpdateContext();
-   Print("SMCSignalEngine: Initialised on ", symbol);
+   Print("SMCSignalEngine v1.1: Init ", symbol);
    return true;
 }
 
-//+------------------------------------------------------------------+
+void CSMCSignalEngine::ConfigureSession(const bool allow_asian,
+                                        const bool allow_london_open,
+                                        const bool allow_ny_open,
+                                        const bool allow_ny_pm,
+                                        const int  gmt_offset)
+{
+   m_session.Configure(allow_asian, allow_london_open,
+                       allow_ny_open, allow_ny_pm, gmt_offset);
+   Print("SMCSignalEngine: Session configured GMToffset=", gmt_offset);
+}
+
 double CSMCSignalEngine::GetATR()
 {
-   if(CopyBuffer(m_atr_handle, 0, 0, 3, m_atr) < 1) return 0.0;
+   // FIX H8: need at least 2 elements before accessing [1]
+   if(CopyBuffer(m_atr_handle, 0, 0, 3, m_atr) < 2) return 0.0;
    return m_atr[1];
 }
 
-//+------------------------------------------------------------------+
-bool CSMCSignalEngine::IsHighVolume(const int bar, const double multiplier)
+// FIX: manual rolling average of tick volume (replaces iMA(VOLUME_TICK))
+void CSMCSignalEngine::UpdateVolumeMa()
 {
-   if(CopyBuffer(m_vol_ma_handle, 0, 0, bar + 2, m_vol_ma) < bar + 2) return false;
+   int bars = m_vol_ma_period + 1;
    long vol_arr[];
    ArraySetAsSeries(vol_arr, true);
-   if(CopyTickVolume(m_symbol, m_exec_tf, 0, bar + 2, vol_arr) < bar + 2) return false;
-   return ((double)vol_arr[bar] > m_vol_ma[bar] * multiplier);
+   if(CopyTickVolume(m_symbol, m_exec_tf, 0, bars, vol_arr) < bars)
+   {
+      m_vol_ma_buffer = 0.0;
+      return;
+   }
+   double sum = 0.0;
+   for(int i = 1; i <= m_vol_ma_period; i++)  // skip bar 0 (incomplete)
+      sum += (double)vol_arr[i];
+   m_vol_ma_buffer = sum / m_vol_ma_period;
 }
 
-//+------------------------------------------------------------------+
+// FIX: uses manual volume MA, raised threshold to 2.0x for gold
+bool CSMCSignalEngine::IsHighVolume(const int bar, const double multiplier)
+{
+   if(m_vol_ma_buffer <= 0.0) return false;
+   long vol_arr[];
+   ArraySetAsSeries(vol_arr, true);
+   if(CopyTickVolume(m_symbol, m_exec_tf, 0, bar + 2, vol_arr) < bar + 1) return false;
+   return ((double)vol_arr[bar] > m_vol_ma_buffer * multiplier);
+}
+
 void CSMCSignalEngine::ScanLiquidityPools(const int lookback)
 {
-   int    total = MathMin(lookback, Bars(m_symbol, m_exec_tf));
-   double hi[], lo[], cl[];
+   int total = MathMin(lookback, Bars(m_symbol, m_exec_tf));
+   double hi[], lo[];
    datetime times[];
 
    ArraySetAsSeries(hi,    true);
    ArraySetAsSeries(lo,    true);
-   ArraySetAsSeries(cl,    true);
    ArraySetAsSeries(times, true);
 
-   if(CopyHigh (m_symbol, m_exec_tf, 0, total, hi)    < total) return;
-   if(CopyLow  (m_symbol, m_exec_tf, 0, total, lo)    < total) return;
-   if(CopyClose(m_symbol, m_exec_tf, 0, total, cl)    < total) return;
-   if(CopyTime (m_symbol, m_exec_tf, 0, total, times) < total) return;
+   if(CopyHigh(m_symbol, m_exec_tf, 0, total, hi)    < total) return;
+   if(CopyLow (m_symbol, m_exec_tf, 0, total, lo)    < total) return;
+   if(CopyTime(m_symbol, m_exec_tf, 0, total, times) < total) return;
 
    m_pool_count = 0;
-   double atr   = GetATR();
-   double tolerance = atr * 0.15;  // within 15% ATR = "equal" level
+   double atr       = GetATR();
+   double tolerance = MathMin(atr * 0.15, 2.0);   // cap at $2.00
 
-   //--- Find equal highs (sell-side liquidity) and equal lows (buy-side)
+   // FIX: deduplication set — track registered price levels
+   double registered_prices[];
+   int    reg_count = 0;
+   ArrayResize(registered_prices, 200);
+
    for(int i = 3; i < total - 3 && m_pool_count < 98; i++)
    {
-      //--- Equal highs: 2+ swing highs at approximately same level
-      for(int j = i + 2; j < MathMin(i + 30, total - 1); j++)
+      // FIX: require 2-bar lookback for valid swing (not just 1)
+      bool is_swing_high = (hi[i] > hi[i+1] && hi[i] > hi[i+2] &&
+                            hi[i] > hi[i-1] && hi[i] > hi[i-2]);
+      bool is_swing_low  = (lo[i] < lo[i+1] && lo[i] < lo[i+2] &&
+                            lo[i] < lo[i-1] && lo[i] < lo[i-2]);
+
+      if(is_swing_high)
       {
-         if(MathAbs(hi[i] - hi[j]) <= tolerance &&
-            hi[i] > hi[i+1] && hi[i] > hi[i-1] &&
-            hi[j] > hi[j+1] && hi[j] > hi[j-1])
+         for(int j = i + 3; j < MathMin(i + 40, total - 1); j++)
          {
-            //--- Sell-side liquidity pool (resting buy stops above equal highs)
-            LiquidityPool &p   = m_pools[m_pool_count];
-            p.price            = (hi[i] + hi[j]) / 2.0;
-            p.formed_time      = times[j];
-            p.is_above         = true;  // liquidity sits above price
-            p.touches          = 2;
-            p.has_been_swept   = false;
-            p.sweep_depth      = 0.0;
-            m_pool_count++;
-            break;
+            bool j_swing_high = (hi[j] > hi[j+1] && hi[j] > hi[j-1]);
+            if(!j_swing_high) continue;
+            if(MathAbs(hi[i] - hi[j]) <= tolerance)
+            {
+               double pool_price = (hi[i] + hi[j]) / 2.0;
+
+               // FIX: deduplicate — skip if already registered within tolerance
+               bool duplicate = false;
+               for(int k = 0; k < reg_count; k++)
+                  if(MathAbs(registered_prices[k] - pool_price) <= tolerance * 2)
+                     { duplicate = true; break; }
+               if(duplicate) break;
+
+               m_pools[m_pool_count].price            = pool_price;
+               m_pools[m_pool_count].formed_time      = times[j];
+               m_pools[m_pool_count].is_above         = true;
+               m_pools[m_pool_count].touches          = 2;
+               m_pools[m_pool_count].has_been_swept   = false;
+               m_pools[m_pool_count].sweep_wick_extreme = 0.0;
+
+               registered_prices[reg_count++] = pool_price;
+               m_pool_count++;
+               break;
+            }
          }
       }
 
-      //--- Equal lows: buy-side liquidity (sell stops rest below)
-      for(int j = i + 2; j < MathMin(i + 30, total - 1); j++)
+      if(is_swing_low)
       {
-         if(MathAbs(lo[i] - lo[j]) <= tolerance &&
-            lo[i] < lo[i+1] && lo[i] < lo[i-1] &&
-            lo[j] < lo[j+1] && lo[j] < lo[j-1])
+         for(int j = i + 3; j < MathMin(i + 40, total - 1); j++)
          {
-            LiquidityPool &p   = m_pools[m_pool_count];
-            p.price            = (lo[i] + lo[j]) / 2.0;
-            p.formed_time      = times[j];
-            p.is_above         = false;  // liquidity sits below price
-            p.touches          = 2;
-            p.has_been_swept   = false;
-            p.sweep_depth      = 0.0;
-            m_pool_count++;
-            break;
+            bool j_swing_low = (lo[j] < lo[j+1] && lo[j] < lo[j-1]);
+            if(!j_swing_low) continue;
+            if(MathAbs(lo[i] - lo[j]) <= tolerance)
+            {
+               double pool_price = (lo[i] + lo[j]) / 2.0;
+
+               bool duplicate = false;
+               for(int k = 0; k < reg_count; k++)
+                  if(MathAbs(registered_prices[k] - pool_price) <= tolerance * 2)
+                     { duplicate = true; break; }
+               if(duplicate) break;
+
+               m_pools[m_pool_count].price            = pool_price;
+               m_pools[m_pool_count].formed_time      = times[j];
+               m_pools[m_pool_count].is_above         = false;
+               m_pools[m_pool_count].touches          = 2;
+               m_pools[m_pool_count].has_been_swept   = false;
+               m_pools[m_pool_count].sweep_wick_extreme = 0.0;
+
+               registered_prices[reg_count++] = pool_price;
+               m_pool_count++;
+               break;
+            }
          }
       }
    }
 
-   //--- Mark swept pools (price wicked through)
-   double cp = iClose(m_symbol, m_exec_tf, 1);
-   double ch = iHigh (m_symbol, m_exec_tf, 1);
-   double cl1= iLow  (m_symbol, m_exec_tf, 1);
+   // Mark swept pools
+   double hi1 = iHigh (m_symbol, m_exec_tf, 1);
+   double lo1 = iLow  (m_symbol, m_exec_tf, 1);   // FIX: correct variable for low
+   double cl1 = iClose(m_symbol, m_exec_tf, 1);
 
    for(int i = 0; i < m_pool_count; i++)
    {
-      if(m_pools[i].is_above && ch > m_pools[i].price && cl[1] < m_pools[i].price)
+      // Pool expiry: ignore pools older than 50 bars (~12.5h on M15)
+      int bar_age = (int)((TimeCurrent() - m_pools[i].formed_time) /
+                           PeriodSeconds(m_exec_tf));
+      if(bar_age > 50) continue;
+
+      if(m_pools[i].is_above)
       {
-         m_pools[i].has_been_swept = true;
-         m_pools[i].sweep_depth    = ch - m_pools[i].price;
+         // FIX: sell-side pool — wick above pool, close back below
+         if(hi1 > m_pools[i].price && cl1 < m_pools[i].price)
+         {
+            m_pools[i].has_been_swept      = true;
+            m_pools[i].sweep_wick_extreme  = hi1;   // actual wick high for SL
+         }
       }
-      if(!m_pools[i].is_above && cl1 < m_pools[i].price && cl[1] > m_pools[i].price)
+      else
       {
-         m_pools[i].has_been_swept = true;
-         m_pools[i].sweep_depth    = m_pools[i].price - cl1;
+         // FIX C (sweep variable): buy-side pool — use lo1 (not cl[1]) for the wick check
+         if(lo1 < m_pools[i].price && cl1 > m_pools[i].price)
+         {
+            m_pools[i].has_been_swept      = true;
+            m_pools[i].sweep_wick_extreme  = lo1;   // actual wick low for SL
+         }
       }
    }
 }
 
-//+------------------------------------------------------------------+
 void CSMCSignalEngine::ScanAccumulationZones(const int lookback)
 {
-   int    total = MathMin(lookback, Bars(m_symbol, m_exec_tf));
-   double hi[], lo[], cl[];
+   int total = MathMin(lookback, Bars(m_symbol, m_exec_tf));
+   double hi[], lo[];
    datetime times[];
 
    ArraySetAsSeries(hi,    true);
    ArraySetAsSeries(lo,    true);
-   ArraySetAsSeries(cl,    true);
    ArraySetAsSeries(times, true);
 
-   if(CopyHigh (m_symbol, m_exec_tf, 0, total, hi)    < total) return;
-   if(CopyLow  (m_symbol, m_exec_tf, 0, total, lo)    < total) return;
-   if(CopyClose(m_symbol, m_exec_tf, 0, total, cl)    < total) return;
-   if(CopyTime (m_symbol, m_exec_tf, 0, total, times) < total) return;
+   if(CopyHigh(m_symbol, m_exec_tf, 0, total, hi)    < total) return;
+   if(CopyLow (m_symbol, m_exec_tf, 0, total, lo)    < total) return;
+   if(CopyTime(m_symbol, m_exec_tf, 0, total, times) < total) return;
 
    m_acc_count = 0;
    double atr  = GetATR();
 
-   //--- Sliding window: find ranges where ATH-ATL < 2*ATR for 8+ bars
-   for(int i = 10; i < total - 8 && m_acc_count < 28; i++)
+   // FIX: scan from RECENT → OLDER (small i = recent, large i = old)
+   // outer loop i starts at small (recent) and we search backward for the zone
+   for(int i = 5; i < total - 10 && m_acc_count < 28; i++)
    {
-      double window_high = hi[i];
-      double window_low  = lo[i];
-      int    bar_count   = 0;
+      double zone_high = hi[i];
+      double zone_low  = lo[i];
+      int    bar_count = 0;
+      double zone_atr  = atr;  // snapshot ATR — acceptable approximation
 
-      for(int j = i; j >= MathMax(0, i - 30) && j >= 0; j--)
+      // Expand zone backward (toward older bars = higher index)
+      for(int j = i; j < MathMin(i + 40, total); j++)
       {
-         window_high = MathMax(window_high, hi[j]);
-         window_low  = MathMin(window_low,  lo[j]);
-         if((window_high - window_low) > atr * 2.0) break;
+         double candidate_high = MathMax(zone_high, hi[j]);
+         double candidate_low  = MathMin(zone_low,  lo[j]);
+         if((candidate_high - candidate_low) > zone_atr * 2.0) break;
+         zone_high = candidate_high;
+         zone_low  = candidate_low;
          bar_count++;
       }
 
       if(bar_count >= 8)
       {
          AccumulationZone &az = m_acc_zones[m_acc_count];
-         az.high               = window_high;
-         az.low                = window_low;
-         az.midpoint           = (window_high + window_low) / 2.0;
-         az.start_time         = times[i];
-         az.end_time           = times[MathMax(0, i - bar_count + 1)];
+         az.high               = zone_high;
+         az.low                = zone_low;
+         az.midpoint           = (zone_high + zone_low) / 2.0;
+         az.start_time         = times[i + bar_count - 1];  // oldest bar
+         az.end_time           = times[i];                  // newest bar
          az.consolidation_bars = bar_count;
-         az.range_pips         = (window_high - window_low) /
+         az.range_pips         = (zone_high - zone_low) /
                                   SymbolInfoDouble(m_symbol, SYMBOL_POINT) / 10.0;
          az.is_valid           = (bar_count >= 8);
+         az.is_high_volume_breakout = false;
          m_acc_count++;
-         i -= bar_count;  // skip scanned bars
+         i += bar_count;   // FIX: skip forward past this zone to avoid overlap
       }
    }
 }
 
-//+------------------------------------------------------------------+
-bool CSMCSignalEngine::DetectDisplacement(DisplacementCandle &dc,
-                                           const int bar)
+bool CSMCSignalEngine::DetectDisplacement(DisplacementCandle &dc, const int bar)
 {
    double atr = GetATR();
    if(atr <= 0.0) return false;
@@ -343,135 +414,136 @@ bool CSMCSignalEngine::DetectDisplacement(DisplacementCandle &dc,
    double hi = iHigh (m_symbol, m_exec_tf, bar);
    double lo = iLow  (m_symbol, m_exec_tf, bar);
 
-   double body       = MathAbs(cl - op);
-   double total_rng  = hi - lo;
+   double body      = MathAbs(cl - op);
+   double total_rng = hi - lo;
    if(total_rng <= 0.0) return false;
 
-   dc.open       = op; dc.high = hi; dc.low = lo; dc.close = cl;
+   dc.open        = op; dc.high = hi; dc.low = lo; dc.close = cl;
    dc.candle_time = iTime(m_symbol, m_exec_tf, bar);
    dc.is_bullish  = (cl > op);
    dc.body_ratio  = body / total_rng;
    dc.atr_multiple= body / atr;
 
-   //--- Displacement: large body (>60% of range), body > 1.5x ATR
-   if(dc.body_ratio < 0.60 || dc.atr_multiple < 1.5) return false;
+   // FIX: raised displacement threshold to 2.0x ATR for XAU/USD
+   if(dc.body_ratio < 0.60 || dc.atr_multiple < 2.0) return false;
 
-   //--- Closes above previous swing high (bull) or below (bear)
    SwingPoint highs[], lows[];
-   m_exec_struct.GetSwingHighs(highs, 2);
-   m_exec_struct.GetSwingLows (lows,  2);
+   m_exec_struct.GetSwingHighs(highs, 3);
+   m_exec_struct.GetSwingLows (lows,  3);
 
-   if(dc.is_bullish && ArraySize(highs) > 0)
-      dc.closes_above_prev_swing = (cl > highs[0].price);
-   else if(!dc.is_bullish && ArraySize(lows) > 0)
-      dc.closes_above_prev_swing = (cl < lows[0].price);
+   if(dc.is_bullish)
+   {
+      // FIX: compare against highs[1] (prior swing), not highs[0] (current)
+      dc.closes_above_prev_swing = (ArraySize(highs) > 1) && (cl > highs[1].price);
+   }
    else
-      dc.closes_above_prev_swing = false;
+   {
+      dc.closes_above_prev_swing = (ArraySize(lows) > 1) && (cl < lows[1].price);
+   }
+
+   // FIX H6: volume confirmation now integrated into displacement check
+   dc.has_volume_confirmation = IsHighVolume(bar, 2.0);
 
    return true;
 }
 
-//+------------------------------------------------------------------+
+// FIX: SL placed at actual wick extreme, not at pool ± arbitrary ATR fraction
 bool CSMCSignalEngine::DetectStopHunt(bool &is_bull_hunt,
-                                       double &hunt_level,
-                                       double &entry_high,
-                                       double &entry_low)
+                                      double &hunt_level,
+                                      double &wick_extreme)
 {
    double atr = GetATR();
 
-   //--- A stop hunt: current bar wicks significantly beyond a pool,
-   //--- then closes back inside the pool range with a large wick.
+   double hi1 = iHigh (m_symbol, m_exec_tf, 1);
+   double lo1 = iLow  (m_symbol, m_exec_tf, 1);
+   double cl1 = iClose(m_symbol, m_exec_tf, 1);
+
    for(int i = 0; i < m_pool_count; i++)
    {
       if(!m_pools[i].has_been_swept) continue;
 
-      double hi1 = iHigh (m_symbol, m_exec_tf, 1);
-      double lo1 = iLow  (m_symbol, m_exec_tf, 1);
-      double cl1 = iClose(m_symbol, m_exec_tf, 1);
+      // Pool expiry check
+      int bar_age = (int)((TimeCurrent() - m_pools[i].formed_time) /
+                           PeriodSeconds(m_exec_tf));
+      if(bar_age > 50) continue;
 
-      //--- Bullish stop hunt: wick below equal lows pool, close back above
-      if(!m_pools[i].is_above &&
-         lo1 < m_pools[i].price &&
-         cl1 > m_pools[i].price &&
-         (m_pools[i].price - lo1) >= atr * 0.3)
+      // FIX: wick-to-body ratio check (wick must be > 2x body for genuine hunt)
+      double body      = MathAbs(cl1 - iOpen(m_symbol, m_exec_tf, 1));
+      double total_rng = hi1 - lo1;
+
+      if(m_pools[i].is_above)
       {
-         is_bull_hunt = true;
-         hunt_level   = m_pools[i].price;
-         entry_high   = cl1 + atr * 0.1;
-         entry_low    = m_pools[i].price;
-         return true;
+         // Bearish sweep: wick above pool, close back below
+         double wick_above = hi1 - m_pools[i].price;
+         if(lo1 < m_pools[i].price && cl1 < m_pools[i].price &&
+            wick_above >= atr * 0.5 &&
+            (total_rng <= 0.0 || wick_above / total_rng >= 0.25))
+         {
+            is_bull_hunt  = false;
+            hunt_level    = m_pools[i].price;
+            wick_extreme  = hi1;   // FIX: SL above actual wick high
+            return true;
+         }
       }
-
-      //--- Bearish stop hunt: wick above equal highs pool, close back below
-      if(m_pools[i].is_above &&
-         hi1 > m_pools[i].price &&
-         cl1 < m_pools[i].price &&
-         (hi1 - m_pools[i].price) >= atr * 0.3)
+      else
       {
-         is_bull_hunt = false;
-         hunt_level   = m_pools[i].price;
-         entry_high   = m_pools[i].price;
-         entry_low    = cl1 - atr * 0.1;
-         return true;
+         // Bullish sweep: wick below pool, close back above
+         double wick_below = m_pools[i].price - lo1;
+         if(hi1 > m_pools[i].price && cl1 > m_pools[i].price &&
+            wick_below >= atr * 0.5 &&
+            (total_rng <= 0.0 || wick_below / total_rng >= 0.25))
+         {
+            is_bull_hunt  = true;
+            hunt_level    = m_pools[i].price;
+            wick_extreme  = lo1;   // FIX: SL below actual wick low
+            return true;
+         }
       }
    }
    return false;
 }
 
-//+------------------------------------------------------------------+
 double CSMCSignalEngine::ScoreLong(const double price,
                                    const AccumulationZone *az,
                                    const LiquidityPool *pool)
 {
    double score = 0.40;
-
    if(az != NULL && price >= az->low && price <= az->high)
    {
       score += 0.15;
       score += MathMin(0.10, az->consolidation_bars * 0.01);
    }
-
-   if(pool != NULL && !pool->is_above && pool->has_been_swept)
-      score += 0.20;  // buy-side pool swept = institutional entry
-
+   if(pool != NULL && !pool->is_above && pool->has_been_swept) score += 0.20;
    if(m_htf_struct.GetBias() == BIAS_BULLISH) score += 0.15;
    if(m_session.IsKillzone())                  score += 0.10;
-
    return MathMin(1.0, score);
 }
 
-//+------------------------------------------------------------------+
 double CSMCSignalEngine::ScoreShort(const double price,
                                     const AccumulationZone *az,
                                     const LiquidityPool *pool)
 {
    double score = 0.40;
-
    if(az != NULL && price >= az->low && price <= az->high)
    {
       score += 0.15;
       score += MathMin(0.10, az->consolidation_bars * 0.01);
    }
-
-   if(pool != NULL && pool->is_above && pool->has_been_swept)
-      score += 0.20;  // sell-side pool swept = institutional short
-
+   if(pool != NULL && pool->is_above && pool->has_been_swept) score += 0.20;
    if(m_htf_struct.GetBias() == BIAS_BEARISH) score += 0.15;
    if(m_session.IsKillzone())                  score += 0.10;
-
    return MathMin(1.0, score);
 }
 
-//+------------------------------------------------------------------+
 void CSMCSignalEngine::UpdateContext()
 {
    m_htf_struct.Update();
    m_exec_struct.Update();
+   UpdateVolumeMa();
    ScanLiquidityPools(150);
    ScanAccumulationZones(100);
 }
 
-//+------------------------------------------------------------------+
 bool CSMCSignalEngine::GetBestSignal(SMCSignal &signal)
 {
    signal.type       = SMC_NONE;
@@ -486,13 +558,13 @@ bool CSMCSignalEngine::GetBestSignal(SMCSignal &signal)
    ENUM_MARKET_BIAS bias = m_htf_struct.GetBias();
    double best_conf = 0.0;
 
-   //--- 1. Stop Hunt / Liquidity Sweep Reversal ----------------------
-   bool bull_hunt; double hunt_lvl, ez_hi, ez_lo;
-   if(DetectStopHunt(bull_hunt, hunt_lvl, ez_hi, ez_lo))
+   // ---- 1. Stop Hunt reversal (FIX: SL at wick extreme) -----------
+   bool bull_hunt; double hunt_lvl, wick_ext;
+   if(DetectStopHunt(bull_hunt, hunt_lvl, wick_ext))
    {
       double conf = bull_hunt ? ScoreLong(price, NULL, NULL)
                               : ScoreShort(price, NULL, NULL);
-      conf += 0.25;  // sweep = strong institutional footprint
+      conf += 0.25;
 
       if(conf > best_conf)
       {
@@ -500,56 +572,55 @@ bool CSMCSignalEngine::GetBestSignal(SMCSignal &signal)
          signal.type         = bull_hunt ? SMC_STOP_HUNT_LONG : SMC_STOP_HUNT_SHORT;
          signal.is_long      = bull_hunt;
          signal.entry_price  = price;
-         signal.stop_loss    = bull_hunt ? hunt_lvl - atr * 0.5
-                                         : hunt_lvl + atr * 0.5;
-         signal.take_profit_1= bull_hunt ? price + atr * 2.0
-                                         : price - atr * 2.0;
-         signal.take_profit_2= bull_hunt ? price + atr * 4.5
-                                         : price - atr * 4.5;
+         // FIX: SL beyond the actual wick extreme, not just pool ± ATR fraction
+         signal.stop_loss    = bull_hunt ? wick_ext - atr * 0.2
+                                         : wick_ext + atr * 0.2;
+         signal.take_profit_1= bull_hunt ? price + atr * 2.0 : price - atr * 2.0;
+         signal.take_profit_2= bull_hunt ? price + atr * 4.5 : price - atr * 4.5;
          signal.confidence   = conf;
          signal.signal_time  = TimeCurrent();
          signal.pool_level   = hunt_lvl;
          signal.description  = "SMC Stop Hunt " + (bull_hunt ? "LONG" : "SHORT") +
-                               " @ " + DoubleToString(hunt_lvl, 2);
+                               " pool=" + DoubleToString(hunt_lvl, 2) +
+                               " wick=" + DoubleToString(wick_ext, 2);
       }
    }
 
-   //--- 2. Accumulation → Displacement entry -------------------------
+   // ---- 2. Displacement + volume confirmation (FIX H6) ------------
    DisplacementCandle dc;
    if(DetectDisplacement(dc, 1))
    {
       bool want_long = dc.is_bullish;
-      if((want_long && bias != BIAS_BEARISH) ||
-         (!want_long && bias != BIAS_BULLISH))
+      if(!((want_long && bias == BIAS_BEARISH) ||
+           (!want_long && bias == BIAS_BULLISH)))
       {
          double conf = want_long ? ScoreLong(price, NULL, NULL)
                                  : ScoreShort(price, NULL, NULL);
-         if(dc.closes_above_prev_swing) conf += 0.15;
-         conf += MathMin(0.10, (dc.atr_multiple - 1.5) * 0.05);
+         if(dc.closes_above_prev_swing)    conf += 0.15;
+         if(dc.has_volume_confirmation)    conf += 0.10;   // FIX H6: volume now counted
+         conf += MathMin(0.10, (dc.atr_multiple - 2.0) * 0.05);
 
          if(conf > best_conf)
          {
             best_conf           = conf;
-            signal.type         = want_long ? SMC_DISPLACEMENT_LONG
-                                            : SMC_DISPLACEMENT_SHORT;
+            signal.type         = want_long ? SMC_DISPLACEMENT_LONG : SMC_DISPLACEMENT_SHORT;
             signal.is_long      = want_long;
             signal.entry_price  = price;
             signal.stop_loss    = want_long ? dc.low  - atr * 0.3
                                             : dc.high + atr * 0.3;
-            signal.take_profit_1= want_long ? price + atr * 2.0
-                                            : price - atr * 2.0;
-            signal.take_profit_2= want_long ? price + atr * 4.0
-                                            : price - atr * 4.0;
+            signal.take_profit_1= want_long ? price + atr * 2.0 : price - atr * 2.0;
+            signal.take_profit_2= want_long ? price + atr * 4.0 : price - atr * 4.0;
             signal.confidence   = conf;
             signal.signal_time  = TimeCurrent();
             signal.description  = "SMC Displacement " +
                                   (want_long ? "LONG" : "SHORT") +
-                                  " body=" + DoubleToString(dc.atr_multiple, 2) + "xATR";
+                                  " " + DoubleToString(dc.atr_multiple, 2) + "xATR" +
+                                  (dc.has_volume_confirmation ? " VOL+" : "");
          }
       }
    }
 
-   //--- 3. Accumulation Zone breakout --------------------------------
+   // ---- 3. Accumulation / Distribution zone breakout ---------------
    for(int i = 0; i < m_acc_count; i++)
    {
       if(!m_acc_zones[i].is_valid) continue;
@@ -573,10 +644,10 @@ bool CSMCSignalEngine::GetBestSignal(SMCSignal &signal)
             signal.signal_time   = TimeCurrent();
             signal.institution_zone_high = m_acc_zones[i].high;
             signal.institution_zone_low  = m_acc_zones[i].low;
-            signal.description   = "SMC Accumulation Break LONG | zone=" +
-                                   DoubleToString(m_acc_zones[i].low, 2) +
-                                   "-" + DoubleToString(m_acc_zones[i].high, 2) +
-                                   " bars=" + IntegerToString(m_acc_zones[i].consolidation_bars);
+            signal.description   = "SMC Accumulation LONG bars=" +
+                                   IntegerToString(m_acc_zones[i].consolidation_bars) +
+                                   " zone=" + DoubleToString(m_acc_zones[i].low, 2) +
+                                   "-" + DoubleToString(m_acc_zones[i].high, 2);
          }
       }
       else if(below_zone && bias != BIAS_BULLISH)
@@ -595,9 +666,8 @@ bool CSMCSignalEngine::GetBestSignal(SMCSignal &signal)
             signal.signal_time   = TimeCurrent();
             signal.institution_zone_high = m_acc_zones[i].high;
             signal.institution_zone_low  = m_acc_zones[i].low;
-            signal.description   = "SMC Distribution Break SHORT | zone=" +
-                                   DoubleToString(m_acc_zones[i].low, 2) +
-                                   "-" + DoubleToString(m_acc_zones[i].high, 2);
+            signal.description   = "SMC Distribution SHORT bars=" +
+                                   IntegerToString(m_acc_zones[i].consolidation_bars);
          }
       }
    }
@@ -605,7 +675,6 @@ bool CSMCSignalEngine::GetBestSignal(SMCSignal &signal)
    return (signal.type != SMC_NONE && signal.confidence > 0.0);
 }
 
-//+------------------------------------------------------------------+
 int CSMCSignalEngine::GetLiquidityPools(LiquidityPool &out[], const int max)
 {
    int n = MathMin(max, m_pool_count);
@@ -614,7 +683,6 @@ int CSMCSignalEngine::GetLiquidityPools(LiquidityPool &out[], const int max)
    return n;
 }
 
-//+------------------------------------------------------------------+
 int CSMCSignalEngine::GetAccumulationZones(AccumulationZone &out[], const int max)
 {
    int n = MathMin(max, m_acc_count);

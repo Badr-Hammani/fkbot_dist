@@ -1,25 +1,24 @@
 //+------------------------------------------------------------------+
 //|  SMC_GoldTrader.mq5 — Smart Money Concept EA for XAU/USD         |
-//|  Components: HTF bias → SMC signal engine → news/macro filter →   |
-//|              risk manager → adaptive learning → order execution    |
+//|  v1.1 Fixes: session wired, partial-close done-flag, TIPS filter |
+//|              now active, signal type capture, BacktestFramework   |
 //+------------------------------------------------------------------+
 #property copyright "FK Bot Distribution"
-#property version   "1.00"
-#property description "Smart Money Concept EA: Liquidity pools, stop hunts, displacement"
+#property version   "1.10"
+#property description "SMC EA v1.1: Liquidity pools, stop hunts, displacement"
 #property strict
 
 #include "SMC_SignalEngine.mqh"
 #include "../Shared/NewsAPI/NewsConnector.mqh"
 #include "../Shared/RiskManagement/RiskManager.mqh"
 #include "../Shared/Utils/AdaptiveLearning.mqh"
+#include "../Backtesting/BacktestFramework.mqh"   // FIX A2
 
-//=== Input Parameters =================================================
-
+//=== Inputs ===========================================================
 input string     InpSymbol        = "XAUUSD";
 input ENUM_TIMEFRAMES InpExecTF   = PERIOD_M15;
 input ENUM_TIMEFRAMES InpHTF      = PERIOD_H4;
 
-//--- Risk
 input double     InpRiskPct       = 1.0;
 input double     InpMaxDailyLoss  = 3.0;
 input double     InpMaxDrawdown   = 8.0;
@@ -30,34 +29,34 @@ input double     InpATR_TP1       = 2.5;
 input double     InpATR_TP2       = 5.0;
 input double     InpPartialClose  = 50.0;
 input double     InpBEtrigger     = 1.2;
+input double     InpBEbuffer      = 5.0;
 input double     InpTrailATR      = 1.8;
 input double     InpMaxSpread     = 35.0;
 input int        InpMaxPositions  = 2;
 
-//--- Macro filters
 input string     InpNewsAPIKey    = "";
 input string     InpFREDKey       = "";
 input bool       InpUseNewsFilter = true;
-input int        InpNewsBlkBefore = 25;           // SMC uses wider blackout
+input int        InpNewsBlkBefore = 25;
 input int        InpNewsBlkAfter  = 20;
 input double     InpMinSentiment  = -1;
-input bool       InpUseDXYFilter  = true;         // Skip longs if USD surging
-input double     InpDXYBullThresh = 0.3;          // DXY 1-day rise > this% → no gold longs
-input bool       InpUseYieldFilter= true;         // Skip longs if real yield > threshold
-input double     InpYieldThresh   = 2.0;          // TIPS yield > 2.0% → headwind for gold
+input bool       InpUseDXYFilter  = true;
+input double     InpDXYBullThresh = 0.3;
+// FIX H5: TIPS yield now gates trade entry, not just logs
+input bool       InpUseYieldFilter= true;
+input double     InpYieldThresh   = 2.0;   // suppress longs if yield > this
 
-//--- Sessions
+// FIX A4: session inputs wired to signal engine
+input bool       InpAllowAsian    = false;
 input bool       InpAllowLondon   = true;
 input bool       InpAllowNYOpen   = true;
 input bool       InpAllowNYPM     = false;
 input int        InpGMToffset     = 0;
 
-//--- Adaptive
 input bool       InpAdaptive      = true;
 input double     InpMinConfidence = 0.58;
 input int        InpAdaptWindow   = 50;
 
-//--- Magic
 input ulong      InpMagic         = 20001;
 
 //=== Globals ===========================================================
@@ -68,20 +67,36 @@ CAdaptiveLearning g_adapt;
 CTrade            g_trade;
 
 datetime g_last_bar = 0;
-ulong    g_open_tickets[];
+bool     g_dxy_suppress_longs  = false;
+bool     g_yield_suppress_longs = false;
+
+struct TicketState
+{
+   ulong ticket;
+   bool  tp1_done;
+   int   signal_type;
+   double confidence;
+   datetime open_time;
+};
+TicketState g_open_positions[];
+int         g_pos_count = 0;
 
 //=======================================================================
 int OnInit()
 {
-   Print("SMC_GoldTrader: Initialising...");
+   Print("SMC_GoldTrader v1.1: Initialising...");
 
    if(!g_signal.Init(InpSymbol, InpExecTF, InpHTF))
    {
       Print("ERROR: SMCSignalEngine init failed"); return INIT_FAILED;
    }
 
+   // FIX A4: wire session inputs
+   g_signal.ConfigureSession(InpAllowAsian, InpAllowLondon,
+                              InpAllowNYOpen, InpAllowNYPM, InpGMToffset);
+
    if(InpUseNewsFilter)
-      g_news.Init(InpNewsAPIKey, InpFREDKey);
+      g_news.Init(InpNewsAPIKey, InpFREDKey, InpSymbol);
 
    RiskParams rp;
    rp.risk_pct_per_trade    = InpRiskPct;
@@ -94,6 +109,7 @@ int OnInit()
    rp.atr_tp2_multiplier    = InpATR_TP2;
    rp.partial_close_pct     = InpPartialClose;
    rp.breakeven_trigger_atr = InpBEtrigger;
+   rp.breakeven_buffer_pts  = InpBEbuffer;
    rp.max_spread_pts        = InpMaxSpread;
    rp.max_positions         = InpMaxPositions;
    rp.trailing_step_atr     = InpTrailATR;
@@ -106,21 +122,22 @@ int OnInit()
    g_risk.SetMagic(InpMagic);
 
    g_adapt.Init(InpAdaptWindow, InpMinConfidence);
-   g_adapt.LoadFromFile("SMC_AdaptData.bin");
+   g_adapt.LoadFromFile("SMC_" + InpSymbol + "_AdaptData.bin");
 
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetDeviationInPoints(20);
    g_trade.SetTypeFillingBySymbol(InpSymbol);
 
-   Print("SMC_GoldTrader: Ready. Magic=", InpMagic);
+   ArrayResize(g_open_positions, 20);
+
+   Print("SMC_GoldTrader v1.1: Ready. Magic=", InpMagic);
    return INIT_SUCCEEDED;
 }
 
-//=======================================================================
 void OnDeinit(const int reason)
 {
-   g_adapt.SaveToFile("SMC_AdaptData.bin");
-   Print("SMC_GoldTrader: Deinitialised. Reason=", reason);
+   g_adapt.SaveToFile("SMC_" + InpSymbol + "_AdaptData.bin");
+   Print("SMC_GoldTrader: Deinit reason=", reason);
 }
 
 //=======================================================================
@@ -134,114 +151,110 @@ void OnTick()
    ProcessPartialCloses();
    ScanClosedTrades();
 
-   //--- Guards
    if(!g_risk.IsTradingAllowed())            return;
    if(!g_risk.IsSpreadAcceptable())           return;
    if(g_risk.IsMaxPositionsReached(InpMagic)) return;
 
-   //--- News blackout
    if(InpUseNewsFilter &&
       g_news.IsNewsBlackout(InpNewsBlkBefore, InpNewsBlkAfter))
    {
       Print("SMC: News blackout — skip"); return;
    }
 
-   //--- Macro filters (DXY + Real Yield)
-   if(InpUseNewsFilter && InpFREDKey != "")
-   {
-      double dxy_chg;
-      if(InpUseDXYFilter && g_news.GetDXYMomentum(dxy_chg))
-      {
-         if(dxy_chg > InpDXYBullThresh)
-         {
-            Print("SMC: DXY surge (+", DoubleToString(dxy_chg, 3),
-                  "%) — suppressing gold longs");
-            // Note: signal engine will still evaluate, but macro check
-            // will cause us to skip if signal is long.
-         }
-      }
-
-      double tips_yield;
-      if(InpUseYieldFilter && g_news.GetRealYield(tips_yield))
-      {
-         if(tips_yield > InpYieldThresh)
-            Print("SMC: Real yield=", DoubleToString(tips_yield, 2),
-                  "% — gold headwind noted");
-      }
-   }
-
-   //--- Sentiment filter
    if(InpUseNewsFilter && InpNewsAPIKey != "")
    {
       NewsSentimentResult sent;
-      if(g_news.GetGoldSentiment(sent) && (double)sent.sentiment < InpMinSentiment)
+      if(g_news.GetGoldSentiment(sent) &&
+         (double)sent.sentiment < InpMinSentiment) return;
+   }
+
+   // Update macro suppression flags (checked per-signal below)
+   if(InpUseNewsFilter && InpFREDKey != "")
+   {
+      if(InpUseDXYFilter)
       {
-         Print("SMC: Sentiment negative — skip"); return;
+         double dxy_chg;
+         if(g_news.GetDXYMomentum(dxy_chg))
+         {
+            g_dxy_suppress_longs = (dxy_chg > InpDXYBullThresh);
+            if(g_dxy_suppress_longs)
+               Print("SMC: DXY +", DoubleToString(dxy_chg, 3), "% — longs suppressed");
+         }
+      }
+
+      // FIX H5: TIPS yield now actively suppresses long signals
+      if(InpUseYieldFilter)
+      {
+         double tips;
+         if(g_news.GetRealYield(tips))
+         {
+            g_yield_suppress_longs = (tips > InpYieldThresh);
+            if(g_yield_suppress_longs)
+               Print("SMC: TIPS yield=", DoubleToString(tips, 2),
+                     "% > ", InpYieldThresh, "% — gold longs suppressed");
+         }
       }
    }
 
-   //--- Update context
    g_signal.UpdateContext();
 
-   //--- Get signal
    SMCSignal sig;
    if(!g_signal.GetBestSignal(sig)) return;
 
-   //--- Macro veto on longs when DXY surging
-   if(InpUseDXYFilter && InpFREDKey != "" && sig.is_long)
+   // FIX H5: apply macro veto to long signals
+   if(sig.is_long && (g_dxy_suppress_longs || g_yield_suppress_longs))
    {
-      double dxy_chg;
-      if(g_news.GetDXYMomentum(dxy_chg) && dxy_chg > InpDXYBullThresh)
-      {
-         Print("SMC: DXY macro veto on long signal"); return;
-      }
+      Print("SMC: Macro veto on long signal (DXY=", g_dxy_suppress_longs,
+            " Yield=", g_yield_suppress_longs, ")");
+      return;
    }
 
-   //--- Adaptive gate
    double min_conf = InpAdaptive
                      ? g_adapt.GetAdaptedThreshold(sig.type)
                      : InpMinConfidence;
-   if(sig.confidence < min_conf)
-   {
-      Print("SMC: conf=", DoubleToString(sig.confidence, 3),
-            " < ", DoubleToString(min_conf, 3), " — skip"); return;
-   }
+   if(sig.confidence < min_conf) return;
 
    if(g_risk.GetTotalOpenRiskPct(InpMagic) >= InpMaxOpenRisk) return;
 
-   //--- Position size
    double lots = g_risk.CalcLotSize(sig.entry_price, sig.stop_loss);
-   if(InpAdaptive) lots *= g_adapt.GetLotScaleFactor();
-   lots = NormalizeDouble(lots, 2);
+   if(InpAdaptive) lots = NormalizeDouble(lots * g_adapt.GetLotScaleFactor(), 2);
+   lots = MathMax(SymbolInfoDouble(InpSymbol, SYMBOL_VOLUME_MIN), lots);
 
-   //--- Execute
-   bool ok = false;
-   if(sig.is_long)
-      ok = g_trade.Buy(lots, InpSymbol, sig.entry_price,
-                       sig.stop_loss, sig.take_profit_2, sig.description);
-   else
-      ok = g_trade.Sell(lots, InpSymbol, sig.entry_price,
-                        sig.stop_loss, sig.take_profit_2, sig.description);
+   bool ok = sig.is_long
+             ? g_trade.Buy (lots, InpSymbol, sig.entry_price,
+                            sig.stop_loss, sig.take_profit_2, sig.description)
+             : g_trade.Sell(lots, InpSymbol, sig.entry_price,
+                            sig.stop_loss, sig.take_profit_2, sig.description);
 
    if(ok)
    {
       ulong ticket = g_trade.ResultOrder();
+      if(g_pos_count < ArraySize(g_open_positions))
+      {
+         g_open_positions[g_pos_count].ticket      = ticket;
+         g_open_positions[g_pos_count].tp1_done    = false;
+         g_open_positions[g_pos_count].signal_type = sig.type;
+         g_open_positions[g_pos_count].confidence  = sig.confidence;
+         g_open_positions[g_pos_count].open_time   = TimeCurrent();
+         g_pos_count++;
+      }
       Print("SMC: ", (sig.is_long ? "BUY" : "SELL"),
             " lots=", lots, " conf=", DoubleToString(sig.confidence, 3),
             " SL=", sig.stop_loss, " TP=", sig.take_profit_2,
             " | ", sig.description);
-      AddTrackedTicket(ticket);
    }
    else
       Print("SMC: Order failed: ", g_trade.ResultRetcodeDescription());
 }
 
 //=======================================================================
+// FIX B1: tp1_done flag prevents repeated fires
 void ProcessPartialCloses()
 {
-   for(int i = ArraySize(g_open_tickets) - 1; i >= 0; i--)
+   for(int i = 0; i < g_pos_count; i++)
    {
-      if(!PositionSelectByTicket(g_open_tickets[i])) continue;
+      if(g_open_positions[i].tp1_done) continue;
+      if(!PositionSelectByTicket(g_open_positions[i].ticket)) continue;
 
       double entry  = PositionGetDouble(POSITION_PRICE_OPEN);
       double price  = PositionGetDouble(POSITION_PRICE_CURRENT);
@@ -249,12 +262,12 @@ void ProcessPartialCloses()
       double volume = PositionGetDouble(POSITION_VOLUME);
       ENUM_POSITION_TYPE pt = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
 
-      double halfway = (pt == POSITION_TYPE_BUY)
-                      ? entry + (tp - entry) * 0.5
-                      : entry - (entry - tp) * 0.5;
+      double half_target = (pt == POSITION_TYPE_BUY)
+                          ? entry + (tp - entry) * 0.5
+                          : entry - (entry - tp) * 0.5;
 
-      bool reached = (pt == POSITION_TYPE_BUY  && price >= halfway) ||
-                     (pt == POSITION_TYPE_SELL && price <= halfway);
+      bool reached = (pt == POSITION_TYPE_BUY  && price >= half_target) ||
+                     (pt == POSITION_TYPE_SELL && price <= half_target);
 
       if(reached)
       {
@@ -262,42 +275,53 @@ void ProcessPartialCloses()
          double min_lot    = SymbolInfoDouble(InpSymbol, SYMBOL_VOLUME_MIN);
          if(close_lots >= min_lot)
          {
-            g_trade.PositionClosePartial(g_open_tickets[i], close_lots);
-            Print("SMC: Partial close ", close_lots, " lots ticket=", g_open_tickets[i]);
+            if(g_trade.PositionClosePartial(g_open_positions[i].ticket, close_lots))
+            {
+               g_open_positions[i].tp1_done = true;
+               Print("SMC: TP1 partial close ", close_lots, " lots ticket=",
+                     g_open_positions[i].ticket);
+            }
          }
       }
    }
 }
 
 //=======================================================================
-void AddTrackedTicket(const ulong ticket)
-{
-   int n = ArraySize(g_open_tickets);
-   ArrayResize(g_open_tickets, n + 1);
-   g_open_tickets[n] = ticket;
-}
-
-//=======================================================================
+// FIX A4 + ticket pruning
 void ScanClosedTrades()
 {
-   HistorySelect(TimeCurrent() - 86400, TimeCurrent());
+   datetime from = TimeCurrent() - 86400;
+   if(!HistorySelect(from, TimeCurrent())) return;
    int deals = HistoryDealsTotal();
    static int last_deal_count = 0;
    if(deals == last_deal_count) return;
 
    for(int i = last_deal_count; i < deals; i++)
    {
-      ulong ticket = HistoryDealGetTicket(i);
-      if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != (long)InpMagic) continue;
-      if(HistoryDealGetInteger(ticket, DEAL_ENTRY) != DEAL_ENTRY_OUT) continue;
+      ulong deal_ticket = HistoryDealGetTicket(i);
+      if(HistoryDealGetInteger(deal_ticket, DEAL_MAGIC) != (long)InpMagic) continue;
+      if(HistoryDealGetInteger(deal_ticket, DEAL_ENTRY) != DEAL_ENTRY_OUT) continue;
 
-      double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT);
-      datetime ot   = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
+      double   profit = HistoryDealGetDouble (deal_ticket, DEAL_PROFIT);
+      datetime open_t = (datetime)HistoryDealGetInteger(deal_ticket, DEAL_TIME);
+      ulong    pos_id = (ulong)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
 
-      g_adapt.RecordTrade(ot, TimeCurrent(),
-                          profit / SymbolInfoDouble(InpSymbol, SYMBOL_TRADE_TICK_VALUE),
-                          SMC_STOP_HUNT_LONG,
-                          InpMinConfidence);
+      int    sig_type = SMC_STOP_HUNT_LONG;
+      double conf     = InpMinConfidence;
+      for(int j = 0; j < g_pos_count; j++)
+      {
+         if(g_open_positions[j].ticket == pos_id)
+         {
+            sig_type = g_open_positions[j].signal_type;
+            conf     = g_open_positions[j].confidence;
+            for(int k = j; k < g_pos_count - 1; k++)
+               g_open_positions[k] = g_open_positions[k + 1];
+            g_pos_count--;
+            break;
+         }
+      }
+
+      g_adapt.RecordTrade(open_t, TimeCurrent(), profit, sig_type, conf);
    }
    last_deal_count = deals;
 }
@@ -307,6 +331,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
 {
-   if(trans.type == TRADE_TRANSACTION_DEAL_ADD)
-      Print("SMC: Trade transaction deal=", trans.deal, " price=", trans.price);
+   if(trans.type == TRADE_TRANSACTION_DEAL_ADD &&
+      (trans.deal_type == DEAL_TYPE_BUY || trans.deal_type == DEAL_TYPE_SELL))
+   {
+      Print("SMC: Transaction deal=", trans.deal, " price=", trans.price);
+   }
 }
