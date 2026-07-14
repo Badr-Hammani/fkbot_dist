@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Weekend Wallet</title>
+<meta name="theme-color" content="#17152a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f5f0" media="(prefers-color-scheme: light)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-180.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Weekend">
+<style>
+  :root{
+    color-scheme: light;
+    --bg:#f7f5f0; --card:#ffffff; --card2:#f1eee6; --line:#e5e1d5;
+    --ink:#232030; --ink2:#6b6880; --ink3:#96929f;
+    --accent:#e89e24; --accent-deep:#8a5a00; --on-accent:#241b08;
+    --good:#006300; --warn:#b97900; --bad:#d03b3b;
+    --c-food:#eda100; --c-drinks:#2a78d6; --c-out:#4a3aa7;
+    --c-transport:#1baf7a; --c-shop:#e34948; --c-other:#008300;
+    --shadow:0 10px 30px rgba(35,32,48,.12);
+    --sheet-shadow:0 -18px 50px rgba(35,32,48,.22);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      color-scheme: dark;
+      --bg:#17152a; --card:#232135; --card2:#2b2946; --line:#37344f;
+      --ink:#f2f0fa; --ink2:#a6a2bc; --ink3:#7d7996;
+      --accent:#f2a93b; --accent-deep:#f2a93b; --on-accent:#241b08;
+      --good:#0ca30c; --warn:#fab219; --bad:#e66767;
+      --c-food:#c98500; --c-drinks:#3987e5; --c-out:#9085e9;
+      --c-transport:#199e70; --c-shop:#e66767; --c-other:#008300;
+      --shadow:0 10px 30px rgba(0,0,0,.4);
+      --sheet-shadow:0 -18px 50px rgba(0,0,0,.55);
+    }
+  }
+
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{margin:0; padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+    font-size:16px; line-height:1.45;
+    min-height:100dvh;
+    padding-top:env(safe-area-inset-top);
+  }
+  button{font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer}
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible{
+    outline:2px solid var(--accent); outline-offset:2px; border-radius:6px;
+  }
+  input, select{
+    font:inherit; color:var(--ink); background:var(--card2);
+    border:1px solid var(--line); border-radius:12px; padding:12px 14px; width:100%;
+  }
+  ::placeholder{color:var(--ink3)}
+
+  #shell{max-width:480px; margin:0 auto; padding:0 16px 120px; min-height:100dvh}
+
+  .topbar{display:flex; align-items:center; justify-content:space-between; padding:20px 2px 6px}
+  .brand{display:flex; align-items:center; gap:10px}
+  .brand-mark{
+    width:34px; height:34px; border-radius:11px; background:var(--accent);
+    display:grid; place-items:center; color:var(--on-accent); font-weight:800; font-size:15px;
+  }
+  .brand-name{font-weight:800; letter-spacing:-.02em; font-size:17px}
+  .brand-sub{font-size:11px; color:var(--ink2); text-transform:uppercase; letter-spacing:.12em; margin-top:1px}
+
+  .micro{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--ink2); font-weight:600}
+  .money{font-variant-numeric:tabular-nums}
+
+  .hero{
+    background:var(--card); border:1px solid var(--line); border-radius:22px;
+    padding:22px 20px 18px; margin-top:12px; box-shadow:var(--shadow);
+  }
+  .hero-top{display:flex; justify-content:space-between; align-items:baseline; gap:8px}
+  .hero-when{font-weight:700; font-size:15px}
+  .hero-live{display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--accent-deep)}
+  .hero-live .dot{width:7px; height:7px; border-radius:50%; background:var(--accent); animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @media (prefers-reduced-motion: reduce){ .hero-live .dot{animation:none} .spin{animation:none} }
+  .hero-amount{
+    font-size:clamp(44px, 14vw, 62px); font-weight:800; letter-spacing:-.03em; line-height:1.05;
+    margin:10px 0 2px; text-wrap:balance;
+  }
+  .hero-amount.over{color:var(--bad)}
+  .hero-caption{color:var(--ink2); font-size:14px}
+  .hero-caption strong{color:var(--ink); font-weight:700}
+
+  .meter{margin-top:16px}
+  .meter-track{height:12px; border-radius:6px; background:var(--card2); overflow:hidden; display:flex}
+  .meter-fill{height:100%; border-radius:6px; background:var(--accent); min-width:4px; transition:width .4s ease}
+  .meter-fill.warn{background:var(--warn)}
+  .meter-fill.over{background:var(--bad)}
+  .meter-row{display:flex; justify-content:space-between; margin-top:8px; font-size:13px; color:var(--ink2)}
+
+  .sec{display:flex; align-items:baseline; justify-content:space-between; margin:26px 2px 10px}
+  .sec .micro{color:var(--ink3)}
+
+  .cats{background:var(--card); border:1px solid var(--line); border-radius:18px; padding:6px 16px}
+  .cat-row{display:grid; grid-template-columns:110px 1fr auto; gap:12px; align-items:center; padding:11px 0; border-bottom:1px solid var(--line)}
+  .cat-row:last-child{border-bottom:0}
+  .cat-name{display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600}
+  .cat-dot{width:10px; height:10px; border-radius:4px; flex:none}
+  .cat-bar{height:8px; border-radius:4px; background:var(--card2); overflow:hidden}
+  .cat-bar i{display:block; height:100%; border-radius:4px; min-width:3px}
+  .cat-amt{font-size:14px; font-weight:700}
+
+  .daygroup{margin-top:14px}
+  .dayhead{display:flex; justify-content:space-between; align-items:baseline; padding:0 4px 8px}
+  .dayhead .total{font-size:13px; color:var(--ink2); font-weight:600}
+  .exp-list{background:var(--card); border:1px solid var(--line); border-radius:18px; overflow:hidden}
+  .exp{
+    display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+    padding:12px 14px; border-bottom:1px solid var(--line);
+  }
+  .exp:last-child{border-bottom:0}
+  .exp:active{background:var(--card2)}
+  .exp-thumb{
+    width:44px; height:44px; border-radius:12px; flex:none; overflow:hidden;
+    background:var(--card2); display:grid; place-items:center;
+  }
+  .exp-thumb img{width:100%; height:100%; object-fit:cover; display:block}
+  .exp-thumb .glyph{width:18px; height:18px; border-radius:6px}
+  .exp-main{flex:1; min-width:0}
+  .exp-title{font-weight:600; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .exp-sub{font-size:12.5px; color:var(--ink2); display:flex; align-items:center; gap:6px}
+  .exp-sub .cat-dot{width:7px; height:7px; border-radius:3px}
+  .exp-amt{font-weight:700; font-size:15px; flex:none}
+
+  .empty{
+    background:var(--card); border:1px dashed var(--line); border-radius:18px;
+    padding:28px 20px; text-align:center; color:var(--ink2); font-size:14.5px;
+  }
+  .empty b{color:var(--ink)}
+
+  .stat-row{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:12px}
+  .stat{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:12px 14px}
+  .stat .v{font-weight:800; font-size:19px; letter-spacing:-.02em; margin-top:2px}
+  .wk{
+    background:var(--card); border:1px solid var(--line); border-radius:18px;
+    padding:14px 16px; margin-top:10px; width:100%; text-align:left;
+    display:block; cursor:pointer;
+  }
+  .wk:active{background:var(--card2)}
+  .wk:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .wk-top{display:flex; justify-content:space-between; align-items:baseline}
+  .wk-label{font-weight:700; font-size:15px}
+  .wk-amt{font-weight:800; font-size:16px}
+  .wk-amt.over{color:var(--bad)}
+  .wk-sub{font-size:12.5px; color:var(--ink2); margin-top:2px}
+  .wk .meter-track{height:8px; margin-top:10px}
+  .wk-detail{margin-top:12px; border-top:1px solid var(--line); padding-top:4px}
+  .wk-detail .exp{padding:10px 2px}
+
+  .panel{background:var(--card); border:1px solid var(--line); border-radius:18px; padding:16px; margin-top:12px}
+  .panel h3{margin:0 0 4px; font-size:15px}
+  .panel p{margin:0 0 12px; color:var(--ink2); font-size:13.5px}
+  .field{margin-bottom:14px}
+  .field:last-child{margin-bottom:0}
+  .field label{display:block; margin-bottom:6px}
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    border-radius:14px; padding:13px 18px; font-weight:700; font-size:15px;
+    background:var(--card2); border:1px solid var(--line); width:100%;
+  }
+  .btn:active{transform:scale(.98)}
+  .btn.primary{background:var(--accent); border-color:transparent; color:var(--on-accent)}
+  .btn.danger{color:var(--bad)}
+  .hint{font-size:12.5px; color:var(--ink3); margin-top:8px; line-height:1.5}
+
+  .tabbar{
+    position:fixed; left:0; right:0; bottom:0; z-index:40;
+    display:flex; justify-content:center;
+    padding:0 16px calc(12px + env(safe-area-inset-bottom));
+    pointer-events:none;
+  }
+  .tabbar-inner{
+    pointer-events:auto; display:flex; align-items:center; gap:4px;
+    background:var(--card); border:1px solid var(--line); border-radius:22px;
+    padding:6px; box-shadow:var(--shadow); width:100%; max-width:448px;
+  }
+  .tab{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+    padding:8px 4px; border-radius:16px; color:var(--ink2); font-size:11px; font-weight:700;
+    letter-spacing:.04em;
+  }
+  .tab svg{width:22px; height:22px}
+  .tab.active{color:var(--accent-deep); background:var(--card2)}
+  .addbtn{
+    flex:none; width:56px; height:56px; border-radius:19px; background:var(--accent);
+    color:var(--on-accent); display:grid; place-items:center; margin:0 4px;
+    box-shadow:0 6px 18px rgba(232,158,36,.45);
+  }
+  .addbtn svg{width:26px; height:26px}
+  .addbtn:active{transform:scale(.94)}
+
+  .backdrop{
+    position:fixed; inset:0; background:rgba(12,10,24,.55); z-index:60;
+    opacity:0; pointer-events:none; transition:opacity .25s ease;
+  }
+  .backdrop.show{opacity:1; pointer-events:auto}
+  .sheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:70;
+    max-width:480px; margin:0 auto;
+    background:var(--card); border-radius:26px 26px 0 0; box-shadow:var(--sheet-shadow);
+    padding:14px 20px calc(22px + env(safe-area-inset-bottom));
+    transform:translateY(105%); transition:transform .3s cubic-bezier(.32,.72,.24,1);
+    max-height:92dvh; overflow-y:auto;
+  }
+  .sheet.show{transform:translateY(0)}
+  @media (prefers-reduced-motion: reduce){ .sheet{transition:none} .backdrop{transition:none} }
+  .grab{width:40px; height:5px; border-radius:3px; background:var(--line); margin:0 auto 14px}
+  .sheet h2{margin:0 0 14px; font-size:19px; letter-spacing:-.01em}
+
+  .amount-wrap{position:relative; margin-bottom:14px}
+  .amount-wrap .cur{
+    position:absolute; right:16px; top:50%; transform:translateY(-50%);
+    font-weight:700; color:var(--ink2); font-size:17px; pointer-events:none;
+  }
+  #f-amount{
+    font-size:34px; font-weight:800; letter-spacing:-.02em; padding:14px 76px 14px 18px;
+    border-radius:16px;
+  }
+  .chips{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px}
+  .chip{
+    display:inline-flex; align-items:center; gap:7px; padding:9px 13px;
+    border-radius:999px; border:1.5px solid var(--line); background:var(--card2);
+    font-size:13.5px; font-weight:600; color:var(--ink);
+  }
+  .chip .cat-dot{width:9px; height:9px}
+  .chip.sel{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 16%, var(--card))}
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px}
+
+  .photo-btn{
+    display:flex; align-items:center; gap:12px; width:100%;
+    background:var(--card2); border:1.5px dashed var(--line); border-radius:16px;
+    padding:12px 14px; margin-bottom:16px; text-align:left;
+  }
+  .photo-btn .ic{
+    width:44px; height:44px; border-radius:12px; background:var(--card);
+    border:1px solid var(--line); display:grid; place-items:center; color:var(--accent-deep); flex:none;
+    overflow:hidden;
+  }
+  .photo-btn .ic img{width:100%; height:100%; object-fit:cover}
+  .photo-btn .t{font-weight:700; font-size:14.5px}
+  .photo-btn .s{font-size:12.5px; color:var(--ink2)}
+  .spin{
+    width:18px; height:18px; border-radius:50%; flex:none;
+    border:2.5px solid var(--line); border-top-color:var(--accent);
+    animation:spinner .8s linear infinite;
+  }
+  @keyframes spinner{to{transform:rotate(360deg)}}
+
+  .detail-photo{width:100%; border-radius:16px; margin-bottom:14px; max-height:48dvh; object-fit:contain; background:var(--card2)}
+  .detail-grid{display:grid; grid-template-columns:auto 1fr; gap:8px 16px; font-size:14.5px; margin-bottom:16px}
+  .detail-grid dt{color:var(--ink2)}
+  .detail-grid dd{margin:0; font-weight:600; text-align:right}
+
+  .viewer{position:fixed; inset:0; z-index:90; background:rgba(8,6,18,.94); display:none; place-items:center; padding:20px}
+  .viewer.show{display:grid}
+  .viewer img{max-width:100%; max-height:82dvh; border-radius:12px}
+  .viewer .close{position:absolute; top:calc(16px + env(safe-area-inset-top)); right:18px; color:#fff; font-size:15px; font-weight:700; background:rgba(255,255,255,.14); padding:8px 14px; border-radius:999px}
+
+  #toast{
+    position:fixed; left:50%; bottom:calc(104px + env(safe-area-inset-bottom)); transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:var(--bg); padding:10px 18px; border-radius:999px;
+    font-size:14px; font-weight:600; opacity:0; transition:all .3s ease; z-index:100;
+    white-space:nowrap; max-width:92vw; overflow:hidden; text-overflow:ellipsis;
+  }
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+
+  .onb{padding-top:8vh}
+  .onb .brand-mark{width:56px; height:56px; border-radius:18px; font-size:24px; margin-bottom:18px}
+  .onb h1{font-size:32px; letter-spacing:-.03em; margin:0 0 8px; line-height:1.1; text-wrap:balance}
+  .onb .lede{color:var(--ink2); margin:0 0 26px; font-size:16px; max-width:34ch}
+</style>
+</head>
+<body>
+
+<div id="shell"></div>
+
+<div class="backdrop" id="backdrop"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
+<div class="viewer" id="viewer"><button class="close" id="viewer-close">Close</button><img id="viewer-img" alt="Receipt photo"></div>
+<div id="toast" role="status"></div>
+<input type="file" accept="image/*" capture="environment" id="camera" hidden>
+
+<script src="scan.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- data ---------- */
+  var KEY = "weekend-wallet-v1";
+  var CATS = [
+    {id:"food",      name:"Food",      v:"--c-food"},
+    {id:"drinks",    name:"Drinks",    v:"--c-drinks"},
+    {id:"out",       name:"Going out", v:"--c-out"},
+    {id:"transport", name:"Transport", v:"--c-transport"},
+    {id:"shop",      name:"Shopping",  v:"--c-shop"},
+    {id:"other",     name:"Other",     v:"--c-other"}
+  ];
+  var CURRENCIES = [
+    {code:"MAD", label:"Moroccan dirham (DH)"},
+    {code:"USD", label:"US dollar ($)"},
+    {code:"EUR", label:"Euro (€)"},
+    {code:"GBP", label:"British pound (£)"},
+    {code:"AED", label:"UAE dirham"},
+    {code:"SAR", label:"Saudi riyal"},
+    {code:"CAD", label:"Canadian dollar"},
+    {code:"TRY", label:"Turkish lira"}
+  ];
+  var SCAN_MODELS = [
+    {id:"claude-opus-4-8",  label:"Best accuracy — Claude Opus 4.8"},
+    {id:"claude-haiku-4-5", label:"Cheaper & faster — Claude Haiku 4.5"}
+  ];
+
+  var state = load();
+  function load(){
+    try{
+      var raw = localStorage.getItem(KEY);
+      if(raw){
+        var s = JSON.parse(raw);
+        if(!s.scanModel) s.scanModel = "claude-opus-4-8";
+        if(typeof s.apiKey !== "string") s.apiKey = "";
+        return s;
+      }
+    }catch(e){}
+    return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", scanModel:"claude-opus-4-8" };
+  }
+  function save(opts){
+    try{
+      localStorage.setItem(KEY, JSON.stringify(state));
+      return true;
+    }catch(e){
+      if(opts && opts.retryWithoutPhoto && opts.retryWithoutPhoto.photo){
+        opts.retryWithoutPhoto.photo = null;
+        try{
+          localStorage.setItem(KEY, JSON.stringify(state));
+          toast("Storage full — saved without the photo");
+          return true;
+        }catch(e2){}
+      }
+      toast("Storage full — delete old weekends in History");
+      return false;
+    }
+  }
+
+  /* ---------- helpers ---------- */
+  function $(s, el){ return (el||document).querySelector(s); }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });}
+  function cat(id){ for(var i=0;i<CATS.length;i++){ if(CATS[i].id===id) return CATS[i]; } return CATS[CATS.length-1]; }
+  function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+  function fmt(n){
+    try{
+      var o = new Intl.NumberFormat(undefined, {style:"currency", currency:state.currency, maximumFractionDigits:2});
+      var s = o.format(n);
+      return s.replace(/[.,]00(\s|$)/, "$1").trim();
+    }catch(e){ return n + " " + state.currency; }
+  }
+
+  function iso(d){
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  }
+  function fromIso(s){ var p = s.split("-"); return new Date(+p[0], +p[1]-1, +p[2]); }
+
+  /* the Friday that anchors the weekend a given date belongs to.
+     Fri/Sat/Sun -> that weekend; Mon–Thu -> the weekend just finished */
+  function weekendOf(dateStr){
+    var d = fromIso(dateStr), day = d.getDay();
+    var back = (day===5)?0 : (day===6)?1 : (day===0)?2 : day+2;
+    d.setDate(d.getDate()-back);
+    return iso(d);
+  }
+  function weekendLabel(friIso, withYear){
+    var f = fromIso(friIso), s = new Date(f); s.setDate(s.getDate()+2);
+    var mo = function(d){ return d.toLocaleDateString(undefined,{month:"short"}); };
+    var lbl = (f.getMonth()===s.getMonth())
+      ? mo(f)+" "+f.getDate()+"–"+s.getDate()
+      : mo(f)+" "+f.getDate()+" – "+mo(s)+" "+s.getDate();
+    if(withYear) lbl += ", " + s.getFullYear();
+    return lbl;
+  }
+  function todayIso(){ return iso(new Date()); }
+  function currentWeekend(){ return weekendOf(todayIso()); }
+  function isLiveWeekend(friIso){
+    var t = fromIso(todayIso()), f = fromIso(friIso), s = new Date(f); s.setDate(s.getDate()+2);
+    return t >= f && t <= s;
+  }
+  function daysUntilFriday(){
+    var day = new Date().getDay();
+    return (5 - day + 7) % 7;
+  }
+  function expensesFor(friIso){
+    return state.expenses.filter(function(e){ return weekendOf(e.date)===friIso; })
+      .sort(function(a,b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.ts||0)-(b.ts||0); });
+  }
+  function total(list){ return list.reduce(function(s,e){ return s + e.amount; }, 0); }
+
+  /* ---------- toast ---------- */
+  var toastTimer;
+  function toast(msg){
+    var t = $("#toast"); t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 2800);
+  }
+
+  /* ---------- icons ---------- */
+  var IC = {
+    wallet:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18M16 15h.01"/></svg>',
+    history:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.5"/><path d="M4 4v4.5H8.5"/><path d="M12 8v4l3 2"/></svg>',
+    gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 0 0-.14-1.4l2-1.55-2-3.46-2.35.95A7 7 0 0 0 14.1 5.1L13.7 2.6h-3.4l-.4 2.5a7 7 0 0 0-2.4 1.44l-2.36-.95-2 3.46 2 1.55A7 7 0 0 0 5 12c0 .48.05.94.14 1.4l-2 1.55 2 3.46 2.35-.95c.7.63 1.52 1.12 2.41 1.44l.4 2.5h3.4l.4-2.5a7 7 0 0 0 2.4-1.44l2.36.95 2-3.46-2-1.55c.09-.46.14-.92.14-1.4Z"/></svg>',
+    plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+    camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h2.5l1.5-2.5h8L17.5 8H20a1.5 1.5 0 0 1 1.5 1.5V18A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18V9.5A1.5 1.5 0 0 1 4 8Z"/><circle cx="12" cy="13.5" r="3.4"/></svg>'
+  };
+
+  /* ---------- views ---------- */
+  var tab = "weekend";
+  var shell = $("#shell");
+
+  function render(){
+    if(!state.setup){ renderOnboarding(); return; }
+    var html = topbar();
+    if(tab==="weekend") html += viewWeekend();
+    else if(tab==="history") html += viewHistory();
+    else html += viewSettings();
+    html += tabbar();
+    shell.innerHTML = html;
+    bindView();
+  }
+
+  function topbar(){
+    return '<header class="topbar"><div class="brand">' +
+      '<div class="brand-mark" aria-hidden="true">W</div>' +
+      '<div><div class="brand-name">Weekend Wallet</div>' +
+      '<div class="brand-sub">Fri · Sat · Sun money</div></div></div></header>';
+  }
+
+  function tabbar(){
+    function t(id, label, icon){
+      return '<button class="tab'+(tab===id?" active":"")+'" data-tab="'+id+'" aria-label="'+label+'">'+icon+'<span>'+label+'</span></button>';
+    }
+    return '<nav class="tabbar"><div class="tabbar-inner">' +
+      t("weekend","Weekend",IC.wallet) +
+      '<button class="addbtn" id="open-add" aria-label="Add expense">'+IC.plus+'</button>' +
+      t("history","History",IC.history) +
+      t("settings","Settings",IC.gear) +
+      '</div></nav>';
+  }
+
+  function meterHtml(spent, budget){
+    var pct = budget>0 ? Math.min(spent/budget*100, 100) : 0;
+    var cls = spent>budget ? " over" : (budget>0 && spent/budget>.85 ? " warn" : "");
+    return '<div class="meter-track"><div class="meter-fill'+cls+'" style="width:'+pct.toFixed(1)+'%"></div></div>';
+  }
+
+  function viewWeekend(){
+    var fri = currentWeekend();
+    var live = isLiveWeekend(fri);
+    var exps = expensesFor(fri);
+    var spent = total(exps);
+    var left = state.budget - spent;
+    var h = "";
+
+    var status = live
+      ? '<span class="hero-live"><span class="dot"></span>Weekend live</span>'
+      : '<span class="hero-live" style="color:var(--ink2)">Next one starts in '+(daysUntilFriday()||7)+' day'+((daysUntilFriday()||7)>1?"s":"")+'</span>';
+
+    h += '<section class="hero">' +
+      '<div class="hero-top"><span class="hero-when">'+weekendLabel(fri)+'</span>'+status+'</div>' +
+      '<div class="hero-amount money'+(left<0?" over":"")+'">'+ fmt(Math.abs(left)) +'</div>' +
+      '<div class="hero-caption">'+(left<0 ? "over budget" : "left to spend") +
+      ' · <strong class="money">'+fmt(spent)+'</strong> of <strong class="money">'+fmt(state.budget)+'</strong></div>' +
+      '<div class="meter">'+meterHtml(spent, state.budget)+
+      '<div class="meter-row"><span>'+(state.budget>0? Math.round(spent/state.budget*100) : 0)+'% used</span>' +
+      '<span class="money">'+exps.length+' expense'+(exps.length===1?"":"s")+'</span></div></div>' +
+      '</section>';
+
+    if(exps.length){
+      var byCat = {};
+      exps.forEach(function(e){ byCat[e.cat] = (byCat[e.cat]||0) + e.amount; });
+      var rows = CATS.filter(function(c){ return byCat[c.id]; })
+        .sort(function(a,b){ return byCat[b.id]-byCat[a.id]; });
+      var max = byCat[rows[0].id];
+      h += '<div class="sec"><span class="micro">Where it went</span></div><div class="cats">';
+      rows.forEach(function(c){
+        var v = byCat[c.id];
+        h += '<div class="cat-row">' +
+          '<span class="cat-name"><span class="cat-dot" style="background:var('+c.v+')"></span>'+c.name+'</span>' +
+          '<span class="cat-bar"><i style="width:'+(v/max*100).toFixed(1)+'%; background:var('+c.v+')"></i></span>' +
+          '<span class="cat-amt money">'+fmt(v)+'</span></div>';
+      });
+      h += '</div>';
+    }
+
+    h += '<div class="sec"><span class="micro">This weekend</span></div>';
+    if(!exps.length){
+      h += '<div class="empty">Nothing logged yet.<br><b>Tap +</b> and snap the receipt — the amount fills in by itself.</div>';
+    }else{
+      var days = {};
+      exps.forEach(function(e){ (days[e.date] = days[e.date]||[]).push(e); });
+      Object.keys(days).sort().reverse().forEach(function(d){
+        var list = days[d];
+        var dn = fromIso(d).toLocaleDateString(undefined,{weekday:"long", month:"short", day:"numeric"});
+        h += '<div class="daygroup"><div class="dayhead"><span class="micro">'+dn+'</span>' +
+          '<span class="total money">'+fmt(total(list))+'</span></div><div class="exp-list">';
+        list.slice().reverse().forEach(function(e){ h += expRow(e); });
+        h += '</div></div>';
+      });
+    }
+    return h;
+  }
+
+  function expRow(e){
+    var c = cat(e.cat);
+    var thumb = e.photo
+      ? '<span class="exp-thumb"><img src="'+e.photo+'" alt="Receipt"></span>'
+      : '<span class="exp-thumb"><span class="glyph" style="background:var('+c.v+')"></span></span>';
+    return '<button class="exp" data-exp="'+e.id+'">' + thumb +
+      '<span class="exp-main"><span class="exp-title">'+esc(e.note || c.name)+'</span>' +
+      '<span class="exp-sub"><span class="cat-dot" style="background:var('+c.v+')"></span>'+c.name+
+      (e.photo? " · receipt":"")+'</span></span>' +
+      '<span class="exp-amt money">'+fmt(e.amount)+'</span></button>';
+  }
+
+  var openWk = null;
+  function viewHistory(){
+    var groups = {};
+    state.expenses.forEach(function(e){
+      var k = weekendOf(e.date);
+      (groups[k] = groups[k]||[]).push(e);
+    });
+    var keys = Object.keys(groups).sort().reverse();
+    var h = '<div class="sec"><span class="micro">Past weekends</span></div>';
+
+    if(!keys.length){
+      return h + '<div class="empty">Your weekend history will build up here —<br>totals, budgets and every receipt.</div>';
+    }
+
+    var totals = keys.map(function(k){ return total(groups[k]); });
+    var sum = totals.reduce(function(a,b){ return a+b; },0);
+    var under = totals.filter(function(t){ return t <= state.budget; }).length;
+    h += '<div class="stat-row">' +
+      '<div class="stat"><span class="micro">Weekends</span><div class="v money">'+keys.length+'</div></div>' +
+      '<div class="stat"><span class="micro">Avg spent</span><div class="v money">'+fmt(sum/keys.length)+'</div></div>' +
+      '<div class="stat"><span class="micro">On budget</span><div class="v money">'+under+'/'+keys.length+'</div></div>' +
+      '</div>';
+
+    keys.forEach(function(k){
+      var list = groups[k], t = total(list), over = t > state.budget;
+      h += '<div class="wk" data-wk="'+k+'" role="button" tabindex="0" aria-expanded="'+(openWk===k)+'"><div class="wk-top">' +
+        '<span class="wk-label">'+weekendLabel(k, true)+(k===currentWeekend()?' · now':'')+'</span>' +
+        '<span class="wk-amt money'+(over?" over":"")+'">'+fmt(t)+'</span></div>' +
+        '<div class="wk-sub">'+list.length+' expense'+(list.length===1?"":"s")+' · budget '+fmt(state.budget)+
+        (over? ' · <span style="color:var(--bad); font-weight:700">'+fmt(t-state.budget)+' over</span>'
+             : ' · <span style="color:var(--good); font-weight:700">'+fmt(state.budget-t)+' saved</span>')+'</div>' +
+        meterHtml(t, state.budget) +
+        (openWk===k ? '<div class="wk-detail">' + list.slice().sort(function(a,b){return a.date<b.date?1:-1;}).map(expRow).join("") + '</div>' : "") +
+        '</div>';
+    });
+    return h;
+  }
+
+  function viewSettings(){
+    var curOpts = CURRENCIES.map(function(c){
+      return '<option value="'+c.code+'"'+(state.currency===c.code?" selected":"")+'>'+c.label+'</option>';
+    }).join("");
+    var modelOpts = SCAN_MODELS.map(function(m){
+      return '<option value="'+m.id+'"'+(state.scanModel===m.id?" selected":"")+'>'+m.label+'</option>';
+    }).join("");
+    return '' +
+      '<div class="sec"><span class="micro">Settings</span></div>' +
+      '<div class="panel"><h3>Weekend budget</h3><p>What you allow yourself each Friday–Sunday.</p>' +
+      '<div class="field"><input id="s-budget" type="number" inputmode="decimal" min="0" value="'+state.budget+'"></div>' +
+      '<div class="field"><label class="micro" for="s-currency">Currency</label><select id="s-currency">'+curOpts+'</select></div>' +
+      '<button class="btn primary" id="s-save">Save changes</button></div>' +
+
+      '<div class="panel"><h3>Receipt scanning</h3>' +
+      '<p>Receipts are read <b>free on your phone</b>. For much better accuracy, add a Claude API key — the photo is sent to Claude, which reads the total, store name and date for you.</p>' +
+      '<div class="field"><label class="micro" for="s-key">Claude API key (optional)</label>' +
+      '<input id="s-key" type="password" placeholder="sk-ant-…" autocomplete="off" value="'+esc(state.apiKey)+'"></div>' +
+      '<div class="field"><label class="micro" for="s-model">AI model</label><select id="s-model">'+modelOpts+'</select></div>' +
+      '<button class="btn" id="s-scan-save">Save scanning settings</button>' +
+      '<div class="hint">The key is stored only on this phone and never included in backups. Get one at console.anthropic.com — a scan costs a fraction of a cent.</div></div>' +
+
+      '<div class="panel"><h3>Put it on your home screen</h3>' +
+      '<p>In Safari tap the <b>Share</b> button, then <b>Add to Home Screen</b>. Weekend Wallet opens full-screen like a normal app — your data stays on this phone.</p></div>' +
+
+      '<div class="panel"><h3>Backup</h3><p>Your expenses live in this browser. Download a backup before switching phones.</p>' +
+      '<button class="btn" id="s-export">Download backup file</button>' +
+      '<div style="height:10px"></div>' +
+      '<button class="btn" id="s-import">Restore from backup</button>' +
+      '<input type="file" accept=".json,application/json" id="s-import-file" hidden></div>' +
+
+      '<div class="panel"><h3>Start fresh</h3><p>Deletes every expense and receipt photo. This can\'t be undone.</p>' +
+      '<button class="btn danger" id="s-wipe">Erase all data</button></div>' +
+      '<p class="hint" style="text-align:center; margin-top:18px">Weekend Wallet · everything stored privately on your device</p>';
+  }
+
+  function renderOnboarding(){
+    var curOpts = CURRENCIES.map(function(c){
+      return '<option value="'+c.code+'"'+(state.currency===c.code?" selected":"")+'>'+c.label+'</option>';
+    }).join("");
+    shell.innerHTML = '<div class="onb">' +
+      '<div class="brand-mark" aria-hidden="true">W</div>' +
+      '<h1>Money for the weekend, sorted.</h1>' +
+      '<p class="lede">Set a Friday-to-Sunday budget, snap receipts and let the amounts fill themselves in. All on your phone.</p>' +
+      '<div class="panel"><div class="field"><label class="micro" for="o-budget">Weekend budget</label>' +
+      '<input id="o-budget" type="number" inputmode="decimal" min="0" placeholder="e.g. 500"></div>' +
+      '<div class="field"><label class="micro" for="o-currency">Currency</label><select id="o-currency">'+curOpts+'</select></div>' +
+      '<button class="btn primary" id="o-go">Start tracking</button></div></div>';
+    $("#o-go").addEventListener("click", function(){
+      var b = parseFloat($("#o-budget").value);
+      if(!(b > 0)){ toast("Set a budget to get started"); $("#o-budget").focus(); return; }
+      state.budget = b;
+      state.currency = $("#o-currency").value;
+      state.setup = true;
+      save(); render();
+      toast("You're set — tap + to log spending");
+    });
+  }
+
+  /* ---------- receipt scanning ---------- */
+  var tesseractLoading = null;
+  function loadTesseract(){
+    if(window.Tesseract) return Promise.resolve();
+    if(!tesseractLoading){
+      tesseractLoading = new Promise(function(res, rej){
+        var s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+        s.onload = res;
+        s.onerror = function(){ tesseractLoading = null; rej(new Error("ocr load failed")); };
+        document.head.appendChild(s);
+      });
+    }
+    return tesseractLoading;
+  }
+  var ocrWorker = null;
+  function getOcrWorker(){
+    return loadTesseract().then(function(){
+      if(ocrWorker) return ocrWorker;
+      return Tesseract.createWorker("eng").then(function(w){ ocrWorker = w; return w; });
+    });
+  }
+  function scanWithTesseract(dataUrl){
+    return getOcrWorker().then(function(w){ return w.recognize(dataUrl); })
+      .then(function(r){
+        var parsed = ReceiptParse.parseReceiptText(r && r.data ? r.data.text : "");
+        parsed.source = "ocr";
+        return parsed;
+      });
+  }
+
+  function scanWithClaude(dataUrl){
+    var b64 = dataUrl.split(",")[1];
+    var catIds = CATS.map(function(c){ return c.id; });
+    return fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": state.apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: state.scanModel || "claude-opus-4-8",
+        max_tokens: 300,
+        output_config: { format: { type: "json_schema", schema: {
+          type: "object",
+          properties: {
+            amount:   { anyOf: [{type:"number"},{type:"null"}], description: "Final total paid, number only" },
+            merchant: { anyOf: [{type:"string"},{type:"null"}], description: "Merchant / store name" },
+            category: { type: "string", enum: catIds },
+            date:     { anyOf: [{type:"string"},{type:"null"}], description: "Purchase date YYYY-MM-DD, null if unreadable" }
+          },
+          required: ["amount","merchant","category","date"],
+          additionalProperties: false
+        }}},
+        messages: [{ role: "user", content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+          { type: "text", text: "This is a photo of a receipt for a personal expense tracker. Extract the final total actually paid (after tax/tip), the merchant name, the purchase date, and pick the best category: food (restaurants, cafés, groceries), drinks (bars), out (entertainment, events), transport (taxi, fuel, parking), shop (retail, pharmacy), other. If it is not a receipt or the total is unreadable, set amount to null." }
+        ]}]
+      })
+    }).then(function(resp){
+      if(!resp.ok) return resp.json().catch(function(){ return {}; }).then(function(err){
+        var msg = err && err.error && err.error.message ? err.error.message : ("API error " + resp.status);
+        throw new Error(msg);
+      });
+      return resp.json();
+    }).then(function(data){
+      if(data.stop_reason === "refusal") throw new Error("Claude declined to read this image");
+      var text = "";
+      (data.content || []).forEach(function(b){ if(b.type === "text") text += b.text; });
+      var parsed = JSON.parse(text);
+      return {
+        amount: (typeof parsed.amount === "number" && parsed.amount > 0) ? parsed.amount : null,
+        merchant: parsed.merchant || null,
+        date: /^\d{4}-\d{2}-\d{2}$/.test(parsed.date || "") ? parsed.date : null,
+        category: CATS.some(function(c){ return c.id === parsed.category; }) ? parsed.category : null,
+        source: "ai"
+      };
+    });
+  }
+
+  function scanReceipt(dataUrl){
+    if(state.apiKey){
+      return scanWithClaude(dataUrl).catch(function(err){
+        toast("AI scan failed — trying free scan");
+        return scanWithTesseract(dataUrl);
+      });
+    }
+    return scanWithTesseract(dataUrl);
+  }
+
+  var scanRun = 0;
+  function startScan(dataUrl){
+    var run = ++scanRun;
+    setPhotoUi("scanning");
+    scanReceipt(dataUrl).then(function(r){
+      if(run !== scanRun || !draft) return;   // sheet closed or newer photo taken
+      var filled = [];
+      var amountEl = $("#f-amount"), noteEl = $("#f-note"), dateEl = $("#f-date");
+      if(r.amount && amountEl && !amountEl.value){
+        amountEl.value = (Math.round(r.amount*100)/100);
+        filled.push("amount");
+      }
+      if(r.merchant && noteEl && !noteEl.value){ noteEl.value = r.merchant; filled.push("store"); }
+      if(r.date && dateEl){ dateEl.value = r.date; filled.push("date"); }
+      if(r.category){ selectChip(r.category); }
+      setPhotoUi("done");
+      if(filled.length){
+        toast((r.source==="ai" ? "Read by Claude" : "Scanned") + " — check the " + filled.join(", "));
+      }else{
+        toast("Couldn't read the numbers — type the amount");
+      }
+    }).catch(function(){
+      if(run !== scanRun || !draft) return;
+      setPhotoUi("done");
+      toast("Couldn't read the receipt — type the amount");
+    });
+  }
+
+  function setPhotoUi(mode){
+    var ic = $("#f-photo-ic"), t = $("#f-photo-t"), s = $("#f-photo-s");
+    if(!ic || !draft) return;
+    if(draft.photo) ic.innerHTML = '<img src="'+draft.photo+'" alt="Receipt preview">';
+    if(mode === "scanning"){
+      t.innerHTML = 'Reading the receipt…';
+      s.innerHTML = "";
+      s.appendChild(document.createElement("span"));
+      s.firstChild.className = "spin";
+      s.firstChild.style.display = "inline-block";
+    }else if(mode === "done"){
+      t.textContent = "Receipt attached";
+      s.textContent = "Tap to retake";
+    }else{
+      t.textContent = "Snap the receipt";
+      s.textContent = state.apiKey ? "Claude reads the amount for you" : "The amount fills in automatically";
+    }
+  }
+  function selectChip(catId){
+    if(!draft) return;
+    draft.cat = catId;
+    var all = sheet.querySelectorAll(".chip");
+    for(var i=0;i<all.length;i++){
+      all[i].classList.toggle("sel", all[i].getAttribute("data-cat")===catId);
+    }
+  }
+
+  /* ---------- add / detail sheets ---------- */
+  var sheet = $("#sheet"), backdrop = $("#backdrop"), camera = $("#camera");
+  var draft = null;
+
+  function openSheet(html){
+    sheet.innerHTML = '<div class="grab"></div>' + html;
+    backdrop.classList.add("show");
+    requestAnimationFrame(function(){ sheet.classList.add("show"); });
+  }
+  function closeSheet(){
+    sheet.classList.remove("show");
+    backdrop.classList.remove("show");
+    draft = null;
+    scanRun++;
+  }
+  backdrop.addEventListener("click", closeSheet);
+
+  function openAdd(){
+    draft = { cat:"food", photo:null };
+    var chips = CATS.map(function(c){
+      return '<button class="chip'+(c.id===draft.cat?" sel":"")+'" data-cat="'+c.id+'">' +
+        '<span class="cat-dot" style="background:var('+c.v+')"></span>'+c.name+'</button>';
+    }).join("");
+    var sym = "";
+    try{ sym = new Intl.NumberFormat(undefined,{style:"currency",currency:state.currency}).formatToParts(0)
+      .filter(function(p){return p.type==="currency";}).map(function(p){return p.value;})[0] || state.currency; }
+    catch(e){ sym = state.currency; }
+
+    openSheet(
+      '<h2>Add expense</h2>' +
+      '<button class="photo-btn" id="f-photo"><span class="ic" id="f-photo-ic">'+IC.camera+'</span>' +
+      '<span><span class="t" id="f-photo-t">Snap the receipt</span><br>' +
+      '<span class="s" id="f-photo-s"></span></span></button>' +
+      '<div class="amount-wrap"><span class="cur">'+esc(sym)+'</span>' +
+      '<input id="f-amount" class="money" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" autocomplete="off"></div>' +
+      '<div class="micro" style="margin-bottom:8px">Category</div>' +
+      '<div class="chips" id="f-cats">'+chips+'</div>' +
+      '<div class="row2">' +
+      '<div><label class="micro" for="f-note" style="display:block; margin-bottom:6px">Note</label>' +
+      '<input id="f-note" type="text" placeholder="Dinner, taxi…" maxlength="60"></div>' +
+      '<div><label class="micro" for="f-date" style="display:block; margin-bottom:6px">Date</label>' +
+      '<input id="f-date" type="date" value="'+todayIso()+'"></div></div>' +
+      '<button class="btn primary" id="f-save">Save expense</button>'
+    );
+    setPhotoUi("idle");
+
+    $("#f-cats").addEventListener("click", function(ev){
+      var b = ev.target.closest("[data-cat]"); if(!b) return;
+      selectChip(b.getAttribute("data-cat"));
+    });
+    $("#f-photo").addEventListener("click", function(){ camera.click(); });
+    $("#f-save").addEventListener("click", saveDraft);
+  }
+
+  function saveDraft(){
+    var amt = parseFloat($("#f-amount").value);
+    if(!(amt > 0)){ toast("Enter the amount first"); $("#f-amount").focus(); return; }
+    var e = {
+      id: uid(), ts: Date.now(),
+      amount: Math.round(amt*100)/100,
+      cat: draft.cat,
+      note: $("#f-note").value.trim(),
+      date: $("#f-date").value || todayIso(),
+      photo: draft.photo
+    };
+    state.expenses.push(e);
+    if(save({retryWithoutPhoto:e})){
+      var wk = weekendOf(e.date);
+      toast(wk===currentWeekend() ? "Added — "+fmt(e.amount) : "Added to the "+weekendLabel(wk)+" weekend");
+    } else {
+      state.expenses.pop();
+    }
+    closeSheet(); render();
+  }
+
+  camera.addEventListener("change", function(){
+    var f = camera.files && camera.files[0];
+    camera.value = "";
+    if(!f || !draft) return;
+    var t = $("#f-photo-t"); if(t) t.textContent = "Processing photo…";
+    var img = new Image();
+    var url = URL.createObjectURL(f);
+    img.onload = function(){
+      var MAX = 1100;   // keep text readable for the scanner, still small enough to store
+      var sc = Math.min(1, MAX / Math.max(img.width, img.height));
+      var cv = document.createElement("canvas");
+      cv.width = Math.round(img.width*sc); cv.height = Math.round(img.height*sc);
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      var scanUrl = cv.toDataURL("image/jpeg", 0.8);   // higher quality for reading
+      URL.revokeObjectURL(url);
+      if(!draft) return;
+      // store a smaller copy with the expense
+      var sc2 = Math.min(1, 720 / Math.max(cv.width, cv.height));
+      var cv2 = document.createElement("canvas");
+      cv2.width = Math.round(cv.width*sc2); cv2.height = Math.round(cv.height*sc2);
+      cv2.getContext("2d").drawImage(cv, 0, 0, cv2.width, cv2.height);
+      draft.photo = cv2.toDataURL("image/jpeg", 0.55);
+      startScan(scanUrl);
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); toast("Couldn't read that photo"); setPhotoUi("idle"); };
+    img.src = url;
+  });
+
+  var pendingDelete = null;
+  function openDetail(id){
+    var e = null;
+    for(var i=0;i<state.expenses.length;i++){ if(state.expenses[i].id===id){ e = state.expenses[i]; break; } }
+    if(!e) return;
+    var c = cat(e.cat);
+    pendingDelete = null;
+    openSheet(
+      '<h2>'+esc(e.note || c.name)+'</h2>' +
+      (e.photo? '<img class="detail-photo" src="'+e.photo+'" id="d-photo" alt="Receipt — tap to zoom">' : "") +
+      '<dl class="detail-grid">' +
+      '<dt>Amount</dt><dd class="money">'+fmt(e.amount)+'</dd>' +
+      '<dt>Category</dt><dd><span class="cat-dot" style="display:inline-block; width:9px; height:9px; border-radius:3px; background:var('+c.v+'); margin-right:6px"></span>'+c.name+'</dd>' +
+      '<dt>Date</dt><dd>'+fromIso(e.date).toLocaleDateString(undefined,{weekday:"short", day:"numeric", month:"short", year:"numeric"})+'</dd>' +
+      '<dt>Weekend</dt><dd>'+weekendLabel(weekendOf(e.date), true)+'</dd>' +
+      '</dl>' +
+      '<button class="btn danger" id="d-del">Delete expense</button>'
+    );
+    if(e.photo){
+      $("#d-photo").addEventListener("click", function(){
+        $("#viewer-img").src = e.photo;
+        $("#viewer").classList.add("show");
+      });
+    }
+    $("#d-del").addEventListener("click", function(){
+      if(pendingDelete !== e.id){
+        pendingDelete = e.id;
+        this.textContent = "Tap again to confirm";
+        return;
+      }
+      state.expenses = state.expenses.filter(function(x){ return x.id!==e.id; });
+      save(); closeSheet(); render();
+      toast("Deleted");
+    });
+  }
+
+  $("#viewer-close").addEventListener("click", function(){ $("#viewer").classList.remove("show"); });
+  $("#viewer").addEventListener("click", function(ev){ if(ev.target===this) this.classList.remove("show"); });
+
+  /* ---------- view event wiring ---------- */
+  function bindView(){
+    var add = $("#open-add");
+    if(add) add.addEventListener("click", openAdd);
+    shell.querySelectorAll("[data-tab]").forEach(function(b){
+      b.addEventListener("click", function(){ tab = b.getAttribute("data-tab"); openWk = null; render(); window.scrollTo(0,0); });
+    });
+    shell.querySelectorAll("[data-exp]").forEach(function(b){
+      b.addEventListener("click", function(ev){ ev.stopPropagation(); openDetail(b.getAttribute("data-exp")); });
+    });
+    shell.querySelectorAll("[data-wk]").forEach(function(b){
+      function toggle(){
+        var k = b.getAttribute("data-wk");
+        openWk = (openWk===k)? null : k;
+        render();
+      }
+      b.addEventListener("click", toggle);
+      b.addEventListener("keydown", function(ev){
+        if(ev.key==="Enter" || ev.key===" "){ ev.preventDefault(); toggle(); }
+      });
+    });
+
+    var sSave = $("#s-save");
+    if(sSave){
+      sSave.addEventListener("click", function(){
+        var b = parseFloat($("#s-budget").value);
+        if(!(b > 0)){ toast("Budget must be above zero"); return; }
+        state.budget = b;
+        state.currency = $("#s-currency").value;
+        save(); render(); toast("Saved");
+      });
+      $("#s-scan-save").addEventListener("click", function(){
+        state.apiKey = $("#s-key").value.trim();
+        state.scanModel = $("#s-model").value;
+        save(); toast(state.apiKey ? "Claude scanning is on" : "Using free on-phone scanning");
+      });
+      $("#s-export").addEventListener("click", function(){
+        var copy = { setup:state.setup, budget:state.budget, currency:state.currency,
+                     scanModel:state.scanModel, expenses:state.expenses };  // apiKey deliberately excluded
+        var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "weekend-wallet-backup-" + todayIso() + ".json";
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+        toast("Backup downloaded");
+      });
+      $("#s-import").addEventListener("click", function(){ $("#s-import-file").click(); });
+      $("#s-import-file").addEventListener("change", function(){
+        var f = this.files && this.files[0]; this.value = "";
+        if(!f) return;
+        var r = new FileReader();
+        r.onload = function(){
+          try{
+            var d = JSON.parse(r.result);
+            if(!d || !Array.isArray(d.expenses)) throw 0;
+            state = { setup:true, budget:+d.budget||0, currency:d.currency||"USD",
+                      expenses:d.expenses, apiKey:state.apiKey,
+                      scanModel:d.scanModel||state.scanModel };
+            save(); render(); toast("Backup restored — "+state.expenses.length+" expenses");
+          }catch(e){ toast("That file isn't a Weekend Wallet backup"); }
+        };
+        r.readAsText(f);
+      });
+      var wipeArmed = false;
+      $("#s-wipe").addEventListener("click", function(){
+        if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
+        state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", scanModel:"claude-opus-4-8" };
+        try{ localStorage.removeItem(KEY); }catch(e){}
+        render();
+      });
+    }
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
