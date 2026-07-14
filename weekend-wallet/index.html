@@ -388,11 +388,12 @@
         if(typeof s.salary !== "number") s.salary = 0;
         if(!Array.isArray(s.commitments)) s.commitments = [];
         if(!Array.isArray(s.goals)) s.goals = [];
+        if(!s.swept || typeof s.swept !== "object") s.swept = {};
         return s;
       }
     }catch(e){}
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-             salary:0, commitments:[], goals:[] };
+             salary:0, commitments:[], goals:[], swept:{} };
   }
   function save(opts){
     try{
@@ -460,11 +461,41 @@
     var day = new Date().getDay();
     return (5 - day + 7) % 7;
   }
+  /* only Fri/Sat/Sun expenses belong to a weekend; weekday spending is monthly */
+  function weekendKeyOf(dateStr){
+    var day = fromIso(dateStr).getDay();
+    return (day===5 || day===6 || day===0) ? weekendOf(dateStr) : null;
+  }
   function expensesFor(friIso){
-    return state.expenses.filter(function(e){ return weekendOf(e.date)===friIso; })
+    return state.expenses.filter(function(e){ return weekendKeyOf(e.date)===friIso; })
       .sort(function(a,b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.ts||0)-(b.ts||0); });
   }
   function total(list){ return list.reduce(function(s,e){ return s + e.amount; }, 0); }
+  function monthSpent(mk){
+    mk = mk || todayIso().slice(0,7);
+    return total(state.expenses.filter(function(e){ return e.date.slice(0,7)===mk; }));
+  }
+  function spentOn(dIso){
+    return total(state.expenses.filter(function(e){ return e.date===dIso; }));
+  }
+  function upcomingBills(){
+    var out = [], now = new Date(), today = now.getDate();
+    var dim = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+    state.commitments.forEach(function(c){
+      if(!c.due) return;
+      var days = c.due - today;
+      if(days < 0) days += dim;
+      if(days <= 10) out.push({c:c, days:days});
+    });
+    out.sort(function(a,b){ return a.days-b.days; });
+    return out;
+  }
+  function sweepInfo(){
+    var fri = currentWeekend();
+    if(isLiveWeekend(fri) || state.swept[fri] || !state.goals.length || !(state.budget>0)) return null;
+    var left = Math.round((state.budget - total(expensesFor(fri)))*100)/100;
+    return left > 0 ? { fri: fri, amount: left } : null;
+  }
 
   /* ---------- toast ---------- */
   var toastTimer;
@@ -476,6 +507,7 @@
 
   /* ---------- icons ---------- */
   var IC = {
+    home:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19v-8.5Z"/><path d="M9.5 20.5v-6h5v6"/></svg>',
     wallet:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18M16 15h.01"/></svg>',
     history:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.5"/><path d="M4 4v4.5H8.5"/><path d="M12 8v4l3 2"/></svg>',
     gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 0 0-.14-1.4l2-1.55-2-3.46-2.35.95A7 7 0 0 0 14.1 5.1L13.7 2.6h-3.4l-.4 2.5a7 7 0 0 0-2.4 1.44l-2.36-.95-2 3.46 2 1.55A7 7 0 0 0 5 12c0 .48.05.94.14 1.4l-2 1.55 2 3.46 2.35-.95c.7.63 1.52 1.12 2.41 1.44l.4 2.5h3.4l.4-2.5a7 7 0 0 0 2.4-1.44l2.36.95 2-3.46-2-1.55c.09-.46.14-.92.14-1.4Z"/></svg>',
@@ -485,13 +517,13 @@
   };
 
   /* ---------- views ---------- */
-  var tab = "weekend";
+  var tab = "home";
   var shell = $("#shell");
 
   function render(){
     if(!state.setup){ renderOnboarding(); return; }
     var html = topbar();
-    if(tab==="weekend") html += viewWeekend();
+    if(tab==="home") html += viewHome();
     else if(tab==="plan") html += viewPlan();
     else if(tab==="history") html += viewHistory();
     else html += viewSettings();
@@ -504,7 +536,7 @@
     return '<header class="topbar"><div class="brand">' +
       '<div class="brand-mark" aria-hidden="true">W</div>' +
       '<div><div class="brand-name">Weekend Wallet</div>' +
-      '<div class="brand-sub">Fri · Sat · Sun money</div></div></div></header>';
+      '<div class="brand-sub">Daily money · weekend fun</div></div></div></header>';
   }
 
   function tabbar(){
@@ -512,7 +544,7 @@
       return '<button class="tab'+(tab===id?" active":"")+'" data-tab="'+id+'" aria-label="'+label+'">'+icon+'<span>'+label+'</span></button>';
     }
     return '<nav class="tabbar"><div class="tabbar-inner">' +
-      t("weekend","Weekend",IC.wallet) +
+      t("home","Home",IC.home) +
       t("plan","Plan",IC.plan) +
       '<button class="addbtn" id="open-add" aria-label="Add expense">'+IC.plus+'</button>' +
       t("history","History",IC.history) +
@@ -526,61 +558,121 @@
     return '<div class="meter-track"><div class="meter-fill'+cls+'" style="width:'+pct.toFixed(1)+'%"></div></div>';
   }
 
-  function viewWeekend(){
-    var fri = currentWeekend();
-    var live = isLiveWeekend(fri);
-    var exps = expensesFor(fri);
-    var spent = total(exps);
-    var left = state.budget - spent;
+  function viewHome(){
+    var monthName = new Date().toLocaleDateString(undefined,{month:"long"});
+    var pm = planMath();
+    var mSpent = monthSpent();
+    var tSpent = spentOn(todayIso());
     var h = "";
 
-    var status = live
-      ? '<span class="hero-live"><span class="dot"></span>Weekend live</span>'
-      : '<span class="hero-live" style="color:var(--ink2)">Next one starts in '+(daysUntilFriday()||7)+' day'+((daysUntilFriday()||7)>1?"s":"")+'</span>';
+    /* month hero */
+    if(state.salary > 0){
+      var spendable = pm.left;
+      var mLeft = spendable - mSpent;
+      h += '<section class="hero">' +
+        '<div class="hero-top"><span class="hero-when">'+monthName+'</span>' +
+        '<span class="hero-live" style="color:var(--ink2)">Today: <b class="money" style="color:var(--ink)">'+fmt(tSpent)+'</b></span></div>' +
+        '<div class="hero-amount money'+(mLeft<0?" over":"")+'">'+fmt(Math.abs(mLeft))+'</div>' +
+        '<div class="hero-caption">'+(mLeft<0? "over this month" : "left this month") +
+        ' · spent <strong class="money">'+fmt(mSpent)+'</strong> of <strong class="money">'+fmt(Math.max(spendable,0))+'</strong></div>' +
+        '<div class="meter">'+meterHtml(mSpent, Math.max(spendable,0))+
+        '<div class="meter-row"><span>after your loan, subscriptions & savings</span></div></div>' +
+        '</section>';
+    }else{
+      h += '<section class="hero">' +
+        '<div class="hero-top"><span class="hero-when">'+monthName+'</span>' +
+        '<span class="hero-live" style="color:var(--ink2)">Today: <b class="money" style="color:var(--ink)">'+fmt(tSpent)+'</b></span></div>' +
+        '<div class="hero-amount money">'+fmt(mSpent)+'</div>' +
+        '<div class="hero-caption">spent this month · add your salary in <strong>Plan</strong> to see what\'s left</div>' +
+        '</section>';
+    }
 
-    h += '<section class="hero">' +
-      '<div class="hero-top"><span class="hero-when">'+weekendLabel(fri)+'</span>'+status+'</div>' +
-      '<div class="hero-amount money'+(left<0?" over":"")+'">'+ fmt(Math.abs(left)) +'</div>' +
-      '<div class="hero-caption">'+(left<0 ? "over budget" : "left to spend") +
-      ' · <strong class="money">'+fmt(spent)+'</strong> of <strong class="money">'+fmt(state.budget)+'</strong></div>' +
-      '<div class="meter">'+meterHtml(spent, state.budget)+
-      '<div class="meter-row"><span>'+(state.budget>0? Math.round(spent/state.budget*100) : 0)+'% used</span>' +
-      '<span class="money">'+exps.length+' expense'+(exps.length===1?"":"s")+'</span></div></div>' +
-      '</section>';
+    /* weekend card */
+    var fri = currentWeekend();
+    var live = isLiveWeekend(fri);
+    var wkSpent = total(expensesFor(fri));
+    var wkLeft = state.budget - wkSpent;
+    h += '<div class="sec"><span class="micro">'+(live? "This weekend" : "Last weekend")+'</span>' +
+      (live? '<span class="hero-live"><span class="dot"></span>Live</span>'
+           : '<span class="micro">next in '+(daysUntilFriday()||7)+' day'+((daysUntilFriday()||7)>1?"s":"")+'</span>')+'</div>';
+    if(state.budget > 0){
+      h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+weekendLabel(fri)+'</span>' +
+        '<span class="goal-amt money">'+(wkLeft<0
+          ? '<b style="color:var(--bad)">'+fmt(Math.abs(wkLeft))+'</b> over'
+          : '<b>'+fmt(wkLeft)+'</b> '+(live?"left":"unspent"))+'</span></div>' +
+        meterHtml(wkSpent, state.budget) +
+        '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(wkSpent)+' of '+fmt(state.budget)+'</span></div></div>';
+    }else{
+      h += '<div class="empty">Set a weekend budget in Settings — or open <b>Plan</b> and tap "Use as budget".</div>';
+    }
+    var sw = sweepInfo();
+    if(sw){
+      h += '<div class="suggest"><span class="txt">You didn\'t spend <b class="money">'+fmt(sw.amount)+'</b> last weekend. Put it toward a goal?</span>' +
+        '<button id="h-sweep">Save it</button></div>';
+    }
 
-    if(exps.length){
-      var byCat = {};
-      exps.forEach(function(e){ byCat[e.cat] = (byCat[e.cat]||0) + e.amount; });
-      var rows = CATS.filter(function(c){ return byCat[c.id]; })
-        .sort(function(a,b){ return byCat[b.id]-byCat[a.id]; });
-      var max = byCat[rows[0].id];
-      h += '<div class="sec"><span class="micro">Where it went</span></div><div class="cats">';
-      rows.forEach(function(c){
-        var v = byCat[c.id];
-        h += '<div class="cat-row">' +
-          '<span class="cat-name"><span class="cat-dot" style="background:var('+c.v+')"></span>'+c.name+'</span>' +
-          '<span class="cat-bar"><i style="width:'+(v/max*100).toFixed(1)+'%; background:var('+c.v+')"></i></span>' +
-          '<span class="cat-amt money">'+fmt(v)+'</span></div>';
+    /* upcoming bills */
+    var up = upcomingBills();
+    if(up.length){
+      h += '<div class="sec"><span class="micro">Coming up</span></div><div class="row-list">';
+      up.forEach(function(u){
+        h += '<button class="row-item" data-cm="'+u.c.id+'">' +
+          '<span class="pill'+(u.c.kind==="loan"?" loan":"")+'">'+(u.days===0? "today" : u.days===1? "tomorrow" : "in "+u.days+" days")+'</span>' +
+          '<span class="name">'+esc(u.c.name)+'</span>' +
+          '<span class="amt money">'+fmt(u.c.amount)+'</span></button>';
       });
       h += '</div>';
     }
 
-    h += '<div class="sec"><span class="micro">This weekend</span></div>';
-    if(!exps.length){
+    /* recent expenses (all days) */
+    h += '<div class="sec"><span class="micro">Recent</span></div>';
+    var recent = state.expenses.slice()
+      .sort(function(a,b){ return a.date < b.date ? 1 : a.date > b.date ? -1 : (b.ts||0)-(a.ts||0); });
+    if(!recent.length){
       h += '<div class="empty">Nothing logged yet.<br><b>Tap +</b> and snap the receipt — the amount fills in by itself.</div>';
     }else{
-      var days = {};
-      exps.forEach(function(e){ (days[e.date] = days[e.date]||[]).push(e); });
-      Object.keys(days).sort().reverse().forEach(function(d){
+      var days = {}, order = [];
+      recent.forEach(function(e){
+        if(!days[e.date]){ if(order.length >= 5) return; days[e.date] = []; order.push(e.date); }
+        days[e.date].push(e);
+      });
+      order.forEach(function(d){
         var list = days[d];
-        var dn = fromIso(d).toLocaleDateString(undefined,{weekday:"long", month:"short", day:"numeric"});
+        var dn = d===todayIso() ? "Today" :
+          fromIso(d).toLocaleDateString(undefined,{weekday:"long", month:"short", day:"numeric"});
         h += '<div class="daygroup"><div class="dayhead"><span class="micro">'+dn+'</span>' +
           '<span class="total money">'+fmt(total(list))+'</span></div><div class="exp-list">';
-        list.slice().reverse().forEach(function(e){ h += expRow(e); });
+        list.forEach(function(e){ h += expRow(e); });
         h += '</div></div>';
       });
     }
     return h;
+  }
+
+  function openSweepSheet(){
+    var sw = sweepInfo();
+    if(!sw) return;
+    var rows = state.goals.map(function(g){
+      return '<button class="row-item" data-sweep-goal="'+g.id+'">' +
+        '<span class="name">'+esc(g.name)+'</span>' +
+        '<span class="amt money">'+fmt(g.saved)+' / '+fmt(g.target)+'</span></button>';
+    }).join("");
+    openSheet(
+      '<h2>Save '+fmt(sw.amount)+'</h2>' +
+      '<p style="color:var(--ink2); font-size:13.5px; margin:0 0 14px">Money you didn\'t spend over the '+weekendLabel(sw.fri)+' weekend. Pick a goal:</p>' +
+      '<div class="row-list">'+rows+'</div>'
+    );
+    sheet.querySelectorAll("[data-sweep-goal]").forEach(function(b){
+      b.addEventListener("click", function(){
+        var g = null;
+        state.goals.forEach(function(x){ if(x.id===b.getAttribute("data-sweep-goal")) g = x; });
+        if(!g) return;
+        g.saved = Math.round((g.saved + sw.amount)*100)/100;
+        state.swept[sw.fri] = sw.amount;
+        save(); closeSheet(); render();
+        toast(fmt(sw.amount)+" saved to "+g.name+(g.saved>=g.target? " — goal reached!" : ""));
+      });
+    });
   }
 
   function expRow(e){
@@ -596,23 +688,62 @@
   }
 
   var openWk = null;
+  var histMode = "weekends";
   function viewHistory(){
+    var h = '<div class="sec"><span class="micro">History</span></div>' +
+      '<div class="chips">' +
+      '<button class="chip'+(histMode==="weekends"?" sel":"")+'" data-hist="weekends">Weekends</button>' +
+      '<button class="chip'+(histMode==="months"?" sel":"")+'" data-hist="months">Months</button></div>';
+    return h + (histMode==="months" ? historyMonths() : historyWeekends());
+  }
+
+  function historyMonths(){
     var groups = {};
     state.expenses.forEach(function(e){
-      var k = weekendOf(e.date);
+      var k = e.date.slice(0,7);
       (groups[k] = groups[k]||[]).push(e);
     });
     var keys = Object.keys(groups).sort().reverse();
-    var h = '<div class="sec"><span class="micro">Past weekends</span></div>';
+    if(!keys.length){
+      return '<div class="empty">Every expense you log — weekday or weekend —<br>adds up here month by month.</div>';
+    }
+    var pm = planMath();
+    var spendable = state.salary > 0 ? Math.max(pm.left, 0) : 0;
+    var h = "";
+    keys.forEach(function(k){
+      var list = groups[k], t = total(list);
+      var label = fromIso(k+"-01").toLocaleDateString(undefined,{month:"long", year:"numeric"});
+      var over = spendable > 0 && t > spendable;
+      h += '<div class="wk"><div class="wk-top">' +
+        '<span class="wk-label">'+label+(k===todayIso().slice(0,7)?' · now':'')+'</span>' +
+        '<span class="wk-amt money'+(over?" over":"")+'">'+fmt(t)+'</span></div>' +
+        '<div class="wk-sub">'+list.length+' expense'+(list.length===1?"":"s")+
+        (spendable>0? ' · '+(over
+          ? '<span style="color:var(--bad); font-weight:700">'+fmt(t-spendable)+' over plan</span>'
+          : '<span style="color:var(--good); font-weight:700">'+fmt(spendable-t)+' under plan</span>') : "")+'</div>' +
+        (spendable>0? meterHtml(t, spendable) : "") +
+        '</div>';
+    });
+    return h;
+  }
+
+  function historyWeekends(){
+    var groups = {};
+    state.expenses.forEach(function(e){
+      var k = weekendKeyOf(e.date);
+      if(!k) return;
+      (groups[k] = groups[k]||[]).push(e);
+    });
+    var keys = Object.keys(groups).sort().reverse();
 
     if(!keys.length){
-      return h + '<div class="empty">Your weekend history will build up here —<br>totals, budgets and every receipt.</div>';
+      return '<div class="empty">Your weekend history will build up here —<br>totals, budgets and every receipt.</div>';
     }
 
     var totals = keys.map(function(k){ return total(groups[k]); });
     var sum = totals.reduce(function(a,b){ return a+b; },0);
     var under = totals.filter(function(t){ return t <= state.budget; }).length;
-    h += '<div class="stat-row">' +
+    var h = '<div class="stat-row">' +
       '<div class="stat"><span class="micro">Weekends</span><div class="v money">'+keys.length+'</div></div>' +
       '<div class="stat"><span class="micro">Avg spent</span><div class="v money">'+fmt(sum/keys.length)+'</div></div>' +
       '<div class="stat"><span class="micro">On budget</span><div class="v money">'+under+'/'+keys.length+'</div></div>' +
@@ -682,9 +813,13 @@
     if(state.commitments.length){
       h += '<div class="row-list">';
       state.commitments.forEach(function(c){
+        var sub = [];
+        if(c.due) sub.push("due the "+c.due+(c.due===1?"st":c.due===2?"nd":c.due===3?"rd":c.due===21?"st":c.due===22?"nd":c.due===23?"rd":c.due===31?"st":"th"));
+        if(c.kind==="loan" && c.remaining > 0) sub.push(fmt(c.remaining)+" left · ≈ "+Math.max(Math.ceil(c.remaining/c.amount),1)+" months to go");
         h += '<button class="row-item" data-cm="'+c.id+'">' +
           '<span class="pill'+(c.kind==="loan"?" loan":"")+'">'+(c.kind==="loan"?"Loan":"Subscription")+'</span>' +
-          '<span class="name">'+esc(c.name)+'</span>' +
+          '<span class="name">'+esc(c.name)+
+          (sub.length? '<br><span style="font-size:12px; font-weight:500; color:var(--ink3)">'+sub.join(" · ")+'</span>' : "")+'</span>' +
           '<span class="amt money">'+fmt(c.amount)+' <small>/mo</small></span></button>';
       });
       h += '</div>';
@@ -727,8 +862,15 @@
       '<div class="chips" id="c-kind">' +
       '<button class="chip'+(kind==="loan"?" sel":"")+'" data-kind="loan"><span class="cat-dot" style="background:var(--bad)"></span>Loan</button>' +
       '<button class="chip'+(kind==="sub"?" sel":"")+'" data-kind="sub"><span class="cat-dot" style="background:var(--c-drinks)"></span>Subscription</button></div>' +
-      '<div class="field"><label class="micro" for="c-amount">Monthly amount</label>' +
+      '<div class="row2">' +
+      '<div><label class="micro" for="c-amount" style="display:block; margin-bottom:6px">Monthly amount</label>' +
       '<input id="c-amount" type="number" inputmode="decimal" min="0" step="0.01" value="'+(c? c.amount:"")+'"></div>' +
+      '<div><label class="micro" for="c-due" style="display:block; margin-bottom:6px">Due day (optional)</label>' +
+      '<input id="c-due" type="number" inputmode="numeric" min="1" max="31" placeholder="e.g. 5" value="'+(c && c.due? c.due:"")+'"></div></div>' +
+      '<div class="field" id="c-loanx" style="'+(kind==="loan"?"":"display:none")+'">' +
+      '<label class="micro" for="c-remaining">Loan balance left (optional)</label>' +
+      '<input id="c-remaining" type="number" inputmode="decimal" min="0" placeholder="How much is still owed" value="'+(c && c.remaining? c.remaining:"")+'">' +
+      '<div class="hint">Each saved edit updates this — the app shows roughly how many months are left.</div></div>' +
       '<button class="btn primary" id="c-save">Save</button>' +
       (c? '<div style="height:10px"></div><button class="btn danger" id="c-del">Remove</button>' : "")
     );
@@ -736,16 +878,20 @@
     $("#c-kind").addEventListener("click", function(ev){
       var b = ev.target.closest("[data-kind]"); if(!b) return;
       selKind = b.getAttribute("data-kind");
-      var all = sheet.querySelectorAll(".chip");
+      var all = $("#c-kind").querySelectorAll(".chip");
       for(var i=0;i<all.length;i++) all[i].classList.toggle("sel", all[i]===b);
+      $("#c-loanx").style.display = selKind==="loan" ? "" : "none";
     });
     $("#c-save").addEventListener("click", function(){
       var name = $("#c-name").value.trim();
       var amt = parseFloat($("#c-amount").value);
+      var due = parseInt($("#c-due").value, 10);
+      due = (due >= 1 && due <= 31) ? due : 0;
+      var remaining = selKind==="loan" ? (parseFloat($("#c-remaining").value) || 0) : 0;
       if(!name){ toast("Give it a name"); return; }
       if(!(amt > 0)){ toast("Enter the monthly amount"); return; }
-      if(c){ c.name = name; c.amount = Math.round(amt*100)/100; c.kind = selKind; }
-      else state.commitments.push({ id: uid(), name: name, amount: Math.round(amt*100)/100, kind: selKind });
+      if(c){ c.name = name; c.amount = Math.round(amt*100)/100; c.kind = selKind; c.due = due; c.remaining = remaining; }
+      else state.commitments.push({ id: uid(), name: name, amount: Math.round(amt*100)/100, kind: selKind, due: due, remaining: remaining });
       save(); closeSheet(); render();
     });
     if(c){
@@ -1089,8 +1235,10 @@
     };
     state.expenses.push(e);
     if(save({retryWithoutPhoto:e})){
-      var wk = weekendOf(e.date);
-      toast(wk===currentWeekend() ? "Added — "+fmt(e.amount) : "Added to the "+weekendLabel(wk)+" weekend");
+      var wk = weekendKeyOf(e.date);
+      toast(wk ? (isLiveWeekend(wk) ? "Added to this weekend — "+fmt(e.amount)
+                                    : "Added to the "+weekendLabel(wk)+" weekend")
+               : "Added — "+fmt(e.amount));
     } else {
       state.expenses.pop();
     }
@@ -1186,6 +1334,22 @@
       });
     });
 
+    /* plan + home shared rows */
+    shell.querySelectorAll("[data-cm]").forEach(function(b){
+      b.addEventListener("click", function(){ openCommitmentSheet(b.getAttribute("data-cm")); });
+    });
+    shell.querySelectorAll("[data-goal-edit]").forEach(function(b){
+      b.addEventListener("click", function(){ openGoalSheet(b.getAttribute("data-goal-edit")); });
+    });
+    shell.querySelectorAll("[data-goal-add]").forEach(function(b){
+      b.addEventListener("click", function(){ openGoalMoneySheet(b.getAttribute("data-goal-add")); });
+    });
+    var sweepBtn = $("#h-sweep");
+    if(sweepBtn) sweepBtn.addEventListener("click", openSweepSheet);
+    shell.querySelectorAll("[data-hist]").forEach(function(b){
+      b.addEventListener("click", function(){ histMode = b.getAttribute("data-hist"); openWk = null; render(); });
+    });
+
     /* plan tab */
     var pSalary = $("#p-salary-save");
     if(pSalary){
@@ -1204,15 +1368,6 @@
       });
       $("#p-add-cm").addEventListener("click", function(){ openCommitmentSheet(null); });
       $("#p-add-goal").addEventListener("click", function(){ openGoalSheet(null); });
-      shell.querySelectorAll("[data-cm]").forEach(function(b){
-        b.addEventListener("click", function(){ openCommitmentSheet(b.getAttribute("data-cm")); });
-      });
-      shell.querySelectorAll("[data-goal-edit]").forEach(function(b){
-        b.addEventListener("click", function(){ openGoalSheet(b.getAttribute("data-goal-edit")); });
-      });
-      shell.querySelectorAll("[data-goal-add]").forEach(function(b){
-        b.addEventListener("click", function(){ openGoalMoneySheet(b.getAttribute("data-goal-add")); });
-      });
     }
 
     var sSave = $("#s-save");
@@ -1232,7 +1387,8 @@
       $("#s-export").addEventListener("click", function(){
         var copy = { setup:state.setup, budget:state.budget, currency:state.currency,
                      scanModel:state.scanModel, expenses:state.expenses,
-                     salary:state.salary, commitments:state.commitments, goals:state.goals };  // apiKey deliberately excluded
+                     salary:state.salary, commitments:state.commitments, goals:state.goals,
+                     swept:state.swept };  // apiKey deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -1255,7 +1411,8 @@
                       scanModel:d.scanModel||state.scanModel,
                       salary:+d.salary||0,
                       commitments:Array.isArray(d.commitments)? d.commitments : [],
-                      goals:Array.isArray(d.goals)? d.goals : [] };
+                      goals:Array.isArray(d.goals)? d.goals : [],
+                      swept:(d.swept && typeof d.swept==="object")? d.swept : {} };
             save(); render(); toast("Backup restored — "+state.expenses.length+" expenses");
           }catch(e){ toast("That file isn't a Weekend Wallet backup"); }
         };
@@ -1265,7 +1422,7 @@
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-                  salary:0, commitments:[], goals:[] };
+                  salary:0, commitments:[], goals:[], swept:{} };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
       });
