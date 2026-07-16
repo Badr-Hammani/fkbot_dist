@@ -383,6 +383,7 @@
   "use strict";
 
   /* ---------- data ---------- */
+  var APP_VERSION = "1.6";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1212,7 +1213,8 @@
 
       '<div class="panel"><h3>'+IC.trash+'Start fresh</h3><p>Deletes every expense and receipt photo. This can\'t be undone.</p>' +
       '<button class="btn danger" id="s-wipe">Erase all data</button></div>' +
-      '<p class="hint" style="text-align:center; margin-top:18px">Weekend Wallet · everything stored privately on your device</p>';
+      '<p class="hint" style="text-align:center; margin-top:18px">Weekend Wallet v'+APP_VERSION+' · everything stored privately on your device<br>' +
+      'Not seeing a new feature? Close the app fully and reopen it.</p>';
   }
 
   function renderOnboarding(){
