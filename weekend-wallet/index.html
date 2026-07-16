@@ -357,6 +357,7 @@
     background:var(--ink); color:var(--bg); padding:10px 18px; border-radius:999px;
     font-size:14px; font-weight:600; opacity:0; transition:all .3s ease; z-index:100;
     white-space:nowrap; max-width:92vw; overflow:hidden; text-overflow:ellipsis;
+    pointer-events:none;
   }
   #toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
 
@@ -419,11 +420,12 @@
         if(!Array.isArray(s.goals)) s.goals = [];
         if(!s.swept || typeof s.swept !== "object") s.swept = {};
         if(typeof s.payday !== "number") s.payday = 0;
+        if(!Array.isArray(s.debts)) s.debts = [];
         return s;
       }
     }catch(e){}
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-             salary:0, commitments:[], goals:[], swept:{}, payday:0 };
+             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[] };
   }
   function save(opts){
     try{
@@ -520,6 +522,9 @@
     out.sort(function(a,b){ return a.days-b.days; });
     return out;
   }
+  function debtTotal(){
+    return state.debts.reduce(function(s,d){ return s + d.balance; }, 0);
+  }
   function sweepInfo(){
     var fri = currentWeekend();
     if(isLiveWeekend(fri) || state.swept[fri] || !state.goals.length || !(state.budget>0)) return null;
@@ -554,7 +559,8 @@
     share:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3.5M8 7l4-3.5L16 7"/><path d="M5 12v7.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V12"/></svg>',
     download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5V15M8 11.5l4 3.5 4-3.5"/><path d="M5 18.5h14"/></svg>',
     trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5h15M9 6.5V4.8A1.3 1.3 0 0 1 10.3 3.5h3.4A1.3 1.3 0 0 1 15 4.8v1.7M6.5 6.5 7.5 20a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4l1-13.5"/></svg>',
-    pencil:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14.5 5 4.5 4.5L8.5 20H4v-4.5L14.5 5Z"/><path d="m12.5 7 4.5 4.5"/></svg>'
+    pencil:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14.5 5 4.5 4.5L8.5 20H4v-4.5L14.5 5Z"/><path d="m12.5 7 4.5 4.5"/></svg>',
+    person:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M5 20.5c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg>'
   };
   var CAT_IC = {
     food:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v7a2 2 0 0 0 2 2v9M11 3v7a2 2 0 0 1-2 2M7 3v4M17 3c-1.7 0-3 2-3 5v4h3v9M17 3v18"/></svg>',
@@ -648,6 +654,14 @@
         '<div class="meter">'+meterHtml(mSpent, Math.max(spendable,0))+
         '<div class="meter-row"><span>after your loan, subscriptions & savings</span>'+paydayChip()+'</div></div>' +
         '</section>';
+      if(mLeft < 0){
+        h += '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(Math.abs(mLeft))+'</b> over. If your dad or a friend covered you, keep track of it.</span>' +
+          '<button id="h-borrow" data-amt="'+Math.abs(Math.round(mLeft))+'">Log it</button></div>';
+      }else if(debtTotal() > 0){
+        h += '<div class="suggest"><span class="txt">You still owe <b class="money">'+fmt(debtTotal())+'</b> to '+
+          state.debts.filter(function(d){return d.balance>0;}).map(function(d){return esc(d.name);}).join(", ")+'.</span>' +
+          '<button id="h-owe">Manage</button></div>';
+      }
     }else{
       h += '<section class="hero">' +
         '<div class="hero-top"><span class="hero-when">'+monthName+'</span>' +
@@ -723,6 +737,88 @@
       });
     }
     return h;
+  }
+
+  function openBorrowSheet(prefillAmt){
+    var chips = state.debts.map(function(d){
+      return '<button class="chip" data-bname="'+esc(d.name)+'">'+IC.person+esc(d.name)+'</button>';
+    }).join("");
+    openSheet(
+      '<h2>I borrowed money</h2>' +
+      '<div class="field"><label class="micro" for="b-name">From who?</label>' +
+      '<input id="b-name" type="text" placeholder="Dad, Ahmed…" maxlength="30"></div>' +
+      (chips? '<div class="chips">'+chips+'</div>' : "") +
+      '<div class="field"><label class="micro" for="b-amt">How much?</label>' +
+      '<input id="b-amt" type="number" inputmode="decimal" min="0" step="0.01"'+(prefillAmt>0? ' value="'+prefillAmt+'"':"")+'></div>' +
+      '<button class="btn primary" id="b-save">Add to what I owe</button>' +
+      '<div class="hint">This is separate from your salary math — it\'s just so you never forget who helped you out.</div>'
+    );
+    sheet.querySelectorAll("[data-bname]").forEach(function(c){
+      c.addEventListener("click", function(){ $("#b-name").value = c.getAttribute("data-bname"); });
+    });
+    $("#b-save").addEventListener("click", function(){
+      var name = $("#b-name").value.trim();
+      var amt = parseFloat($("#b-amt").value);
+      if(!name){ toast("Who lent you the money?"); return; }
+      if(!(amt > 0)){ toast("Enter the amount"); return; }
+      amt = Math.round(amt*100)/100;
+      var d = null;
+      state.debts.forEach(function(x){ if(x.name.toLowerCase()===name.toLowerCase()) d = x; });
+      if(!d){ d = { id: uid(), name: name, balance: 0, log: [] }; state.debts.push(d); }
+      d.balance = Math.round((d.balance + amt)*100)/100;
+      d.log.push({ ts: Date.now(), amt: amt, dir: "b" });
+      save(); closeSheet(); render();
+      toast("You owe "+d.name+" "+fmt(d.balance));
+    });
+  }
+
+  function openDebtSheet(id){
+    var d = null;
+    state.debts.forEach(function(x){ if(x.id===id) d = x; });
+    if(!d) return;
+    var hist = (d.log||[]).slice(-6).reverse().map(function(l){
+      return '<div class="flow-row" style="padding:5px 0"><span class="lbl">'+(l.dir==="b"?"borrowed":"paid back")+
+        ' · '+new Date(l.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+'</span>' +
+        '<span class="val money" style="color:'+(l.dir==="b"?"var(--bad)":"var(--good)")+'">'+(l.dir==="b"?"+":"−")+fmt(l.amt)+'</span></div>';
+    }).join("");
+    openSheet(
+      '<h2>'+esc(d.name)+'</h2>' +
+      '<p style="color:var(--ink2); font-size:14px; margin:0 0 14px">'+(d.balance>0
+        ? 'You owe <b class="money" style="color:var(--bad)">'+fmt(d.balance)+'</b>'
+        : '<b style="color:var(--good)">All settled</b> — you owe nothing')+'</p>' +
+      '<div class="field"><input id="d2-amt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Amount"></div>' +
+      '<div class="row2">' +
+      '<button class="btn" id="d2-borrow">Borrowed more</button>' +
+      '<button class="btn primary" id="d2-repay">Paid back</button></div>' +
+      (hist? '<div class="micro" style="margin:4px 0 6px">History</div>'+hist : "") +
+      '<div style="height:12px"></div>' +
+      '<button class="btn danger ghost" id="d2-del">Remove '+esc(d.name)+'</button>'
+    );
+    function amount(){
+      var a = parseFloat($("#d2-amt").value);
+      if(!(a > 0)){ toast("Enter the amount first"); return 0; }
+      return Math.round(a*100)/100;
+    }
+    $("#d2-borrow").addEventListener("click", function(){
+      var a = amount(); if(!a) return;
+      d.balance = Math.round((d.balance + a)*100)/100;
+      d.log.push({ ts: Date.now(), amt: a, dir: "b" });
+      save(); closeSheet(); render(); toast("You owe "+d.name+" "+fmt(d.balance));
+    });
+    $("#d2-repay").addEventListener("click", function(){
+      var a = amount(); if(!a) return;
+      a = Math.min(a, d.balance);
+      d.balance = Math.round((d.balance - a)*100)/100;
+      d.log.push({ ts: Date.now(), amt: a, dir: "r" });
+      save(); closeSheet(); render();
+      toast(d.balance<=0 ? "All settled with "+d.name+"!" : "Still owe "+d.name+" "+fmt(d.balance));
+    });
+    var armed = false;
+    $("#d2-del").addEventListener("click", function(){
+      if(!armed){ armed = true; this.textContent = "Tap again to remove"; return; }
+      state.debts = state.debts.filter(function(x){ return x.id!==d.id; });
+      save(); closeSheet(); render();
+    });
   }
 
   function openSweepSheet(){
@@ -926,6 +1022,28 @@
       h += emptyBox(IC.repeat, 'Your loan payment, Netflix, Spotify, gym…<br>everything that leaves your account monthly.');
     }
     h += '<button class="addrow" id="p-add-cm">+ Add loan or subscription</button>';
+
+    /* informal debts — dad, friends */
+    var owed = debtTotal();
+    h += '<div class="sec"><span class="micro">Money you owe</span>' +
+      (owed>0? '<span class="micro money" style="color:var(--bad)">'+fmt(owed)+' total</span>' : "")+'</div>';
+    if(state.debts.length){
+      h += '<div class="row-list">';
+      state.debts.forEach(function(d){
+        var last = d.log && d.log.length ? d.log[d.log.length-1] : null;
+        var sub = d.balance<=0 ? "all settled" :
+          (last? (last.dir==="b"?"borrowed ":"paid back ")+fmt(last.amt)+" · "+new Date(last.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"}) : "");
+        h += '<button class="row-item" data-debt="'+d.id+'">' +
+          '<span class="ic-tile" style="color:var(--warn); background:color-mix(in srgb, var(--warn) 14%, var(--card2))">'+IC.person+'</span>' +
+          '<span class="name"><span class="ttl">'+esc(d.name)+'</span>' +
+          '<span class="subline"'+(d.balance<=0?' style="color:var(--good)"':"")+'>'+sub+'</span></span>' +
+          '<span class="amt money"'+(d.balance>0?' style="color:var(--bad)"':"")+'>'+fmt(d.balance)+'</span></button>';
+      });
+      h += '</div>';
+    }else{
+      h += emptyBox(IC.person, 'Spent more than you earned? If your dad or a friend<br>covered you, keep track of who you owe here.');
+    }
+    h += '<button class="addrow" id="p-add-debt">+ I borrowed money</button>';
 
     h += '<div class="sec"><span class="micro">Saving goals</span></div>';
     if(state.goals.length){
@@ -1518,6 +1636,17 @@
     });
     var sweepBtn = $("#h-sweep");
     if(sweepBtn) sweepBtn.addEventListener("click", openSweepSheet);
+    var borrowBtn = $("#h-borrow");
+    if(borrowBtn) borrowBtn.addEventListener("click", function(){
+      openBorrowSheet(parseFloat(this.getAttribute("data-amt")) || 0);
+    });
+    var oweBtn = $("#h-owe");
+    if(oweBtn) oweBtn.addEventListener("click", function(){ tab = "plan"; render(); window.scrollTo(0,0); });
+    shell.querySelectorAll("[data-debt]").forEach(function(b){
+      b.addEventListener("click", function(){ openDebtSheet(b.getAttribute("data-debt")); });
+    });
+    var addDebt = $("#p-add-debt");
+    if(addDebt) addDebt.addEventListener("click", function(){ openBorrowSheet(0); });
     shell.querySelectorAll("[data-hist]").forEach(function(b){
       b.addEventListener("click", function(){ histMode = b.getAttribute("data-hist"); openWk = null; render(); });
     });
@@ -1562,7 +1691,7 @@
         var copy = { setup:state.setup, budget:state.budget, currency:state.currency,
                      scanModel:state.scanModel, expenses:state.expenses,
                      salary:state.salary, commitments:state.commitments, goals:state.goals,
-                     swept:state.swept, payday:state.payday };  // apiKey deliberately excluded
+                     swept:state.swept, payday:state.payday, debts:state.debts };  // apiKey deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -1587,7 +1716,8 @@
                       commitments:Array.isArray(d.commitments)? d.commitments : [],
                       goals:Array.isArray(d.goals)? d.goals : [],
                       swept:(d.swept && typeof d.swept==="object")? d.swept : {},
-                      payday:+d.payday||0 };
+                      payday:+d.payday||0,
+                      debts:Array.isArray(d.debts)? d.debts : [] };
             save(); render(); toast("Backup restored — "+state.expenses.length+" expenses");
           }catch(e){ toast("That file isn't a Weekend Wallet backup"); }
         };
@@ -1597,7 +1727,7 @@
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-                  salary:0, commitments:[], goals:[], swept:{}, payday:0 };
+                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[] };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
       });
