@@ -1138,13 +1138,49 @@
       return Tesseract.createWorker("eng").then(function(w){ ocrWorker = w; return w; });
     });
   }
+  function rotatedDataUrl(img, deg){
+    var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    var cv = document.createElement("canvas");
+    if(deg === 180){ cv.width = w; cv.height = h; }
+    else { cv.width = h; cv.height = w; }
+    var ctx = cv.getContext("2d");
+    ctx.translate(cv.width/2, cv.height/2);
+    ctx.rotate(deg * Math.PI / 180);
+    ctx.drawImage(img, -w/2, -h/2);
+    return cv.toDataURL("image/jpeg", 0.8);
+  }
+  /* try upright first; if the text reads badly, retry the photo rotated —
+     receipts photographed sideways are common */
   function scanWithTesseract(dataUrl){
-    return getOcrWorker().then(function(w){ return w.recognize(dataUrl); })
-      .then(function(r){
-        var parsed = ReceiptParse.parseReceiptText(r && r.data ? r.data.text : "");
-        parsed.source = "ocr";
-        return parsed;
+    return new Promise(function(res, rej){
+      var img = new Image();
+      img.onload = function(){ res(img); };
+      img.onerror = function(){ rej(new Error("bad image")); };
+      img.src = dataUrl;
+    }).then(function(img){
+      return getOcrWorker().then(function(w){
+        var angles = [0, 90, 270];
+        var best = null;
+        function better(a, b){
+          if(!b) return true;
+          if(!!a.amount !== !!b.amount) return !!a.amount;
+          return (a.conf||0) > (b.conf||0);
+        }
+        function attempt(i){
+          if(i >= angles.length) return best;
+          var src = angles[i] === 0 ? dataUrl : rotatedDataUrl(img, angles[i]);
+          return w.recognize(src).then(function(r){
+            var parsed = ReceiptParse.parseReceiptText(r && r.data ? r.data.text : "");
+            parsed.source = "ocr";
+            parsed.conf = r && r.data ? (r.data.confidence || 0) : 0;
+            if(better(parsed, best)) best = parsed;
+            if(best.amount && best.conf >= 60) return best;   // confident — stop early
+            return attempt(i+1);
+          });
+        }
+        return attempt(0);
       });
+    });
   }
 
   function scanWithClaude(dataUrl){
@@ -1226,13 +1262,20 @@
       setPhotoUi("done");
       if(filled.length){
         toast((r.source==="ai" ? "Read by Claude" : "Scanned") + " — check the " + filled.join(", "));
+        if(r.source==="ocr" && (r.conf||0) < 55){
+          setTimeout(function(){
+            if(draft) toast("Low confidence — double-check the amount");
+          }, 3000);
+        }
       }else{
-        toast("Couldn't read the numbers — type the amount");
+        toast(state.apiKey ? "Couldn't read it — type the amount"
+                           : "Couldn't read it — handwriting needs Claude scanning (Settings)");
       }
     }).catch(function(){
       if(run !== scanRun || !draft) return;
       setPhotoUi("done");
-      toast("Couldn't read the receipt — type the amount");
+      toast(state.apiKey ? "Couldn't read the receipt — type the amount"
+                         : "Couldn't read it — try Claude scanning in Settings");
     });
   }
 
@@ -1251,7 +1294,8 @@
       s.textContent = "Tap to retake";
     }else{
       t.textContent = "Snap the receipt";
-      s.textContent = state.apiKey ? "Claude reads the amount for you" : "The amount fills in automatically";
+      s.textContent = state.apiKey ? "Claude reads it — even handwriting"
+                                   : "Best on printed receipts — Claude scan reads handwriting";
     }
   }
   function selectChip(catId){
