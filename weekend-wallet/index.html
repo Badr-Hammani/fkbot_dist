@@ -214,7 +214,10 @@
     border:1px solid var(--line); flex:none;
   }
   .pill.loan{color:var(--bad); border-color:color-mix(in srgb, var(--bad) 35%, transparent)}
-  .row-item .name{flex:1; min-width:0; font-weight:600; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .row-item .name{flex:1; min-width:0; font-weight:600; font-size:15px}
+  .row-item .name .ttl{display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .row-item .subline{display:block; white-space:normal; font-size:12px; font-weight:500; color:var(--ink3); line-height:1.4; margin-top:1px}
+  .row-item .subline.hl{color:var(--accent-deep); font-weight:700}
   .row-item .amt{font-weight:700; font-size:15px; flex:none}
   .row-item .amt small{font-weight:600; color:var(--ink3); font-size:11px}
   .addrow{
@@ -685,8 +688,8 @@
       up.forEach(function(u){
         var soon = u.days <= 1;
         h += '<button class="row-item" data-cm="'+u.c.id+'">' + kindTile(u.c.kind) +
-          '<span class="name">'+esc(u.c.name)+
-          '<br><span style="font-size:12px; font-weight:600; color:'+(soon?"var(--bad)":"var(--ink3)")+'">' +
+          '<span class="name"><span class="ttl">'+esc(u.c.name)+'</span>' +
+          '<span class="subline" style="'+(soon?"color:var(--bad); font-weight:700":"")+'">' +
           (u.days===0? "due today" : u.days===1? "due tomorrow" : "due in "+u.days+" days")+'</span></span>' +
           '<span class="amt money">'+fmt(u.c.amount)+'</span></button>';
       });
@@ -909,12 +912,13 @@
     if(state.commitments.length){
       h += '<div class="row-list">';
       state.commitments.forEach(function(c){
-        var sub = [c.kind==="loan"?"Loan":"Subscription"];
-        if(c.due) sub.push("due the "+c.due+(c.due===1?"st":c.due===2?"nd":c.due===3?"rd":c.due===21?"st":c.due===22?"nd":c.due===23?"rd":c.due===31?"st":"th"));
-        if(c.kind==="loan" && c.remaining > 0) sub.push(fmt(c.remaining)+" left · ≈ "+Math.max(Math.ceil(c.remaining/c.amount),1)+" months");
+        var ord = c.due===1||c.due===21||c.due===31 ? "st" : c.due===2||c.due===22 ? "nd" : c.due===3||c.due===23 ? "rd" : "th";
+        var sub1 = (c.kind==="loan"?"Loan":"Subscription") + (c.due? " · due the "+c.due+ord : "");
+        var months = c.kind==="loan" && c.remaining > 0 ? Math.max(Math.ceil(c.remaining/c.amount),1) : 0;
         h += '<button class="row-item" data-cm="'+c.id+'">' + kindTile(c.kind) +
-          '<span class="name">'+esc(c.name)+
-          '<br><span style="font-size:12px; font-weight:500; color:var(--ink3)">'+sub.join(" · ")+'</span></span>' +
+          '<span class="name"><span class="ttl">'+esc(c.name)+'</span>' +
+          '<span class="subline">'+sub1+'</span>' +
+          (months? '<span class="subline hl money">'+fmt(c.remaining)+' left · ≈ '+months+' month'+(months>1?"s":"")+' to go</span>' : "")+'</span>' +
           '<span class="amt money">'+fmt(c.amount)+' <small>/mo</small></span></button>';
       });
       h += '</div>';
