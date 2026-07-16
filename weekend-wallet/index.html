@@ -383,7 +383,7 @@
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "1.6";
+  var APP_VERSION = "1.7";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -526,6 +526,14 @@
   function debtTotal(){
     return state.debts.reduce(function(s,d){ return s + d.balance; }, 0);
   }
+  function borrowedThisMonth(){
+    var start = new Date(); start.setDate(1); start.setHours(0,0,0,0);
+    var t = start.getTime(), sum = 0;
+    state.debts.forEach(function(d){
+      (d.log||[]).forEach(function(l){ if(l.dir==="b" && l.ts >= t) sum += l.amt; });
+    });
+    return sum;
+  }
   function sweepInfo(){
     var fri = currentWeekend();
     if(isLiveWeekend(fri) || state.swept[fri] || !state.goals.length || !(state.budget>0)) return null;
@@ -655,9 +663,11 @@
         '<div class="meter">'+meterHtml(mSpent, Math.max(spendable,0))+
         '<div class="meter-row"><span>after your loan, subscriptions & savings</span>'+paydayChip()+'</div></div>' +
         '</section>';
-      if(mLeft < 0){
-        h += '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(Math.abs(mLeft))+'</b> over. If your dad or a friend covered you, keep track of it.</span>' +
-          '<button id="h-borrow" data-amt="'+Math.abs(Math.round(mLeft))+'">Log it</button></div>';
+      var uncovered = Math.abs(Math.min(mLeft, 0)) - borrowedThisMonth();
+      if(mLeft < 0 && uncovered >= 1){
+        h += '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(Math.abs(mLeft))+'</b> over' +
+          (borrowedThisMonth() > 0 ? ' — <b class="money">'+fmt(uncovered)+'</b> of it not logged yet.' : '. If your dad or a friend covered you, keep track of it.') +
+          '</span><button id="h-borrow" data-amt="'+Math.round(uncovered)+'">Log it</button></div>';
       }else if(debtTotal() > 0){
         h += '<div class="suggest"><span class="txt">You still owe <b class="money">'+fmt(debtTotal())+'</b> to '+
           state.debts.filter(function(d){return d.balance>0;}).map(function(d){return esc(d.name);}).join(", ")+'.</span>' +
@@ -762,6 +772,7 @@
       var amt = parseFloat($("#b-amt").value);
       if(!name){ toast("Who lent you the money?"); return; }
       if(!(amt > 0)){ toast("Enter the amount"); return; }
+      this.disabled = true;
       amt = Math.round(amt*100)/100;
       var d = null;
       state.debts.forEach(function(x){ if(x.name.toLowerCase()===name.toLowerCase()) d = x; });
@@ -793,8 +804,18 @@
       '<button class="btn primary" id="d2-repay">Paid back</button></div>' +
       (hist? '<div class="micro" style="margin:4px 0 6px">History</div>'+hist : "") +
       '<div style="height:12px"></div>' +
+      ((d.log||[]).length? '<button class="btn ghost" id="d2-undo" style="color:var(--ink2)">Undo last entry</button><div style="height:10px"></div>' : "") +
       '<button class="btn danger ghost" id="d2-del">Remove '+esc(d.name)+'</button>'
     );
+    var undoBtn = $("#d2-undo");
+    if(undoBtn) undoBtn.addEventListener("click", function(){
+      var last = d.log.pop();
+      if(!last) return;
+      d.balance = Math.round((d.balance + (last.dir==="b" ? -last.amt : last.amt))*100)/100;
+      if(d.balance < 0) d.balance = 0;
+      save(); closeSheet(); render();
+      toast("Removed — you owe "+d.name+" "+fmt(d.balance));
+    });
     function amount(){
       var a = parseFloat($("#d2-amt").value);
       if(!(a > 0)){ toast("Enter the amount first"); return 0; }
@@ -802,12 +823,14 @@
     }
     $("#d2-borrow").addEventListener("click", function(){
       var a = amount(); if(!a) return;
+      this.disabled = true;
       d.balance = Math.round((d.balance + a)*100)/100;
       d.log.push({ ts: Date.now(), amt: a, dir: "b" });
       save(); closeSheet(); render(); toast("You owe "+d.name+" "+fmt(d.balance));
     });
     $("#d2-repay").addEventListener("click", function(){
       var a = amount(); if(!a) return;
+      this.disabled = true;
       a = Math.min(a, d.balance);
       d.balance = Math.round((d.balance - a)*100)/100;
       d.log.push({ ts: Date.now(), amt: a, dir: "r" });
