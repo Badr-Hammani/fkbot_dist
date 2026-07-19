@@ -361,6 +361,19 @@
   }
   #toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
 
+  #updatebar{
+    position:fixed; top:0; left:0; right:0; z-index:200;
+    display:none; justify-content:center; align-items:center; gap:14px;
+    padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
+    background:var(--accent); color:var(--on-accent);
+    font-size:14px; font-weight:700;
+  }
+  #updatebar.show{display:flex}
+  #updatebar button{
+    background:var(--on-accent); color:var(--accent);
+    font-weight:800; font-size:13px; padding:7px 16px; border-radius:999px;
+  }
+
   .onb{padding-top:8vh}
   .onb .brand-mark{width:56px; height:56px; border-radius:18px; font-size:24px; margin-bottom:18px}
   .onb h1{font-size:32px; letter-spacing:-.03em; margin:0 0 8px; line-height:1.1; text-wrap:balance}
@@ -369,6 +382,7 @@
 </head>
 <body>
 
+<div id="updatebar"><span>A new version is ready</span><button id="updatebar-go">Update</button></div>
 <div id="shell"></div>
 
 <div class="backdrop" id="backdrop"></div>
@@ -377,13 +391,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js"></script>
+<script src="scan.js?v=1.9"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "1.8";
+  var APP_VERSION = "1.9";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1913,6 +1927,29 @@
   }
 
   render();
+
+  /* ---------- auto-update check ---------- */
+  var lastUpdateCheck = 0;
+  function checkForUpdate(){
+    var now = Date.now();
+    if(now - lastUpdateCheck < 5*60*1000) return;
+    lastUpdateCheck = now;
+    fetch("version.json?t=" + now, { cache: "no-store" })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(j && j.version && j.version !== APP_VERSION){
+          document.getElementById("updatebar").classList.add("show");
+        }
+      })
+      .catch(function(){});
+  }
+  document.getElementById("updatebar-go").addEventListener("click", function(){
+    location.replace(location.pathname + "?u=" + Date.now());
+  });
+  checkForUpdate();
+  document.addEventListener("visibilitychange", function(){
+    if(document.visibilityState === "visible") checkForUpdate();
+  });
 })();
 </script>
 </body>
