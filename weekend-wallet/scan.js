@@ -96,11 +96,11 @@
   }
 
   var CATEGORY_RULES = [
-    { cat: "food", re: /caf[eé]|coffee|restaurant|resto|pizz|burger|tacos|snack|grill|food|boulangerie|patisserie|p[aâ]tisserie|marjane|carrefour|acima|aswak|\bbim\b|market|supermarch/i },
-    { cat: "drinks", re: /\bbar\b|\bpub\b|lounge|brasserie|juice|jus\b/i },
-    { cat: "out", re: /cin[eé]ma|megarama|bowling|karting|club|billetterie|concert|spa\b|hammam/i },
-    { cat: "transport", re: /taxi|uber|careem|indrive|oncf|\bctm\b|tramway|\bbus\b|parking|autoroute|p[eé]age|afriquia|winxo|petromin|station|essence|gasoil|car\s*wash/i },
-    { cat: "shop", re: /zara|bershka|pull\s*&?\s*bear|kiabi|decathlon|electro|pharmacie|pharmacy|parfumerie|boutique|store|shop/i }
+    { cat: "drinks", re: /\bbar\b|\bpub\b|lounge|brasserie|bi[eè]re|beer|\bwine\b|cocktail|chicha|shisha|juice|jus\b|soda|coca|red\s*bull|monster/i },
+    { cat: "out", re: /cin[eé]|movie|megarama|bowling|karting|\bclub\b|billetterie|concert|festival|spa\b|hammam|game|gaming|playstation|ps5|match\b|foot\b|five\b|billard|pool\b|snooker|padel/i },
+    { cat: "transport", re: /taxi|uber|careem|indrive|bolt\b|oncf|\bctm\b|tram|train\b|\bbus\b|parking|autoroute|p[eé]age|afriquia|winxo|petromin|station|essence|gasoil|fuel|carburant|car\s*wash|moto\b/i },
+    { cat: "shop", re: /zara|bershka|pull\s*&?\s*bear|kiabi|decathlon|electro|pharmacie|pharmacy|parfumerie|boutique|store|shop|v[eê]tement|chaussure|shoes|sneaker|clothes|t-?shirt|jean\b|amazon|aliexpress|jumia|cadeau|gift\b|montre|watch\b/i },
+    { cat: "food", re: /caf[eé]|coffee|kahwa|9ahwa|restaurant|resto|pizz|burger|tacos|kebab|shawarma|panini|sandwich|sushi|pasta|couscous|taji?ne|tagine|snack|grill|food|breakfast|brunch|lunch|dinner|d[eé]jeuner|d[iî]ner|petit\s*dej|boulangerie|patisserie|p[aâ]tisserie|glovo|mcdo|mcdonald|kfc|dominos|marjane|carrefour|acima|aswak|\bbim\b|hanout|market|supermarch|grocer|[eé]picerie|fruit|l[eé]gume/i }
   ];
 
   function guessCategory(text) {
@@ -120,7 +120,7 @@
     };
   }
 
-  var api = { parseReceiptText: parseReceiptText, parseAmountToken: parseAmountToken };
+  var api = { parseReceiptText: parseReceiptText, parseAmountToken: parseAmountToken, guessCategory: guessCategory };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.ReceiptParse = api;
 })(typeof window !== "undefined" ? window : this);

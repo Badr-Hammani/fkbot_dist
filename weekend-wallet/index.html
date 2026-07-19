@@ -386,6 +386,11 @@
     pointer-events:none;
   }
   #toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  #toast.action{pointer-events:auto; display:flex; align-items:center; gap:12px}
+  #toast.action button{
+    background:var(--accent); color:var(--on-accent); font-weight:800; font-size:13px;
+    padding:6px 14px; border-radius:999px; flex:none;
+  }
 
   #updatebar{
     position:fixed; top:0; left:0; right:0; z-index:200;
@@ -417,13 +422,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=1.9"></script>
+<script src="scan.js?v=2.2"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "2.1";
+  var APP_VERSION = "2.2";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -462,6 +467,9 @@
         if(!s.swept || typeof s.swept !== "object") s.swept = {};
         if(typeof s.payday !== "number") s.payday = 0;
         if(!Array.isArray(s.debts)) s.debts = [];
+        if(typeof s.backupTs !== "number") s.backupTs = 0;
+        if(typeof s.nudgedAt !== "number") s.nudgedAt = 0;
+        if(typeof s.lastCat !== "string") s.lastCat = "";
         return s;
       }
     }catch(e){}
@@ -605,9 +613,25 @@
   /* ---------- toast ---------- */
   var toastTimer;
   function toast(msg){
-    var t = $("#toast"); t.textContent = msg; t.classList.add("show");
+    var t = $("#toast"); t.textContent = msg; t.classList.remove("action"); t.classList.add("show");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 2800);
+  }
+  function toastAction(msg, label, fn, ms){
+    var t = $("#toast");
+    t.innerHTML = "";
+    t.appendChild(document.createTextNode(msg));
+    var b = document.createElement("button");
+    b.textContent = label;
+    b.addEventListener("click", function(){
+      t.classList.remove("show","action");
+      clearTimeout(toastTimer);
+      fn();
+    });
+    t.appendChild(b);
+    t.classList.add("show","action");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove("show","action"); }, ms || 6000);
   }
 
   /* ---------- icons ---------- */
@@ -1667,7 +1691,7 @@
       }
       if(r.merchant && noteEl && !noteEl.value){ noteEl.value = r.merchant; filled.push("store"); }
       if(r.date && dateEl){ dateEl.value = r.date; filled.push("date"); }
-      if(r.category){ selectChip(r.category); }
+      if(r.category && !draft.catManual){ selectChip(r.category); }
       setPhotoUi("done");
       if(filled.length){
         toast((r.source==="ai" ? "Read by Claude" : "Scanned") + " — check the " + filled.join(", "));
@@ -1774,10 +1798,22 @@
     return h + '</div>';
   }
 
+  function noteSuggestions(){
+    var freq = {};
+    state.expenses.forEach(function(e){
+      var n = (e.note||"").trim();
+      if(n) freq[n] = (freq[n]||0) + 1;
+    });
+    return Object.keys(freq).sort(function(a,b){ return freq[b]-freq[a]; }).slice(0,8);
+  }
+
   function openAdd(editId){
     var editing = null;
     if(editId){ state.expenses.forEach(function(x){ if(x.id===editId) editing = x; }); }
-    draft = { cat: editing? editing.cat : "food", photo: editing? editing.photo : null, editId: editing? editing.id : null };
+    draft = { cat: editing? editing.cat : (state.lastCat || "food"),
+              photo: editing? editing.photo : null,
+              editId: editing? editing.id : null,
+              catManual: !!editing };
     var chips = CATS.map(function(c){
       return '<button class="chip'+(c.id===draft.cat?" sel":"")+'" data-cat="'+c.id+'">' +
         '<span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+c.name+'</button>';
@@ -1803,8 +1839,10 @@
       '<div class="chips" id="f-cats">'+chips+'</div>' +
       '<div class="row2">' +
       '<div><label class="micro" for="f-note" style="display:block; margin-bottom:6px">Note</label>' +
-      '<input id="f-note" type="text" placeholder="Dinner, taxi…" maxlength="60"' +
-      (editing && editing.note? ' value="'+esc(editing.note)+'"' : "")+'></div>' +
+      '<input id="f-note" type="text" placeholder="Dinner, taxi…" maxlength="60" list="note-suggestions"' +
+      (editing && editing.note? ' value="'+esc(editing.note)+'"' : "")+'>' +
+      '<datalist id="note-suggestions">' +
+      noteSuggestions().map(function(n){ return '<option value="'+esc(n)+'">'; }).join("")+'</datalist></div>' +
       '<div><label class="micro" for="f-date" style="display:block; margin-bottom:6px">Date</label>' +
       '<input id="f-date" type="date" value="'+(editing? editing.date : todayIso())+'"></div></div>' +
       '<button class="btn primary" id="f-save">'+(editing? "Save changes" : "Save expense")+'</button>'
@@ -1814,6 +1852,13 @@
     $("#f-cats").addEventListener("click", function(ev){
       var b = ev.target.closest("[data-cat]"); if(!b) return;
       selectChip(b.getAttribute("data-cat"));
+      draft.catManual = true;
+    });
+    /* smart category: guess from what you type ("taxi" -> Transport) */
+    $("#f-note").addEventListener("input", function(){
+      if(draft.catManual) return;
+      var g = window.ReceiptParse && ReceiptParse.guessCategory(this.value);
+      if(g) selectChip(g);
     });
     $("#f-quicks").addEventListener("click", function(ev){
       var b = ev.target.closest("[data-quick]"); if(!b) return;
@@ -1848,6 +1893,7 @@
       date: $("#f-date").value || todayIso(),
       photo: draft.photo
     };
+    state.lastCat = e.cat;
     state.expenses.push(e);
     if(save({retryWithoutPhoto:e})){
       var wk = weekendKeyOf(e.date);
@@ -1904,10 +1950,21 @@
       '<dt>Date</dt><dd>'+fromIso(e.date).toLocaleDateString(undefined,{weekday:"short", day:"numeric", month:"short", year:"numeric"})+'</dd>' +
       '<dt>Weekend</dt><dd>'+weekendLabel(weekendOf(e.date), true)+'</dd>' +
       '</dl>' +
+      '<button class="btn primary" id="d-again">Log this again today</button>' +
+      '<div style="height:10px"></div>' +
       '<button class="btn" id="d-edit">'+IC.pencil+' Edit expense</button>' +
       '<div style="height:10px"></div>' +
       '<button class="btn danger ghost" id="d-del">Delete expense</button>'
     );
+    $("#d-again").addEventListener("click", function(){
+      this.disabled = true;
+      var copy = { id: uid(), ts: Date.now(), amount: e.amount, cat: e.cat,
+                   note: e.note, date: todayIso(), photo: null };
+      state.lastCat = e.cat;
+      state.expenses.push(copy);
+      save(); closeSheet(); render();
+      toast("Logged again — "+fmt(e.amount));
+    });
     $("#d-edit").addEventListener("click", function(){ openAdd(e.id); });
     if(e.photo){
       $("#d-photo").addEventListener("click", function(){
@@ -1916,14 +1973,14 @@
       });
     }
     $("#d-del").addEventListener("click", function(){
-      if(pendingDelete !== e.id){
-        pendingDelete = e.id;
-        this.textContent = "Tap again to confirm";
-        return;
-      }
+      this.disabled = true;
       state.expenses = state.expenses.filter(function(x){ return x.id!==e.id; });
       save(); closeSheet(); render();
-      toast("Deleted");
+      toastAction("Deleted "+fmt(e.amount), "Undo", function(){
+        state.expenses.push(e);
+        save(); render();
+        toast("Restored");
+      });
     });
   }
 
@@ -2036,6 +2093,8 @@
         a.download = "weekend-wallet-backup-" + todayIso() + ".json";
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+        state.backupTs = Date.now();
+        save();
         toast("Backup downloaded");
       });
       $("#s-import").addEventListener("click", function(){ $("#s-import-file").click(); });
@@ -2096,6 +2155,19 @@
   document.addEventListener("visibilitychange", function(){
     if(document.visibilityState === "visible") checkForUpdate();
   });
+
+  /* gentle backup reminder — data only lives on this phone */
+  setTimeout(function(){
+    var TWO_WEEKS = 14*24*3600*1000;
+    var last = Math.max(state.backupTs, state.nudgedAt);
+    if(state.setup && state.expenses.length >= 10 && Date.now() - last > TWO_WEEKS){
+      state.nudgedAt = Date.now();
+      save();
+      toastAction("Protect your data — download a backup", "Go", function(){
+        tab = "settings"; render(); window.scrollTo(0, 0);
+      }, 8000);
+    }
+  }, 2500);
 })();
 </script>
 </body>
