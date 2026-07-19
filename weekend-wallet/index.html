@@ -383,7 +383,7 @@
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "1.7";
+  var APP_VERSION = "1.8";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -523,8 +523,29 @@
     out.sort(function(a,b){ return a.days-b.days; });
     return out;
   }
-  function debtTotal(){
-    return state.debts.reduce(function(s,d){ return s + d.balance; }, 0);
+  /* net ledger per person: balance > 0 = I owe them, < 0 = they owe me */
+  function iOweTotal(){
+    return state.debts.reduce(function(s,d){ return s + Math.max(d.balance, 0); }, 0);
+  }
+  function owedToMeTotal(){
+    return state.debts.reduce(function(s,d){ return s + Math.max(-d.balance, 0); }, 0);
+  }
+  function debtTotal(){ return iOweTotal(); }
+  function findOrCreatePerson(name){
+    var d = null;
+    state.debts.forEach(function(x){ if(x.name.toLowerCase()===name.toLowerCase()) d = x; });
+    if(!d){ d = { id: uid(), name: name, balance: 0, log: [] }; state.debts.push(d); }
+    return d;
+  }
+  /* dir 'b' = they gave me money (my debt grows), 'r' = I gave them money */
+  function ledgerAdd(d, dir, amt, note){
+    d.balance = Math.round((d.balance + (dir==="b" ? amt : -amt))*100)/100;
+    d.log.push({ ts: Date.now(), amt: amt, dir: dir, note: note || "" });
+  }
+  function balanceLabel(d){
+    if(d.balance > 0) return 'you owe <b class="money" style="color:var(--bad)">'+fmt(d.balance)+'</b>';
+    if(d.balance < 0) return 'owes you <b class="money" style="color:var(--good)">'+fmt(-d.balance)+'</b>';
+    return '<b style="color:var(--good)">all settled</b>';
   }
   function borrowedThisMonth(){
     var start = new Date(); start.setDate(1); start.setHours(0,0,0,0);
@@ -668,9 +689,13 @@
         h += '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(Math.abs(mLeft))+'</b> over' +
           (borrowedThisMonth() > 0 ? ' — <b class="money">'+fmt(uncovered)+'</b> of it not logged yet.' : '. If your dad or a friend covered you, keep track of it.') +
           '</span><button id="h-borrow" data-amt="'+Math.round(uncovered)+'">Log it</button></div>';
-      }else if(debtTotal() > 0){
-        h += '<div class="suggest"><span class="txt">You still owe <b class="money">'+fmt(debtTotal())+'</b> to '+
-          state.debts.filter(function(d){return d.balance>0;}).map(function(d){return esc(d.name);}).join(", ")+'.</span>' +
+      }else if(iOweTotal() > 0 || owedToMeTotal() > 0){
+        var bits = [];
+        if(iOweTotal() > 0) bits.push('you owe <b class="money">'+fmt(iOweTotal())+'</b> ('+
+          state.debts.filter(function(d){return d.balance>0;}).map(function(d){return esc(d.name);}).join(", ")+')');
+        if(owedToMeTotal() > 0) bits.push('friends owe you <b class="money">'+fmt(owedToMeTotal())+'</b> ('+
+          state.debts.filter(function(d){return d.balance<0;}).map(function(d){return esc(d.name);}).join(", ")+')');
+        h += '<div class="suggest"><span class="txt">'+bits.join(" · ").replace(/^y/,"Y")+'.</span>' +
           '<button id="h-owe">Manage</button></div>';
       }
     }else{
@@ -750,38 +775,43 @@
     return h;
   }
 
+  function toastBalance(d){
+    toast(d.balance > 0 ? "You owe "+d.name+" "+fmt(d.balance)
+        : d.balance < 0 ? d.name+" owes you "+fmt(-d.balance)
+        : "All settled with "+d.name+"!");
+  }
+
   function openBorrowSheet(prefillAmt){
     var chips = state.debts.map(function(d){
       return '<button class="chip" data-bname="'+esc(d.name)+'">'+IC.person+esc(d.name)+'</button>';
     }).join("");
     openSheet(
-      '<h2>I borrowed money</h2>' +
-      '<div class="field"><label class="micro" for="b-name">From who?</label>' +
+      '<h2>Money in / out</h2>' +
+      '<div class="field"><label class="micro" for="b-name">With who?</label>' +
       '<input id="b-name" type="text" placeholder="Dad, Ahmed…" maxlength="30"></div>' +
       (chips? '<div class="chips">'+chips+'</div>' : "") +
       '<div class="field"><label class="micro" for="b-amt">How much?</label>' +
       '<input id="b-amt" type="number" inputmode="decimal" min="0" step="0.01"'+(prefillAmt>0? ' value="'+prefillAmt+'"':"")+'></div>' +
-      '<button class="btn primary" id="b-save">Add to what I owe</button>' +
-      '<div class="hint">This is separate from your salary math — it\'s just so you never forget who helped you out.</div>'
+      '<div class="row2">' +
+      '<button class="btn" id="b-igave">I gave them</button>' +
+      '<button class="btn primary" id="b-theygave">They gave me</button></div>' +
+      '<div class="hint">One balance per person covers everything — lending, borrowing and paying back. Giving money always moves the balance your way.</div>'
     );
     sheet.querySelectorAll("[data-bname]").forEach(function(c){
       c.addEventListener("click", function(){ $("#b-name").value = c.getAttribute("data-bname"); });
     });
-    $("#b-save").addEventListener("click", function(){
+    function submit(dir, btn){
       var name = $("#b-name").value.trim();
       var amt = parseFloat($("#b-amt").value);
-      if(!name){ toast("Who lent you the money?"); return; }
+      if(!name){ toast("Who was it with?"); return; }
       if(!(amt > 0)){ toast("Enter the amount"); return; }
-      this.disabled = true;
-      amt = Math.round(amt*100)/100;
-      var d = null;
-      state.debts.forEach(function(x){ if(x.name.toLowerCase()===name.toLowerCase()) d = x; });
-      if(!d){ d = { id: uid(), name: name, balance: 0, log: [] }; state.debts.push(d); }
-      d.balance = Math.round((d.balance + amt)*100)/100;
-      d.log.push({ ts: Date.now(), amt: amt, dir: "b" });
-      save(); closeSheet(); render();
-      toast("You owe "+d.name+" "+fmt(d.balance));
-    });
+      btn.disabled = true;
+      var d = findOrCreatePerson(name);
+      ledgerAdd(d, dir, Math.round(amt*100)/100, "");
+      save(); closeSheet(); render(); toastBalance(d);
+    }
+    $("#b-igave").addEventListener("click", function(){ submit("r", this); });
+    $("#b-theygave").addEventListener("click", function(){ submit("b", this); });
   }
 
   function openDebtSheet(id){
@@ -789,19 +819,18 @@
     state.debts.forEach(function(x){ if(x.id===id) d = x; });
     if(!d) return;
     var hist = (d.log||[]).slice(-6).reverse().map(function(l){
-      return '<div class="flow-row" style="padding:5px 0"><span class="lbl">'+(l.dir==="b"?"borrowed":"paid back")+
+      return '<div class="flow-row" style="padding:5px 0"><span class="lbl">'+(l.dir==="b"?"they gave":"you gave")+
+        (l.note? " · "+esc(l.note) : "")+
         ' · '+new Date(l.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+'</span>' +
         '<span class="val money" style="color:'+(l.dir==="b"?"var(--bad)":"var(--good)")+'">'+(l.dir==="b"?"+":"−")+fmt(l.amt)+'</span></div>';
     }).join("");
     openSheet(
       '<h2>'+esc(d.name)+'</h2>' +
-      '<p style="color:var(--ink2); font-size:14px; margin:0 0 14px">'+(d.balance>0
-        ? 'You owe <b class="money" style="color:var(--bad)">'+fmt(d.balance)+'</b>'
-        : '<b style="color:var(--good)">All settled</b> — you owe nothing')+'</p>' +
+      '<p style="color:var(--ink2); font-size:14px; margin:0 0 14px">'+balanceLabel(d)+'</p>' +
       '<div class="field"><input id="d2-amt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Amount"></div>' +
       '<div class="row2">' +
-      '<button class="btn" id="d2-borrow">Borrowed more</button>' +
-      '<button class="btn primary" id="d2-repay">Paid back</button></div>' +
+      '<button class="btn" id="d2-igave">I gave them</button>' +
+      '<button class="btn primary" id="d2-theygave">They gave me</button></div>' +
       (hist? '<div class="micro" style="margin:4px 0 6px">History</div>'+hist : "") +
       '<div style="height:12px"></div>' +
       ((d.log||[]).length? '<button class="btn ghost" id="d2-undo" style="color:var(--ink2)">Undo last entry</button><div style="height:10px"></div>' : "") +
@@ -812,36 +841,149 @@
       var last = d.log.pop();
       if(!last) return;
       d.balance = Math.round((d.balance + (last.dir==="b" ? -last.amt : last.amt))*100)/100;
-      if(d.balance < 0) d.balance = 0;
-      save(); closeSheet(); render();
-      toast("Removed — you owe "+d.name+" "+fmt(d.balance));
+      save(); closeSheet(); render(); toastBalance(d);
     });
-    function amount(){
+    function submit(dir, btn){
       var a = parseFloat($("#d2-amt").value);
-      if(!(a > 0)){ toast("Enter the amount first"); return 0; }
-      return Math.round(a*100)/100;
+      if(!(a > 0)){ toast("Enter the amount first"); return; }
+      btn.disabled = true;
+      ledgerAdd(d, dir, Math.round(a*100)/100, "");
+      save(); closeSheet(); render(); toastBalance(d);
     }
-    $("#d2-borrow").addEventListener("click", function(){
-      var a = amount(); if(!a) return;
-      this.disabled = true;
-      d.balance = Math.round((d.balance + a)*100)/100;
-      d.log.push({ ts: Date.now(), amt: a, dir: "b" });
-      save(); closeSheet(); render(); toast("You owe "+d.name+" "+fmt(d.balance));
-    });
-    $("#d2-repay").addEventListener("click", function(){
-      var a = amount(); if(!a) return;
-      this.disabled = true;
-      a = Math.min(a, d.balance);
-      d.balance = Math.round((d.balance - a)*100)/100;
-      d.log.push({ ts: Date.now(), amt: a, dir: "r" });
-      save(); closeSheet(); render();
-      toast(d.balance<=0 ? "All settled with "+d.name+"!" : "Still owe "+d.name+" "+fmt(d.balance));
-    });
+    $("#d2-igave").addEventListener("click", function(){ submit("r", this); });
+    $("#d2-theygave").addEventListener("click", function(){ submit("b", this); });
     var armed = false;
     $("#d2-del").addEventListener("click", function(){
       if(!armed){ armed = true; this.textContent = "Tap again to remove"; return; }
       state.debts = state.debts.filter(function(x){ return x.id!==d.id; });
       save(); closeSheet(); render();
+    });
+  }
+
+  /* ---------- split a bill ---------- */
+  function openSplitSheet(){
+    var people = state.debts.map(function(d){ return d.name; });
+    var selected = { "Me": true };
+    var payer = "Me";
+
+    function chipRow(idPrefix){
+      var all = ["Me"].concat(people);
+      return all.map(function(n){
+        var sel = idPrefix==="pay" ? (payer===n) : !!selected[n];
+        return '<button class="chip'+(sel?" sel":"")+'" data-'+idPrefix+'="'+esc(n)+'">'+
+          (n==="Me"? "" : IC.person)+esc(n)+'</button>';
+      }).join("");
+    }
+    var catChips = CATS.map(function(c){
+      return '<button class="chip'+(c.id==="out"?" sel":"")+'" data-spcat="'+c.id+'">' +
+        '<span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+c.name+'</button>';
+    }).join("");
+
+    openSheet(
+      '<h2>Split a bill</h2>' +
+      '<div class="row2">' +
+      '<div><label class="micro" for="sp-total" style="display:block; margin-bottom:6px">Total paid</label>' +
+      '<input id="sp-total" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0"></div>' +
+      '<div><label class="micro" for="sp-note" style="display:block; margin-bottom:6px">What for</label>' +
+      '<input id="sp-note" type="text" placeholder="Dinner, taxi…" maxlength="40"></div></div>' +
+      '<div class="micro" style="margin-bottom:8px">Split between</div>' +
+      '<div class="chips" id="sp-people">'+chipRow("who")+'</div>' +
+      '<div class="row2" style="margin-top:-4px">' +
+      '<input id="sp-newname" type="text" placeholder="Add a friend…" maxlength="30">' +
+      '<button class="btn" id="sp-addperson" style="padding:12px">Add</button></div>' +
+      '<div class="micro" style="margin-bottom:8px">Who paid the bill?</div>' +
+      '<div class="chips" id="sp-payer">'+chipRow("pay")+'</div>' +
+      '<div class="micro" style="margin-bottom:8px">Category (for your share)</div>' +
+      '<div class="chips" id="sp-cats">'+catChips+'</div>' +
+      '<div class="suggest" style="margin-bottom:14px"><span class="txt" id="sp-preview">Enter the total and pick who was there.</span></div>' +
+      '<button class="btn primary" id="sp-save">Save split</button>'
+    );
+
+    var spCat = "out";
+    function participants(){ return Object.keys(selected).filter(function(n){ return selected[n]; }); }
+    function preview(){
+      var t = parseFloat($("#sp-total").value) || 0;
+      var parts = participants();
+      var el = $("#sp-preview");
+      if(!(t > 0) || !parts.length){ el.textContent = "Enter the total and pick who was there."; return; }
+      if(payer !== "Me" && !selected["Me"] ){ el.textContent = "This one doesn't involve you — nothing to track."; return; }
+      var share = Math.round(t / parts.length * 100) / 100;
+      var lines = ["Each pays "+fmt(share)+"."];
+      if(payer === "Me"){
+        var owed = parts.filter(function(n){ return n!=="Me"; });
+        if(owed.length) lines.push(owed.join(", ")+(owed.length>1?" each owe you ":" owes you ")+fmt(share)+".");
+        if(selected["Me"]) lines.push("Your share "+fmt(share)+" goes to your expenses.");
+      }else{
+        lines.push("You owe "+payer+" "+fmt(share)+" — your share goes to your expenses.");
+      }
+      el.textContent = lines.join(" ");
+    }
+    function rebuildChips(){
+      $("#sp-people").innerHTML = chipRow("who");
+      $("#sp-payer").innerHTML = chipRow("pay");
+      bindChips();
+      preview();
+    }
+    function bindChips(){
+      sheet.querySelectorAll("[data-who]").forEach(function(c){
+        c.addEventListener("click", function(){
+          var n = c.getAttribute("data-who");
+          selected[n] = !selected[n];
+          c.classList.toggle("sel", selected[n]);
+          preview();
+        });
+      });
+      sheet.querySelectorAll("[data-pay]").forEach(function(c){
+        c.addEventListener("click", function(){
+          payer = c.getAttribute("data-pay");
+          sheet.querySelectorAll("[data-pay]").forEach(function(x){ x.classList.toggle("sel", x===c); });
+          preview();
+        });
+      });
+    }
+    bindChips();
+    $("#sp-total").addEventListener("input", preview);
+    $("#sp-addperson").addEventListener("click", function(){
+      var n = $("#sp-newname").value.trim();
+      if(!n){ toast("Type the friend's name"); return; }
+      if(n.toLowerCase()==="me"){ toast("You're already here"); return; }
+      var exists = people.some(function(p){ return p.toLowerCase()===n.toLowerCase(); });
+      if(!exists) people.push(n);
+      selected[n] = true;
+      $("#sp-newname").value = "";
+      rebuildChips();
+    });
+    $("#sp-cats").addEventListener("click", function(ev){
+      var b = ev.target.closest("[data-spcat]"); if(!b) return;
+      spCat = b.getAttribute("data-spcat");
+      sheet.querySelectorAll("[data-spcat]").forEach(function(x){ x.classList.toggle("sel", x===b); });
+    });
+    $("#sp-save").addEventListener("click", function(){
+      var t = parseFloat($("#sp-total").value);
+      var parts = participants();
+      var note = $("#sp-note").value.trim() || "split";
+      if(!(t > 0)){ toast("Enter the total"); return; }
+      if(!parts.length){ toast("Pick who was there"); return; }
+      if(payer !== "Me" && !selected["Me"]){ toast("This split doesn't involve you"); return; }
+      if(payer === "Me" && parts.length === 1 && selected["Me"]){ toast("Just you? Log it as a normal expense with +"); return; }
+      this.disabled = true;
+      var share = Math.round(t / parts.length * 100) / 100;
+      if(payer === "Me"){
+        parts.forEach(function(n){
+          if(n === "Me") return;
+          ledgerAdd(findOrCreatePerson(n), "r", share, note);   // I covered their share
+        });
+      }else{
+        ledgerAdd(findOrCreatePerson(payer), "b", share, note); // they covered my share
+      }
+      if(selected["Me"]){
+        state.expenses.push({ id: uid(), ts: Date.now(), amount: share, cat: spCat,
+                              note: note, date: todayIso(), photo: null });
+      }
+      save(); closeSheet(); render();
+      toast(payer === "Me"
+        ? "Split saved — friends owe you "+fmt(Math.round(share*(parts.length-(selected["Me"]?1:0))*100)/100)
+        : "Split saved — you owe "+payer+" "+fmt(share));
     });
   }
 
@@ -1047,27 +1189,36 @@
     }
     h += '<button class="addrow" id="p-add-cm">+ Add loan or subscription</button>';
 
-    /* informal debts — dad, friends */
-    var owed = debtTotal();
-    h += '<div class="sec"><span class="micro">Money you owe</span>' +
-      (owed>0? '<span class="micro money" style="color:var(--bad)">'+fmt(owed)+' total</span>' : "")+'</div>';
+    /* friends & family ledger */
+    var iOwe = iOweTotal(), owedMe = owedToMeTotal();
+    var totals = [];
+    if(iOwe > 0) totals.push('<span style="color:var(--bad)">you owe '+fmt(iOwe)+'</span>');
+    if(owedMe > 0) totals.push('<span style="color:var(--good)">owed to you '+fmt(owedMe)+'</span>');
+    h += '<div class="sec"><span class="micro">Friends & family</span>' +
+      (totals.length? '<span class="micro money">'+totals.join(" · ")+'</span>' : "")+'</div>';
     if(state.debts.length){
       h += '<div class="row-list">';
       state.debts.forEach(function(d){
         var last = d.log && d.log.length ? d.log[d.log.length-1] : null;
-        var sub = d.balance<=0 ? "all settled" :
-          (last? (last.dir==="b"?"borrowed ":"paid back ")+fmt(last.amt)+" · "+new Date(last.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"}) : "");
+        var sub = last
+          ? (last.dir==="b" ? "they gave " : "you gave ")+fmt(last.amt)+
+            (last.note? " · "+esc(last.note) : "")+" · "+new Date(last.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})
+          : "no activity yet";
+        var tint = d.balance > 0 ? "--bad" : d.balance < 0 ? "--good" : "--warn";
         h += '<button class="row-item" data-debt="'+d.id+'">' +
-          '<span class="ic-tile" style="color:var(--warn); background:color-mix(in srgb, var(--warn) 14%, var(--card2))">'+IC.person+'</span>' +
+          '<span class="ic-tile" style="color:var('+tint+'); background:color-mix(in srgb, var('+tint+') 14%, var(--card2))">'+IC.person+'</span>' +
           '<span class="name"><span class="ttl">'+esc(d.name)+'</span>' +
-          '<span class="subline"'+(d.balance<=0?' style="color:var(--good)"':"")+'>'+sub+'</span></span>' +
-          '<span class="amt money"'+(d.balance>0?' style="color:var(--bad)"':"")+'>'+fmt(d.balance)+'</span></button>';
+          '<span class="subline">'+sub+'</span></span>' +
+          '<span class="amt money" style="color:'+(d.balance>0?"var(--bad)":d.balance<0?"var(--good)":"var(--ink2)")+'">' +
+          (d.balance<0? fmt(-d.balance) : fmt(d.balance))+
+          '<br><small style="font-weight:600; color:var(--ink3)">'+(d.balance>0?"you owe":d.balance<0?"owes you":"settled")+'</small></span></button>';
       });
       h += '</div>';
     }else{
-      h += emptyBox(IC.person, 'Spent more than you earned? If your dad or a friend<br>covered you, keep track of who you owe here.');
+      h += emptyBox(IC.person, 'Lend a friend money, split a dinner, borrow from your dad —<br>keep every balance straight here.');
     }
-    h += '<button class="addrow" id="p-add-debt">+ I borrowed money</button>';
+    h += '<button class="addrow" id="p-add-split">+ Split a bill</button>' +
+      '<button class="addrow" id="p-add-debt">+ Money in / out</button>';
 
     h += '<div class="sec"><span class="micro">Saving goals</span></div>';
     if(state.goals.length){
@@ -1672,6 +1823,8 @@
     });
     var addDebt = $("#p-add-debt");
     if(addDebt) addDebt.addEventListener("click", function(){ openBorrowSheet(0); });
+    var addSplit = $("#p-add-split");
+    if(addSplit) addSplit.addEventListener("click", openSplitSheet);
     shell.querySelectorAll("[data-hist]").forEach(function(b){
       b.addEventListener("click", function(){ histMode = b.getAttribute("data-hist"); openWk = null; render(); });
     });
