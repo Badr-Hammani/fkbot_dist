@@ -149,6 +149,23 @@
     font-variant-numeric:tabular-nums;
   }
   .qamts button:active{background:color-mix(in srgb, var(--accent) 18%, var(--card2))}
+  .qa-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .qa-tile{
+    background:var(--card2); border:1px solid var(--line); border-radius:18px;
+    padding:20px 12px 16px; display:flex; flex-direction:column; align-items:center; gap:9px;
+    font-weight:700; font-size:14px; color:var(--ink);
+  }
+  .qa-tile svg{width:27px; height:27px; color:var(--accent-deep)}
+  .qa-tile:active{transform:scale(.96); background:color-mix(in srgb, var(--accent) 12%, var(--card2))}
+  .task{display:flex; align-items:center; gap:12px; width:100%; text-align:left; padding:13px 14px; border-bottom:1px solid var(--line)}
+  .task:last-child{border-bottom:0}
+  .task:active{background:var(--card2)}
+  .task svg{width:21px; height:21px; flex:none}
+  .task .tx{flex:1; font-weight:600; font-size:14.5px}
+  .task.done .tx{color:var(--ink3); text-decoration:line-through}
+  .task.done svg:first-child{color:var(--good)}
+  .task:not(.done) svg:first-child{color:var(--accent-deep)}
+  .task .go{color:var(--ink3); width:17px; height:17px}
   .share-row{display:flex; align-items:center; gap:12px; margin-bottom:8px}
   .share-row .nm{flex:1; font-weight:600; font-size:14.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .share-row input{width:120px; flex:none; padding:10px 12px}
@@ -304,6 +321,12 @@
   .sheet.show{transform:translateY(0)}
   @media (prefers-reduced-motion: reduce){ .sheet{transition:none} .backdrop{transition:none} }
   .grab{width:40px; height:5px; border-radius:3px; background:var(--line); margin:0 auto 14px}
+  .sheet-x{
+    position:absolute; top:14px; right:16px; width:34px; height:34px; border-radius:50%;
+    background:var(--card2); color:var(--ink2); display:grid; place-items:center;
+    font-size:17px; font-weight:700; line-height:1; z-index:5;
+  }
+  .sheet-x:active{background:var(--line)}
   .sheet h2{margin:0 0 14px; font-size:19px; letter-spacing:-.01em}
 
   .amount-wrap{position:relative; margin-bottom:14px}
@@ -400,7 +423,7 @@
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "2.0";
+  var APP_VERSION = "2.1";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -607,7 +630,10 @@
     download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5V15M8 11.5l4 3.5 4-3.5"/><path d="M5 18.5h14"/></svg>',
     trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5h15M9 6.5V4.8A1.3 1.3 0 0 1 10.3 3.5h3.4A1.3 1.3 0 0 1 15 4.8v1.7M6.5 6.5 7.5 20a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4l1-13.5"/></svg>',
     pencil:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14.5 5 4.5 4.5L8.5 20H4v-4.5L14.5 5Z"/><path d="m12.5 7 4.5 4.5"/></svg>',
-    person:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M5 20.5c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg>'
+    person:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M5 20.5c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg>',
+    split:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-8L5.5 6.5M12 13l6.5-6.5"/><path d="M5 10V6.5H8.5M19 10V6.5H15.5"/></svg>',
+    check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.7 2.7L16 9.5"/></svg>',
+    chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg>'
   };
   var CAT_IC = {
     food:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v7a2 2 0 0 0 2 2v9M11 3v7a2 2 0 0 1-2 2M7 3v4M17 3c-1.7 0-3 2-3 5v4h3v9M17 3v18"/></svg>',
@@ -687,6 +713,8 @@
     var mSpent = monthSpent();
     var tSpent = spentOn(todayIso());
     var h = "";
+
+    h += setupChecklist();
 
     /* month hero */
     if(state.salary > 0){
@@ -1693,7 +1721,8 @@
   var draft = null;
 
   function openSheet(html){
-    sheet.innerHTML = '<div class="grab"></div>' + html;
+    sheet.innerHTML = '<div class="grab"></div><button class="sheet-x" aria-label="Close">✕</button>' + html;
+    sheet.querySelector(".sheet-x").addEventListener("click", closeSheet);
     backdrop.classList.add("show");
     requestAnimationFrame(function(){ sheet.classList.add("show"); });
   }
@@ -1704,6 +1733,46 @@
     scanRun++;
   }
   backdrop.addEventListener("click", closeSheet);
+
+  function openQuickAdd(){
+    openSheet(
+      '<h2>Add something</h2>' +
+      '<div class="qa-grid">' +
+      '<button class="qa-tile" id="qa-expense">'+IC.receipt+'Expense</button>' +
+      '<button class="qa-tile" id="qa-snap">'+IC.camera+'Snap receipt</button>' +
+      '<button class="qa-tile" id="qa-split">'+IC.split+'Split a bill</button>' +
+      '<button class="qa-tile" id="qa-friend">'+IC.person+'Friend money</button>' +
+      '</div>'
+    );
+    $("#qa-expense").addEventListener("click", function(){ openAdd(); });
+    $("#qa-snap").addEventListener("click", function(){
+      openAdd();
+      setTimeout(function(){ camera.click(); }, 250);
+    });
+    $("#qa-split").addEventListener("click", openSplitSheet);
+    $("#qa-friend").addEventListener("click", function(){ openBorrowSheet(0); });
+  }
+
+  function setupChecklist(){
+    var items = [
+      { done: state.salary > 0,            label: "Set your monthly salary",        go: "plan" },
+      { done: state.commitments.length > 0, label: "Add your loan & subscriptions", go: "plan" },
+      { done: state.budget > 0,            label: "Set a weekend budget",           go: "plan" },
+      { done: state.expenses.length > 0,   label: "Log your first expense",         go: "add" }
+    ];
+    var open = items.filter(function(i){ return !i.done; });
+    if(!open.length) return "";
+    var doneCount = items.length - open.length;
+    var h = '<div class="sec"><span class="micro">Getting started</span>' +
+      '<span class="micro">'+doneCount+' of '+items.length+' done</span></div><div class="row-list">';
+    items.forEach(function(i, idx){
+      h += '<button class="task'+(i.done?" done":"")+'" data-task="'+(i.done?"":i.go)+'">' +
+        (i.done? IC.check : IC.chev.replace("m9.5","m9.5")) +
+        '<span class="tx">'+i.label+'</span>' +
+        (i.done? "" : '<span class="go">'+IC.chev+'</span>')+'</button>';
+    });
+    return h + '</div>';
+  }
 
   function openAdd(editId){
     var editing = null;
@@ -1864,7 +1933,15 @@
   /* ---------- view event wiring ---------- */
   function bindView(){
     var add = $("#open-add");
-    if(add) add.addEventListener("click", function(){ openAdd(); });
+    if(add) add.addEventListener("click", openQuickAdd);
+    shell.querySelectorAll("[data-task]").forEach(function(b){
+      b.addEventListener("click", function(){
+        var go = b.getAttribute("data-task");
+        if(!go) return;
+        if(go === "add"){ openQuickAdd(); return; }
+        tab = go; render(); window.scrollTo(0,0);
+      });
+    });
     shell.querySelectorAll("[data-tab]").forEach(function(b){
       b.addEventListener("click", function(){ tab = b.getAttribute("data-tab"); openWk = null; render(); window.scrollTo(0,0); });
     });
