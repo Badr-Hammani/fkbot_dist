@@ -149,6 +149,9 @@
     font-variant-numeric:tabular-nums;
   }
   .qamts button:active{background:color-mix(in srgb, var(--accent) 18%, var(--card2))}
+  .share-row{display:flex; align-items:center; gap:12px; margin-bottom:8px}
+  .share-row .nm{flex:1; font-weight:600; font-size:14.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .share-row input{width:120px; flex:none; padding:10px 12px}
   .btn.ghost{background:transparent}
   .exp-main{flex:1; min-width:0}
   .exp-title{font-weight:600; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
@@ -397,7 +400,7 @@
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "1.9";
+  var APP_VERSION = "2.0";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -905,6 +908,11 @@
       '<div class="row2" style="margin-top:-4px">' +
       '<input id="sp-newname" type="text" placeholder="Add a friend…" maxlength="30">' +
       '<button class="btn" id="sp-addperson" style="padding:12px">Add</button></div>' +
+      '<div class="micro" style="margin-bottom:8px">How to split it</div>' +
+      '<div class="chips" id="sp-mode">' +
+      '<button class="chip sel" data-mode="equal">Equally</button>' +
+      '<button class="chip" data-mode="custom">Custom amounts</button></div>' +
+      '<div id="sp-shares" style="display:none; margin-bottom:6px"></div>' +
       '<div class="micro" style="margin-bottom:8px">Who paid the bill?</div>' +
       '<div class="chips" id="sp-payer">'+chipRow("pay")+'</div>' +
       '<div class="micro" style="margin-bottom:8px">Category (for your share)</div>' +
@@ -914,28 +922,72 @@
     );
 
     var spCat = "out";
+    var mode = "equal";
+    var customShares = {};
     function participants(){ return Object.keys(selected).filter(function(n){ return selected[n]; }); }
+    function sharesFor(t){
+      var parts = participants(), out = {};
+      if(mode === "equal"){
+        var each = parts.length ? Math.round(t / parts.length * 100) / 100 : 0;
+        parts.forEach(function(n){ out[n] = each; });
+      }else{
+        parts.forEach(function(n){ out[n] = Math.round((parseFloat(customShares[n]) || 0) * 100) / 100; });
+      }
+      return out;
+    }
+    function assignedSum(sh){
+      var s = 0;
+      Object.keys(sh).forEach(function(n){ s += sh[n]; });
+      return Math.round(s * 100) / 100;
+    }
     function preview(){
       var t = parseFloat($("#sp-total").value) || 0;
       var parts = participants();
       var el = $("#sp-preview");
       if(!(t > 0) || !parts.length){ el.textContent = "Enter the total and pick who was there."; return; }
       if(payer !== "Me" && !selected["Me"] ){ el.textContent = "This one doesn't involve you — nothing to track."; return; }
-      var share = Math.round(t / parts.length * 100) / 100;
-      var lines = ["Each pays "+fmt(share)+"."];
+      var sh = sharesFor(t);
+      if(mode === "custom"){
+        var diff = Math.round((t - assignedSum(sh)) * 100) / 100;
+        if(Math.abs(diff) > 0.05){
+          el.textContent = "Assigned "+fmt(assignedSum(sh))+" of "+fmt(t)+" — " +
+            (diff > 0 ? fmt(diff)+" still to assign." : fmt(-diff)+" too much.");
+          return;
+        }
+      }
+      var lines = [];
+      if(mode === "equal") lines.push("Each pays "+fmt(sh[parts[0]])+".");
       if(payer === "Me"){
-        var owed = parts.filter(function(n){ return n!=="Me"; });
-        if(owed.length) lines.push(owed.join(", ")+(owed.length>1?" each owe you ":" owes you ")+fmt(share)+".");
-        if(selected["Me"]) lines.push("Your share "+fmt(share)+" goes to your expenses.");
+        var owed = parts.filter(function(n){ return n!=="Me" && sh[n] > 0; });
+        if(owed.length) lines.push("Owed to you: "+owed.map(function(n){ return n+" "+fmt(sh[n]); }).join(", ")+".");
+        if(selected["Me"] && sh["Me"] > 0) lines.push("Your share "+fmt(sh["Me"])+" goes to your expenses.");
       }else{
-        lines.push("You owe "+payer+" "+fmt(share)+" — your share goes to your expenses.");
+        lines.push((sh["Me"] > 0 ? "You owe "+payer+" "+fmt(sh["Me"])+" — your share goes to your expenses."
+                                 : "Nothing for you to pay."));
       }
       el.textContent = lines.join(" ");
+    }
+    function rebuildShares(){
+      var box = $("#sp-shares");
+      if(mode !== "custom"){ box.style.display = "none"; box.innerHTML = ""; return; }
+      box.style.display = "";
+      box.innerHTML = participants().map(function(n){
+        return '<div class="share-row"><span class="nm">'+(n==="Me"? "Me" : esc(n))+'</span>' +
+          '<input type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" data-sname="'+esc(n)+'"' +
+          (customShares[n] != null && customShares[n] !== "" ? ' value="'+customShares[n]+'"' : "")+'></div>';
+      }).join("");
+      box.querySelectorAll("[data-sname]").forEach(function(inp){
+        inp.addEventListener("input", function(){
+          customShares[inp.getAttribute("data-sname")] = inp.value;
+          preview();
+        });
+      });
     }
     function rebuildChips(){
       $("#sp-people").innerHTML = chipRow("who");
       $("#sp-payer").innerHTML = chipRow("pay");
       bindChips();
+      rebuildShares();
       preview();
     }
     function bindChips(){
@@ -944,6 +996,7 @@
           var n = c.getAttribute("data-who");
           selected[n] = !selected[n];
           c.classList.toggle("sel", selected[n]);
+          rebuildShares();
           preview();
         });
       });
@@ -967,6 +1020,13 @@
       $("#sp-newname").value = "";
       rebuildChips();
     });
+    $("#sp-mode").addEventListener("click", function(ev){
+      var b = ev.target.closest("[data-mode]"); if(!b) return;
+      mode = b.getAttribute("data-mode");
+      sheet.querySelectorAll("[data-mode]").forEach(function(x){ x.classList.toggle("sel", x===b); });
+      rebuildShares();
+      preview();
+    });
     $("#sp-cats").addEventListener("click", function(ev){
       var b = ev.target.closest("[data-spcat]"); if(!b) return;
       spCat = b.getAttribute("data-spcat");
@@ -980,24 +1040,33 @@
       if(!parts.length){ toast("Pick who was there"); return; }
       if(payer !== "Me" && !selected["Me"]){ toast("This split doesn't involve you"); return; }
       if(payer === "Me" && parts.length === 1 && selected["Me"]){ toast("Just you? Log it as a normal expense with +"); return; }
+      var sh = sharesFor(t);
+      if(mode === "custom"){
+        var diff = Math.round((t - assignedSum(sh)) * 100) / 100;
+        if(Math.abs(diff) > 0.05){
+          toast("Amounts add up to "+fmt(assignedSum(sh))+" but the total is "+fmt(t));
+          return;
+        }
+      }
       this.disabled = true;
-      var share = Math.round(t / parts.length * 100) / 100;
+      var owedToMe = 0;
       if(payer === "Me"){
         parts.forEach(function(n){
-          if(n === "Me") return;
-          ledgerAdd(findOrCreatePerson(n), "r", share, note);   // I covered their share
+          if(n === "Me" || !(sh[n] > 0)) return;
+          ledgerAdd(findOrCreatePerson(n), "r", sh[n], note);   // I covered their share
+          owedToMe += sh[n];
         });
-      }else{
-        ledgerAdd(findOrCreatePerson(payer), "b", share, note); // they covered my share
+      }else if(sh["Me"] > 0){
+        ledgerAdd(findOrCreatePerson(payer), "b", sh["Me"], note); // they covered my share
       }
-      if(selected["Me"]){
-        state.expenses.push({ id: uid(), ts: Date.now(), amount: share, cat: spCat,
+      if(selected["Me"] && sh["Me"] > 0){
+        state.expenses.push({ id: uid(), ts: Date.now(), amount: sh["Me"], cat: spCat,
                               note: note, date: todayIso(), photo: null });
       }
       save(); closeSheet(); render();
       toast(payer === "Me"
-        ? "Split saved — friends owe you "+fmt(Math.round(share*(parts.length-(selected["Me"]?1:0))*100)/100)
-        : "Split saved — you owe "+payer+" "+fmt(share));
+        ? "Split saved — friends owe you "+fmt(Math.round(owedToMe*100)/100)
+        : "Split saved — you owe "+payer+" "+fmt(sh["Me"] || 0));
     });
   }
 
