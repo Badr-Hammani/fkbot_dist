@@ -428,7 +428,7 @@
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "2.3";
+  var APP_VERSION = "2.4";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -471,11 +471,12 @@
         if(typeof s.nudgedAt !== "number") s.nudgedAt = 0;
         if(typeof s.lastCat !== "string") s.lastCat = "";
         if(typeof s.dailyBudget !== "number") s.dailyBudget = 0;
+        if(typeof s.borrowCap !== "number") s.borrowCap = 0;
         return s;
       }
     }catch(e){}
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], dailyBudget:0 };
+             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], dailyBudget:0, borrowCap:0 };
   }
   function save(opts){
     try{
@@ -784,6 +785,13 @@
       var isAuto = !(state.dailyBudget > 0);
       h += '<div class="sec"><span class="micro">Today</span>' +
         '<span class="micro">'+(isAuto? daysLeftInMonth()+" days left this month" : "daily target")+'</span></div>';
+      var borrowLine = "";
+      if(state.borrowCap > 0){
+        var used = borrowUsed(), cap = state.borrowCap;
+        borrowLine = used > cap
+          ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">Past your '+fmt(cap)+' borrow limit by '+fmt(used-cap)+'</span></div>'
+          : '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">borrowed ~'+fmt(used)+' of your '+fmt(cap)+' limit this month</span></div>';
+      }
       h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+
         new Date().toLocaleDateString(undefined,{weekday:"long"})+'</span>' +
         '<span class="goal-amt money">'+(dLeft<0
@@ -791,7 +799,7 @@
           : '<b>'+fmt(dLeft)+'</b> left today')+'</span></div>' +
         meterHtml(tSpent, tb) +
         '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(tSpent)+' of '+fmt(tb)+
-        (isAuto? ' · rebalances daily' : '')+'</span></div></div>';
+        (isAuto? ' · rebalances daily' : '')+'</span></div>' + borrowLine + '</div>';
     }
 
     /* weekend card */
@@ -1294,11 +1302,21 @@
     var dim = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
     return dim - now.getDate() + 1;   // includes today
   }
-  /* self-adjusting: what's left this month spread over the days left */
+  /* money you can still spend this month = salary left over + what you allow
+     yourself to borrow (e.g. up to 1000 from dad) */
+  function monthPool(){
+    return planMath().left + (state.borrowCap > 0 ? state.borrowCap : 0);
+  }
+  /* spending that has gone past your salary — i.e. borrowed */
+  function borrowUsed(){
+    var over = monthSpent() - planMath().left;
+    return over > 0 ? Math.round(over*100)/100 : 0;
+  }
+  /* self-adjusting: what's left in the pool spread over the days left */
   function autoDailyBudget(){
-    if(!(state.salary > 0)) return 0;
+    if(!(state.salary > 0) && !(state.borrowCap > 0)) return 0;
     var spentBeforeToday = monthSpent() - spentOn(todayIso());
-    var remaining = planMath().left - spentBeforeToday;
+    var remaining = monthPool() - spentBeforeToday;
     var days = daysLeftInMonth();
     return days > 0 ? Math.max(Math.floor(remaining / days), 0) : 0;
   }
@@ -1339,12 +1357,16 @@
       '<button class="btn primary" id="p-salary-save">Save salary</button></div>';
 
     var autoD = autoDailyBudget();
-    h += '<div class="panel"><h3>'+IC.home+'Everyday budget</h3>' +
-      '<p>How much to spend per day. Leave it empty and I work it out from what\'s left this month — it adjusts every day on its own.</p>' +
-      '<div class="field"><label class="micro" for="p-daily" style="display:block; margin-bottom:6px">Daily target (optional)</label>' +
+    h += '<div class="panel"><h3>'+IC.home+'Daily budget</h3>' +
+      '<p>How much you can spend each day for the rest of the month. If you run out of salary and borrow from family, set the most you\'re willing to borrow — I\'ll keep your daily number inside it. Leave the target empty and I work it out for you; it adjusts every day.</p>' +
+      '<div class="field"><label class="micro" for="p-borrow" style="display:block; margin-bottom:6px">Most you\'ll borrow this month (optional)</label>' +
+      '<input id="p-borrow" type="number" inputmode="decimal" min="0" placeholder="e.g. 1000 from dad" value="'+(state.borrowCap||"")+'"></div>' +
+      '<div class="field"><label class="micro" for="p-daily" style="display:block; margin-bottom:6px">Fixed daily target (optional)</label>' +
       '<input id="p-daily" type="number" inputmode="decimal" min="0" placeholder="'+(autoD>0? "auto ≈ "+autoD : "e.g. 100")+'" value="'+(state.dailyBudget||"")+'"></div>' +
       '<button class="btn primary" id="p-daily-save">Save daily budget</button>' +
-      (autoD>0 ? '<div class="hint">Automatic right now: about <b class="money">'+fmt(autoD)+'</b> a day for the '+daysLeftInMonth()+' days left this month.</div>' : "") +
+      (autoD>0 ? '<div class="hint">Right now you can spend about <b class="money">'+fmt(autoD)+'</b> a day for the '+daysLeftInMonth()+' days left'+
+        (state.borrowCap>0? ', staying within your '+fmt(state.borrowCap)+' borrow limit' : '')+'.'+
+        (state.borrowCap>0 && borrowUsed()>0? ' You\'ve used about '+fmt(borrowUsed())+' of it so far.' : '')+'</div>' : "") +
       '</div>';
 
     h += '<div class="sec"><span class="micro">Loan & subscriptions</span>' +
@@ -2111,8 +2133,10 @@
       if(pDaily) pDaily.addEventListener("click", function(){
         var v = parseFloat($("#p-daily").value);
         state.dailyBudget = (v > 0) ? Math.round(v*100)/100 : 0;
+        var bc = parseFloat($("#p-borrow").value);
+        state.borrowCap = (bc > 0) ? Math.round(bc*100)/100 : 0;
         save(); render();
-        toast(state.dailyBudget>0 ? "Daily target set to "+fmt(state.dailyBudget) : "Using the automatic daily budget");
+        toast("Daily budget saved");
       });
       $("#p-add-cm").addEventListener("click", function(){ openCommitmentSheet(null); });
       $("#p-add-goal").addEventListener("click", function(){ openGoalSheet(null); });
@@ -2137,7 +2161,7 @@
                      scanModel:state.scanModel, expenses:state.expenses,
                      salary:state.salary, commitments:state.commitments, goals:state.goals,
                      swept:state.swept, payday:state.payday, debts:state.debts,
-                     dailyBudget:state.dailyBudget };  // apiKey deliberately excluded
+                     dailyBudget:state.dailyBudget, borrowCap:state.borrowCap };  // apiKey deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -2166,7 +2190,8 @@
                       swept:(d.swept && typeof d.swept==="object")? d.swept : {},
                       payday:+d.payday||0,
                       debts:Array.isArray(d.debts)? d.debts : [],
-                      dailyBudget:+d.dailyBudget||0 };
+                      dailyBudget:+d.dailyBudget||0,
+                      borrowCap:+d.borrowCap||0 };
             save(); render(); toast("Backup restored — "+state.expenses.length+" expenses");
           }catch(e){ toast("That file isn't a Weekend Wallet backup"); }
         };
@@ -2176,7 +2201,7 @@
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], dailyBudget:0 };
+                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], dailyBudget:0, borrowCap:0 };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
       });
