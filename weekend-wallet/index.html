@@ -428,7 +428,7 @@
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "2.4";
+  var APP_VERSION = "2.5";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -471,12 +471,17 @@
         if(typeof s.nudgedAt !== "number") s.nudgedAt = 0;
         if(typeof s.lastCat !== "string") s.lastCat = "";
         if(typeof s.dailyBudget !== "number") s.dailyBudget = 0;
-        if(typeof s.borrowCap !== "number") s.borrowCap = 0;
+        if(typeof s.restAmount !== "number") s.restAmount = 0;
+        if(typeof s.restFrom !== "string") s.restFrom = "";
+        /* carry over an old borrow limit into the new "money for rest of month" */
+        if(s.restAmount === 0 && typeof s.borrowCap === "number" && s.borrowCap > 0){
+          s.restAmount = s.borrowCap; s.restFrom = todayIso();
+        }
         return s;
       }
     }catch(e){}
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], dailyBudget:0, borrowCap:0 };
+             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], dailyBudget:0, restAmount:0, restFrom:"" };
   }
   function save(opts){
     try{
@@ -785,12 +790,12 @@
       var isAuto = !(state.dailyBudget > 0);
       h += '<div class="sec"><span class="micro">Today</span>' +
         '<span class="micro">'+(isAuto? daysLeftInMonth()+" days left this month" : "daily target")+'</span></div>';
-      var borrowLine = "";
-      if(state.borrowCap > 0){
-        var used = borrowUsed(), cap = state.borrowCap;
-        borrowLine = used > cap
-          ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">Past your '+fmt(cap)+' borrow limit by '+fmt(used-cap)+'</span></div>'
-          : '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">borrowed ~'+fmt(used)+' of your '+fmt(cap)+' limit this month</span></div>';
+      var poolLine = "";
+      var rr = restRemaining();
+      if(isAuto && rr !== null){
+        poolLine = rr < 0
+          ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">'+fmt(-rr)+' past your '+fmt(state.restAmount)+' for the month</span></div>'
+          : '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">'+fmt(rr)+' left of your '+fmt(state.restAmount)+' for the rest of the month</span></div>';
       }
       h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+
         new Date().toLocaleDateString(undefined,{weekday:"long"})+'</span>' +
@@ -799,7 +804,7 @@
           : '<b>'+fmt(dLeft)+'</b> left today')+'</span></div>' +
         meterHtml(tSpent, tb) +
         '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(tSpent)+' of '+fmt(tb)+
-        (isAuto? ' · rebalances daily' : '')+'</span></div>' + borrowLine + '</div>';
+        (isAuto? ' · rebalances daily' : '')+'</span></div>' + poolLine + '</div>';
     }
 
     /* weekend card */
@@ -1302,23 +1307,29 @@
     var dim = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
     return dim - now.getDate() + 1;   // includes today
   }
-  /* money you can still spend this month = salary left over + what you allow
-     yourself to borrow (e.g. up to 1000 from dad) */
-  function monthPool(){
-    return planMath().left + (state.borrowCap > 0 ? state.borrowCap : 0);
+  function spentSince(dIso){
+    return total(state.expenses.filter(function(e){ return e.date >= dIso; }));
   }
-  /* spending that has gone past your salary — i.e. borrowed */
-  function borrowUsed(){
-    var over = monthSpent() - planMath().left;
-    return over > 0 ? Math.round(over*100)/100 : 0;
+  /* the money you said you have from restFrom to end of month, minus what
+     you've spent since — ignores everything before restFrom */
+  function restRemaining(){
+    if(!(state.restAmount > 0) || !state.restFrom) return null;
+    return Math.round((state.restAmount - spentSince(state.restFrom)) * 100) / 100;
   }
-  /* self-adjusting: what's left in the pool spread over the days left */
+  /* simple: money left at the start of today ÷ days left. Today's number
+     stays put as you spend today; it recomputes tomorrow. */
   function autoDailyBudget(){
-    if(!(state.salary > 0) && !(state.borrowCap > 0)) return 0;
-    var spentBeforeToday = monthSpent() - spentOn(todayIso());
-    var remaining = monthPool() - spentBeforeToday;
     var days = daysLeftInMonth();
-    return days > 0 ? Math.max(Math.floor(remaining / days), 0) : 0;
+    if(days <= 0) return 0;
+    if(state.restAmount > 0 && state.restFrom){
+      var spentBefore = spentSince(state.restFrom) - spentOn(todayIso());
+      return Math.max(Math.floor((state.restAmount - spentBefore) / days), 0);
+    }
+    if(state.salary > 0){
+      var spentBeforeToday = monthSpent() - spentOn(todayIso());
+      return Math.max(Math.floor((planMath().left - spentBeforeToday) / days), 0);
+    }
+    return 0;
   }
   function todayBudget(){
     return state.dailyBudget > 0 ? state.dailyBudget : autoDailyBudget();
@@ -1357,16 +1368,19 @@
       '<button class="btn primary" id="p-salary-save">Save salary</button></div>';
 
     var autoD = autoDailyBudget();
+    var rr = restRemaining();
+    var freshFrom = state.restFrom && state.restFrom !== todayIso();
     h += '<div class="panel"><h3>'+IC.home+'Daily budget</h3>' +
-      '<p>How much you can spend each day for the rest of the month. If you run out of salary and borrow from family, set the most you\'re willing to borrow — I\'ll keep your daily number inside it. Leave the target empty and I work it out for you; it adjusts every day.</p>' +
-      '<div class="field"><label class="micro" for="p-borrow" style="display:block; margin-bottom:6px">Most you\'ll borrow this month (optional)</label>' +
-      '<input id="p-borrow" type="number" inputmode="decimal" min="0" placeholder="e.g. 1000 from dad" value="'+(state.borrowCap||"")+'"></div>' +
-      '<div class="field"><label class="micro" for="p-daily" style="display:block; margin-bottom:6px">Fixed daily target (optional)</label>' +
-      '<input id="p-daily" type="number" inputmode="decimal" min="0" placeholder="'+(autoD>0? "auto ≈ "+autoD : "e.g. 100")+'" value="'+(state.dailyBudget||"")+'"></div>' +
-      '<button class="btn primary" id="p-daily-save">Save daily budget</button>' +
-      (autoD>0 ? '<div class="hint">Right now you can spend about <b class="money">'+fmt(autoD)+'</b> a day for the '+daysLeftInMonth()+' days left'+
-        (state.borrowCap>0? ', staying within your '+fmt(state.borrowCap)+' borrow limit' : '')+'.'+
-        (state.borrowCap>0 && borrowUsed()>0? ' You\'ve used about '+fmt(borrowUsed())+' of it so far.' : '')+'</div>' : "") +
+      '<p>Forget the past. Tell me how much money you have from <b>today</b> until the end of the month — including whatever you plan to borrow — and I split it into a daily amount that shrinks itself as you spend.</p>' +
+      '<div class="field"><label class="micro" for="p-rest" style="display:block; margin-bottom:6px">Money for the rest of the month</label>' +
+      '<input id="p-rest" type="number" inputmode="decimal" min="0" placeholder="e.g. 1000" value="'+(state.restAmount||"")+'"></div>' +
+      '<button class="btn primary" id="p-rest-save">Set daily budget</button>' +
+      (rr !== null
+        ? '<div class="hint">You can spend about <b class="money" style="color:var(--ink)">'+fmt(autoD)+'</b> a day — '+
+          (rr<0? '<span style="color:var(--bad)">'+fmt(-rr)+' past your '+fmt(state.restAmount)+'</span>' : fmt(rr)+' left of '+fmt(state.restAmount))+
+          ' over the '+daysLeftInMonth()+' days left'+(freshFrom? ', counting from '+fromIso(state.restFrom).toLocaleDateString(undefined,{month:"short",day:"numeric"}) : '')+'.'+
+          (freshFrom? ' <button id="p-rest-reset" style="color:var(--accent-deep); font-weight:700; background:none; padding:0">Restart from today</button>' : '')+'</div>'
+        : (autoD>0 ? '<div class="hint">Or I can spread your salary: about <b class="money">'+fmt(autoD)+'</b>/day for '+daysLeftInMonth()+' days.</div>' : '')) +
       '</div>';
 
     h += '<div class="sec"><span class="micro">Loan & subscriptions</span>' +
@@ -2129,14 +2143,21 @@
         state.budget = amt;
         save(); toast("Weekend budget set to "+fmt(amt));
       });
-      var pDaily = $("#p-daily-save");
-      if(pDaily) pDaily.addEventListener("click", function(){
-        var v = parseFloat($("#p-daily").value);
-        state.dailyBudget = (v > 0) ? Math.round(v*100)/100 : 0;
-        var bc = parseFloat($("#p-borrow").value);
-        state.borrowCap = (bc > 0) ? Math.round(bc*100)/100 : 0;
+      var pRest = $("#p-rest-save");
+      if(pRest) pRest.addEventListener("click", function(){
+        var v = parseFloat($("#p-rest").value);
+        if(v > 0){ state.restAmount = Math.round(v*100)/100; state.restFrom = todayIso(); }
+        else { state.restAmount = 0; state.restFrom = ""; }
         save(); render();
-        toast("Daily budget saved");
+        toast(state.restAmount>0 ? "Daily budget: "+fmt(autoDailyBudget())+"/day" : "Daily budget cleared");
+      });
+      var pRestReset = $("#p-rest-reset");
+      if(pRestReset) pRestReset.addEventListener("click", function(){
+        var left = restRemaining();
+        if(left !== null && left > 0){ state.restAmount = left; }
+        state.restFrom = todayIso();
+        save(); render();
+        toast("Counting fresh from today");
       });
       $("#p-add-cm").addEventListener("click", function(){ openCommitmentSheet(null); });
       $("#p-add-goal").addEventListener("click", function(){ openGoalSheet(null); });
@@ -2161,7 +2182,7 @@
                      scanModel:state.scanModel, expenses:state.expenses,
                      salary:state.salary, commitments:state.commitments, goals:state.goals,
                      swept:state.swept, payday:state.payday, debts:state.debts,
-                     dailyBudget:state.dailyBudget, borrowCap:state.borrowCap };  // apiKey deliberately excluded
+                     dailyBudget:state.dailyBudget, restAmount:state.restAmount, restFrom:state.restFrom };  // apiKey deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -2191,7 +2212,8 @@
                       payday:+d.payday||0,
                       debts:Array.isArray(d.debts)? d.debts : [],
                       dailyBudget:+d.dailyBudget||0,
-                      borrowCap:+d.borrowCap||0 };
+                      restAmount:+d.restAmount||0,
+                      restFrom:(typeof d.restFrom==="string")? d.restFrom : "" };
             save(); render(); toast("Backup restored — "+state.expenses.length+" expenses");
           }catch(e){ toast("That file isn't a Weekend Wallet backup"); }
         };
@@ -2201,7 +2223,7 @@
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], dailyBudget:0, borrowCap:0 };
+                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], dailyBudget:0, restAmount:0, restFrom:"" };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
       });
