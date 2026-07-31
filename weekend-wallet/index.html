@@ -422,13 +422,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=2.3"></script>
+<script src="scan.js?v=2.6"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "2.5";
+  var APP_VERSION = "2.6";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -508,6 +508,22 @@
   });}
   function cat(id){ for(var i=0;i<CATS.length;i++){ if(CATS[i].id===id) return CATS[i]; } return CATS[CATS.length-1]; }
   function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+  /* accepts 7,5 and 7.5 and "7 500,25" — people type money both ways */
+  function num(v){
+    if(typeof v === "number") return v;
+    var s = String(v == null ? "" : v).trim().replace(/\s/g, "");
+    if(!s) return NaN;
+    var lastDot = s.lastIndexOf("."), lastCom = s.lastIndexOf(",");
+    if(lastDot > -1 && lastCom > -1){
+      if(lastCom > lastDot){ s = s.replace(/\./g, ""); s = s.slice(0,lastCom).replace(/,/g,"") + "." + s.slice(lastCom+1); }
+      else { s = s.replace(/,/g, ""); }
+    }else if(lastCom > -1){
+      var dec = s.length - lastCom - 1;
+      s = (dec >= 1 && dec <= 2) ? s.slice(0,lastCom) + "." + s.slice(lastCom+1) : s.replace(/,/g, "");
+    }
+    return parseFloat(s);
+  }
 
   function fmt(n){
     try{
@@ -891,7 +907,7 @@
       '<input id="b-name" type="text" placeholder="Dad, Ahmed…" maxlength="30"></div>' +
       (chips? '<div class="chips">'+chips+'</div>' : "") +
       '<div class="field"><label class="micro" for="b-amt">How much?</label>' +
-      '<input id="b-amt" type="number" inputmode="decimal" min="0" step="0.01"'+(prefillAmt>0? ' value="'+prefillAmt+'"':"")+'></div>' +
+      '<input id="b-amt" type="text" inputmode="decimal" min="0" step="0.01"'+(prefillAmt>0? ' value="'+prefillAmt+'"':"")+'></div>' +
       '<div class="row2">' +
       '<button class="btn" id="b-igave">I gave them</button>' +
       '<button class="btn primary" id="b-theygave">They gave me</button></div>' +
@@ -902,7 +918,7 @@
     });
     function submit(dir, btn){
       var name = $("#b-name").value.trim();
-      var amt = parseFloat($("#b-amt").value);
+      var amt = num($("#b-amt").value);
       if(!name){ toast("Who was it with?"); return; }
       if(!(amt > 0)){ toast("Enter the amount"); return; }
       btn.disabled = true;
@@ -927,7 +943,7 @@
     openSheet(
       '<h2>'+esc(d.name)+'</h2>' +
       '<p style="color:var(--ink2); font-size:14px; margin:0 0 14px">'+balanceLabel(d)+'</p>' +
-      '<div class="field"><input id="d2-amt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Amount"></div>' +
+      '<div class="field"><input id="d2-amt" type="text" inputmode="decimal" min="0" step="0.01" placeholder="Amount"></div>' +
       '<div class="row2">' +
       '<button class="btn" id="d2-igave">I gave them</button>' +
       '<button class="btn primary" id="d2-theygave">They gave me</button></div>' +
@@ -944,7 +960,7 @@
       save(); closeSheet(); render(); toastBalance(d);
     });
     function submit(dir, btn){
-      var a = parseFloat($("#d2-amt").value);
+      var a = num($("#d2-amt").value);
       if(!(a > 0)){ toast("Enter the amount first"); return; }
       btn.disabled = true;
       ledgerAdd(d, dir, Math.round(a*100)/100, "");
@@ -983,7 +999,7 @@
       '<h2>Split a bill</h2>' +
       '<div class="row2">' +
       '<div><label class="micro" for="sp-total" style="display:block; margin-bottom:6px">Total paid</label>' +
-      '<input id="sp-total" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0"></div>' +
+      '<input id="sp-total" type="text" inputmode="decimal" min="0" step="0.01" placeholder="0"></div>' +
       '<div><label class="micro" for="sp-note" style="display:block; margin-bottom:6px">What for</label>' +
       '<input id="sp-note" type="text" placeholder="Dinner, taxi…" maxlength="40"></div></div>' +
       '<div class="micro" style="margin-bottom:8px">Split between</div>' +
@@ -1014,7 +1030,7 @@
         var each = parts.length ? Math.round(t / parts.length * 100) / 100 : 0;
         parts.forEach(function(n){ out[n] = each; });
       }else{
-        parts.forEach(function(n){ out[n] = Math.round((parseFloat(customShares[n]) || 0) * 100) / 100; });
+        parts.forEach(function(n){ out[n] = Math.round((num(customShares[n]) || 0) * 100) / 100; });
       }
       return out;
     }
@@ -1024,7 +1040,7 @@
       return Math.round(s * 100) / 100;
     }
     function preview(){
-      var t = parseFloat($("#sp-total").value) || 0;
+      var t = num($("#sp-total").value) || 0;
       var parts = participants();
       var el = $("#sp-preview");
       if(!(t > 0) || !parts.length){ el.textContent = "Enter the total and pick who was there."; return; }
@@ -1056,7 +1072,7 @@
       box.style.display = "";
       box.innerHTML = participants().map(function(n){
         return '<div class="share-row"><span class="nm">'+(n==="Me"? "Me" : esc(n))+'</span>' +
-          '<input type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" data-sname="'+esc(n)+'"' +
+          '<input type="text" inputmode="decimal" min="0" step="0.01" placeholder="0" data-sname="'+esc(n)+'"' +
           (customShares[n] != null && customShares[n] !== "" ? ' value="'+customShares[n]+'"' : "")+'></div>';
       }).join("");
       box.querySelectorAll("[data-sname]").forEach(function(inp){
@@ -1116,7 +1132,7 @@
       sheet.querySelectorAll("[data-spcat]").forEach(function(x){ x.classList.toggle("sel", x===b); });
     });
     $("#sp-save").addEventListener("click", function(){
-      var t = parseFloat($("#sp-total").value);
+      var t = num($("#sp-total").value);
       var parts = participants();
       var note = $("#sp-note").value.trim() || "split";
       if(!(t > 0)){ toast("Enter the total"); return; }
@@ -1362,7 +1378,7 @@
     h += '<div class="panel"><h3>'+IC.banknote+'Salary</h3><p>Your income each month.</p>' +
       '<div class="row2">' +
       '<div><label class="micro" for="p-salary" style="display:block; margin-bottom:6px">Monthly salary</label>' +
-      '<input id="p-salary" type="number" inputmode="decimal" min="0" placeholder="e.g. 8000" value="'+(state.salary||"")+'"></div>' +
+      '<input id="p-salary" type="text" inputmode="decimal" min="0" placeholder="e.g. 8000" value="'+(state.salary||"")+'"></div>' +
       '<div><label class="micro" for="p-payday" style="display:block; margin-bottom:6px">Payday (optional)</label>' +
       '<input id="p-payday" type="number" inputmode="numeric" min="1" max="31" placeholder="day, e.g. 28" value="'+(state.payday||"")+'"></div></div>' +
       '<button class="btn primary" id="p-salary-save">Save salary</button></div>';
@@ -1373,7 +1389,7 @@
     h += '<div class="panel"><h3>'+IC.home+'Daily budget</h3>' +
       '<p>Forget the past. Tell me how much money you have from <b>today</b> until the end of the month — including whatever you plan to borrow — and I split it into a daily amount that shrinks itself as you spend.</p>' +
       '<div class="field"><label class="micro" for="p-rest" style="display:block; margin-bottom:6px">Money for the rest of the month</label>' +
-      '<input id="p-rest" type="number" inputmode="decimal" min="0" placeholder="e.g. 1000" value="'+(state.restAmount||"")+'"></div>' +
+      '<input id="p-rest" type="text" inputmode="decimal" min="0" placeholder="e.g. 1000" value="'+(state.restAmount||"")+'"></div>' +
       '<button class="btn primary" id="p-rest-save">Set daily budget</button>' +
       (rr !== null
         ? '<div class="hint">You can spend about <b class="money" style="color:var(--ink)">'+fmt(autoD)+'</b> a day — '+
@@ -1470,12 +1486,12 @@
       '<button class="chip'+(kind==="sub"?" sel":"")+'" data-kind="sub"><span style="color:var(--c-drinks); display:inline-flex">'+IC.repeat+'</span>Subscription</button></div>' +
       '<div class="row2">' +
       '<div><label class="micro" for="c-amount" style="display:block; margin-bottom:6px">Monthly amount</label>' +
-      '<input id="c-amount" type="number" inputmode="decimal" min="0" step="0.01" value="'+(c? c.amount:"")+'"></div>' +
+      '<input id="c-amount" type="text" inputmode="decimal" min="0" step="0.01" value="'+(c? c.amount:"")+'"></div>' +
       '<div><label class="micro" for="c-due" style="display:block; margin-bottom:6px">Due day (optional)</label>' +
       '<input id="c-due" type="number" inputmode="numeric" min="1" max="31" placeholder="e.g. 5" value="'+(c && c.due? c.due:"")+'"></div></div>' +
       '<div class="field" id="c-loanx" style="'+(kind==="loan"?"":"display:none")+'">' +
       '<label class="micro" for="c-remaining">Loan balance left (optional)</label>' +
-      '<input id="c-remaining" type="number" inputmode="decimal" min="0" placeholder="How much is still owed" value="'+(c && c.remaining? c.remaining:"")+'">' +
+      '<input id="c-remaining" type="text" inputmode="decimal" min="0" placeholder="How much is still owed" value="'+(c && c.remaining? c.remaining:"")+'">' +
       '<div class="hint">Each saved edit updates this — the app shows roughly how many months are left.</div></div>' +
       '<button class="btn primary" id="c-save">Save</button>' +
       (c? '<div style="height:10px"></div><button class="btn danger" id="c-del">Remove</button>' : "")
@@ -1490,10 +1506,10 @@
     });
     $("#c-save").addEventListener("click", function(){
       var name = $("#c-name").value.trim();
-      var amt = parseFloat($("#c-amount").value);
+      var amt = num($("#c-amount").value);
       var due = parseInt($("#c-due").value, 10);
       due = (due >= 1 && due <= 31) ? due : 0;
-      var remaining = selKind==="loan" ? (parseFloat($("#c-remaining").value) || 0) : 0;
+      var remaining = selKind==="loan" ? (num($("#c-remaining").value) || 0) : 0;
       if(!name){ toast("Give it a name"); return; }
       if(!(amt > 0)){ toast("Enter the monthly amount"); return; }
       if(c){ c.name = name; c.amount = Math.round(amt*100)/100; c.kind = selKind; c.due = due; c.remaining = remaining; }
@@ -1519,17 +1535,17 @@
       '<input id="g-name" type="text" placeholder="Trip to Spain, new phone…" maxlength="40" value="'+(g? esc(g.name):"")+'"></div>' +
       '<div class="row2">' +
       '<div><label class="micro" for="g-target" style="display:block; margin-bottom:6px">Target</label>' +
-      '<input id="g-target" type="number" inputmode="decimal" min="0" value="'+(g? g.target:"")+'"></div>' +
+      '<input id="g-target" type="text" inputmode="decimal" min="0" value="'+(g? g.target:"")+'"></div>' +
       '<div><label class="micro" for="g-monthly" style="display:block; margin-bottom:6px">Per month (optional)</label>' +
-      '<input id="g-monthly" type="number" inputmode="decimal" min="0" placeholder="0" value="'+(g && g.monthly? g.monthly:"")+'"></div></div>' +
+      '<input id="g-monthly" type="text" inputmode="decimal" min="0" placeholder="0" value="'+(g && g.monthly? g.monthly:"")+'"></div></div>' +
       '<p class="hint" style="margin:0 0 14px">The monthly amount is set aside in your plan before spending money is counted.</p>' +
       '<button class="btn primary" id="g-save">Save goal</button>' +
       (g? '<div style="height:10px"></div><button class="btn danger" id="g-del">Delete goal</button>' : "")
     );
     $("#g-save").addEventListener("click", function(){
       var name = $("#g-name").value.trim();
-      var target = parseFloat($("#g-target").value);
-      var monthly = parseFloat($("#g-monthly").value) || 0;
+      var target = num($("#g-target").value);
+      var monthly = num($("#g-monthly").value) || 0;
       if(!name){ toast("Give the goal a name"); return; }
       if(!(target > 0)){ toast("Set a target amount"); return; }
       if(g){ g.name = name; g.target = target; g.monthly = monthly; }
@@ -1555,11 +1571,11 @@
       '<h2>Add money — '+esc(g.name)+'</h2>' +
       '<p style="color:var(--ink2); font-size:13.5px; margin:0 0 14px">Saved so far: <b class="money">'+fmt(g.saved)+'</b>' +
       (remaining>0? ' · '+fmt(remaining)+' to go' : "")+'</p>' +
-      '<div class="field"><input id="gm-amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" style="font-size:28px; font-weight:800; padding:14px 16px"></div>' +
+      '<div class="field"><input id="gm-amount" type="text" inputmode="decimal" min="0" step="0.01" placeholder="0" style="font-size:28px; font-weight:800; padding:14px 16px"></div>' +
       '<button class="btn primary" id="gm-save">Add to goal</button>'
     );
     $("#gm-save").addEventListener("click", function(){
-      var amt = parseFloat($("#gm-amount").value);
+      var amt = num($("#gm-amount").value);
       if(!(amt > 0)){ toast("Enter an amount"); return; }
       g.saved = Math.round((g.saved + amt)*100)/100;
       save(); closeSheet(); render();
@@ -1578,7 +1594,7 @@
     return '' +
       '<div class="sec"><span class="micro">Settings</span></div>' +
       '<div class="panel"><h3>Weekend budget</h3><p>What you allow yourself each Friday–Sunday.</p>' +
-      '<div class="field"><input id="s-budget" type="number" inputmode="decimal" min="0" value="'+state.budget+'"></div>' +
+      '<div class="field"><input id="s-budget" type="text" inputmode="decimal" min="0" value="'+state.budget+'"></div>' +
       '<div class="field"><label class="micro" for="s-currency">Currency</label><select id="s-currency">'+curOpts+'</select></div>' +
       '<button class="btn primary" id="s-save">Save changes</button></div>' +
 
@@ -1614,11 +1630,11 @@
       '<h1>Money for the weekend, sorted.</h1>' +
       '<p class="lede">Set a Friday-to-Sunday budget, snap receipts and let the amounts fill themselves in. All on your phone.</p>' +
       '<div class="panel"><div class="field"><label class="micro" for="o-budget">Weekend budget</label>' +
-      '<input id="o-budget" type="number" inputmode="decimal" min="0" placeholder="e.g. 500"></div>' +
+      '<input id="o-budget" type="text" inputmode="decimal" min="0" placeholder="e.g. 500"></div>' +
       '<div class="field"><label class="micro" for="o-currency">Currency</label><select id="o-currency">'+curOpts+'</select></div>' +
       '<button class="btn primary" id="o-go">Start tracking</button></div></div>';
     $("#o-go").addEventListener("click", function(){
-      var b = parseFloat($("#o-budget").value);
+      var b = num($("#o-budget").value);
       if(!(b > 0)){ toast("Set a budget to get started"); $("#o-budget").focus(); return; }
       state.budget = b;
       state.currency = $("#o-currency").value;
@@ -1911,7 +1927,7 @@
       '<span><span class="t" id="f-photo-t">Snap the receipt</span><br>' +
       '<span class="s" id="f-photo-s"></span></span></button>' +
       '<div class="amount-wrap"><span class="cur">'+esc(sym)+'</span>' +
-      '<input id="f-amount" class="money" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" autocomplete="off"' +
+      '<input id="f-amount" class="money" type="text" inputmode="decimal" min="0" step="0.01" placeholder="0" autocomplete="off"' +
       (editing? ' value="'+editing.amount+'"' : "")+'></div>' +
       '<div class="qamts" id="f-quicks">'+quicks+'</div>' +
       '<div class="micro" style="margin-bottom:8px">Category</div>' +
@@ -1948,7 +1964,7 @@
   }
 
   function saveDraft(){
-    var amt = parseFloat($("#f-amount").value);
+    var amt = num($("#f-amount").value);
     if(!(amt > 0)){ toast("Enter the amount first"); $("#f-amount").focus(); return; }
     if(draft.editId){
       var ex = null;
@@ -2129,7 +2145,7 @@
     var pSalary = $("#p-salary-save");
     if(pSalary){
       pSalary.addEventListener("click", function(){
-        var v = parseFloat($("#p-salary").value);
+        var v = num($("#p-salary").value);
         if(!(v >= 0)){ toast("Enter your salary"); return; }
         state.salary = v;
         var pd = parseInt($("#p-payday").value, 10);
@@ -2145,7 +2161,7 @@
       });
       var pRest = $("#p-rest-save");
       if(pRest) pRest.addEventListener("click", function(){
-        var v = parseFloat($("#p-rest").value);
+        var v = num($("#p-rest").value);
         if(v > 0){ state.restAmount = Math.round(v*100)/100; state.restFrom = todayIso(); }
         else { state.restAmount = 0; state.restFrom = ""; }
         save(); render();
@@ -2166,7 +2182,7 @@
     var sSave = $("#s-save");
     if(sSave){
       sSave.addEventListener("click", function(){
-        var b = parseFloat($("#s-budget").value);
+        var b = num($("#s-budget").value);
         if(!(b > 0)){ toast("Budget must be above zero"); return; }
         state.budget = b;
         state.currency = $("#s-currency").value;
