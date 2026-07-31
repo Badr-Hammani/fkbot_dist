@@ -428,7 +428,7 @@
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "2.6";
+  var APP_VERSION = "2.7";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -766,14 +766,22 @@
     /* month hero */
     if(state.salary > 0){
       var spendable = pm.left;
-      var mLeft = spendable - mSpent;
+      var mFlow = ledgerFlowSince(monthStartIso());
+      var mLeft = spendable - mSpent - mFlow.net;
+      var flowNote = "";
+      if(mFlow.out > 0 || mFlow.inn > 0){
+        var parts = [];
+        if(mFlow.out > 0) parts.push(fmt(mFlow.out)+" given out");
+        if(mFlow.inn > 0) parts.push(fmt(mFlow.inn)+" received");
+        flowNote = ' · '+parts.join(", ")+' with people';
+      }
       h += '<section class="hero">' +
         '<div class="hero-top"><span class="hero-when">'+monthName+'</span>' +
         '<span class="hero-live" style="color:var(--ink2)">Today: <b class="money" style="color:var(--ink)">'+fmt(tSpent)+'</b></span></div>' +
         '<div class="hero-amount money'+(mLeft<0?" over":"")+'">'+fmt(Math.abs(mLeft))+'</div>' +
         '<div class="hero-caption">'+(mLeft<0? "over this month" : "left this month") +
-        ' · spent <strong class="money">'+fmt(mSpent)+'</strong> of <strong class="money">'+fmt(Math.max(spendable,0))+'</strong></div>' +
-        '<div class="meter">'+meterHtml(mSpent, Math.max(spendable,0))+
+        ' · spent <strong class="money">'+fmt(mSpent)+'</strong> of <strong class="money">'+fmt(Math.max(spendable,0))+'</strong>'+flowNote+'</div>' +
+        '<div class="meter">'+meterHtml(mSpent + Math.max(mFlow.net,0), Math.max(spendable,0))+
         '<div class="meter-row"><span>after your loan, subscriptions & savings</span>'+paydayChip()+'</div></div>' +
         '</section>';
       var uncovered = Math.abs(Math.min(mLeft, 0)) - borrowedThisMonth();
@@ -812,6 +820,13 @@
         poolLine = rr < 0
           ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">'+fmt(-rr)+' past your '+fmt(state.restAmount)+' for the month</span></div>'
           : '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">'+fmt(rr)+' left of your '+fmt(state.restAmount)+' for the rest of the month</span></div>';
+        var pf = ledgerFlowSince(state.restFrom);
+        if(pf.out > 0 || pf.inn > 0){
+          var bits2 = [];
+          if(pf.out > 0) bits2.push('−'+fmt(pf.out)+' given out');
+          if(pf.inn > 0) bits2.push('+'+fmt(pf.inn)+' received');
+          poolLine += '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink3)">includes '+bits2.join(" · ")+' with friends & family</span></div>';
+        }
       }
       h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+
         new Date().toLocaleDateString(undefined,{weekday:"long"})+'</span>' +
@@ -1326,24 +1341,44 @@
   function spentSince(dIso){
     return total(state.expenses.filter(function(e){ return e.date >= dIso; }));
   }
-  /* the money you said you have from restFrom to end of month, minus what
-     you've spent since — ignores everything before restFrom */
+  /* real cash moved with people since a date: money you handed over (out)
+     and money handed to you (in). Paying someone back empties your pocket
+     just like buying something does. */
+  function ledgerFlowSince(dIso){
+    var t = fromIso(dIso).getTime(), inn = 0, out = 0;
+    state.debts.forEach(function(d){
+      (d.log||[]).forEach(function(l){
+        if(l.ts >= t){ if(l.dir === "b") inn += l.amt; else out += l.amt; }
+      });
+    });
+    return { inn: Math.round(inn*100)/100, out: Math.round(out*100)/100,
+             net: Math.round((out - inn)*100)/100 };
+  }
+  function monthStartIso(){
+    var n = new Date();
+    return iso(new Date(n.getFullYear(), n.getMonth(), 1));
+  }
+  /* what's left of the money you set aside, after spending AND after money
+     given to / received from people */
   function restRemaining(){
     if(!(state.restAmount > 0) || !state.restFrom) return null;
-    return Math.round((state.restAmount - spentSince(state.restFrom)) * 100) / 100;
+    var f = ledgerFlowSince(state.restFrom);
+    return Math.round((state.restAmount - spentSince(state.restFrom) - f.net) * 100) / 100;
   }
-  /* simple: money left at the start of today ÷ days left. Today's number
-     stays put as you spend today; it recomputes tomorrow. */
+  /* money left ÷ days left. Spending today doesn't move today's number
+     (it recomputes tomorrow), but cash given or received counts right away. */
   function autoDailyBudget(){
     var days = daysLeftInMonth();
     if(days <= 0) return 0;
     if(state.restAmount > 0 && state.restFrom){
       var spentBefore = spentSince(state.restFrom) - spentOn(todayIso());
-      return Math.max(Math.floor((state.restAmount - spentBefore) / days), 0);
+      var net = ledgerFlowSince(state.restFrom).net;
+      return Math.max(Math.floor((state.restAmount - spentBefore - net) / days), 0);
     }
     if(state.salary > 0){
       var spentBeforeToday = monthSpent() - spentOn(todayIso());
-      return Math.max(Math.floor((planMath().left - spentBeforeToday) / days), 0);
+      var netM = ledgerFlowSince(monthStartIso()).net;
+      return Math.max(Math.floor((planMath().left - spentBeforeToday - netM) / days), 0);
     }
     return 0;
   }
