@@ -428,7 +428,7 @@
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "2.7";
+  var APP_VERSION = "2.8";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -824,8 +824,11 @@
         if(pf.out > 0 || pf.inn > 0){
           var bits2 = [];
           if(pf.out > 0) bits2.push('−'+fmt(pf.out)+' given out');
-          if(pf.inn > 0) bits2.push('+'+fmt(pf.inn)+' received');
-          poolLine += '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink3)">includes '+bits2.join(" · ")+' with friends & family</span></div>';
+          if(pf.inn > 0) bits2.push('+'+fmt(pf.inn)+' paid back to you');
+          poolLine += '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink3)">includes '+bits2.join(" · ")+'</span></div>';
+        }
+        if(pf.borrowed > 0){
+          poolLine += '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink3)">'+fmt(pf.borrowed)+' borrowed — already part of this budget</span></div>';
         }
       }
       h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+
@@ -906,6 +909,19 @@
     return h;
   }
 
+  /* borrowing doesn't silently change your budget — you decide */
+  function offerBudgetBump(d, newBorrow){
+    if(newBorrow > 0 && state.restAmount > 0){
+      toastAction("Borrowed "+fmt(newBorrow)+" — add it to this month?", "Add", function(){
+        state.restAmount = Math.round((state.restAmount + newBorrow)*100)/100;
+        save(); render();
+        toast("Budget now "+fmt(state.restAmount)+" · "+fmt(autoDailyBudget())+"/day");
+      }, 7000);
+      return;
+    }
+    toastBalance(d);
+  }
+
   function toastBalance(d){
     toast(d.balance > 0 ? "You owe "+d.name+" "+fmt(d.balance)
         : d.balance < 0 ? d.name+" owes you "+fmt(-d.balance)
@@ -938,8 +954,11 @@
       if(!(amt > 0)){ toast("Enter the amount"); return; }
       btn.disabled = true;
       var d = findOrCreatePerson(name);
-      ledgerAdd(d, dir, Math.round(amt*100)/100, "");
-      save(); closeSheet(); render(); toastBalance(d);
+      amt = Math.round(amt*100)/100;
+      var newBorrow = dir === "b" ? classifyIncoming(d.balance, amt).borrow : 0;
+      ledgerAdd(d, dir, amt, "");
+      save(); closeSheet(); render();
+      offerBudgetBump(d, newBorrow);
     }
     $("#b-igave").addEventListener("click", function(){ submit("r", this); });
     $("#b-theygave").addEventListener("click", function(){ submit("b", this); });
@@ -978,8 +997,11 @@
       var a = num($("#d2-amt").value);
       if(!(a > 0)){ toast("Enter the amount first"); return; }
       btn.disabled = true;
-      ledgerAdd(d, dir, Math.round(a*100)/100, "");
-      save(); closeSheet(); render(); toastBalance(d);
+      a = Math.round(a*100)/100;
+      var newBorrow = dir === "b" ? classifyIncoming(d.balance, a).borrow : 0;
+      ledgerAdd(d, dir, a, "");
+      save(); closeSheet(); render();
+      offerBudgetBump(d, newBorrow);
     }
     $("#d2-igave").addEventListener("click", function(){ submit("r", this); });
     $("#d2-theygave").addEventListener("click", function(){ submit("b", this); });
@@ -1344,14 +1366,31 @@
   /* real cash moved with people since a date: money you handed over (out)
      and money handed to you (in). Paying someone back empties your pocket
      just like buying something does. */
+  /* Money coming back to you (someone repaying what they owed) is your own
+     cash returning — it raises your budget. Money you *borrow* does not:
+     it funds the amount you already said you'd have. That way planned
+     borrowing can never be counted twice. */
+  function classifyIncoming(balanceBefore, amt){
+    var repay = balanceBefore < 0 ? Math.min(amt, -balanceBefore) : 0;
+    return { repay: repay, borrow: Math.round((amt - repay)*100)/100 };
+  }
   function ledgerFlowSince(dIso){
-    var t = fromIso(dIso).getTime(), inn = 0, out = 0;
+    var t = fromIso(dIso).getTime(), inn = 0, out = 0, borrowed = 0;
     state.debts.forEach(function(d){
+      var bal = 0;
       (d.log||[]).forEach(function(l){
-        if(l.ts >= t){ if(l.dir === "b") inn += l.amt; else out += l.amt; }
+        if(l.dir === "b"){
+          var c = classifyIncoming(bal, l.amt);
+          bal += l.amt;
+          if(l.ts >= t){ inn += c.repay; borrowed += c.borrow; }
+        }else{
+          bal -= l.amt;
+          if(l.ts >= t) out += l.amt;
+        }
       });
     });
     return { inn: Math.round(inn*100)/100, out: Math.round(out*100)/100,
+             borrowed: Math.round(borrowed*100)/100,
              net: Math.round((out - inn)*100)/100 };
   }
   function monthStartIso(){
