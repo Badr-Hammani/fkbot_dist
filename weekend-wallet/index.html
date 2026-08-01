@@ -21,7 +21,7 @@
     --accent:#e89e24; --accent-deep:#8a5a00; --on-accent:#241b08;
     --good:#006300; --warn:#b97900; --bad:#d03b3b;
     --c-food:#eda100; --c-drinks:#2a78d6; --c-out:#4a3aa7;
-    --c-transport:#1baf7a; --c-shop:#e34948; --c-other:#008300;
+    --c-transport:#1baf7a; --c-shop:#e34948; --c-other:#008300; --c-missing:#7a7391;
     --shadow:0 10px 30px rgba(35,32,48,.12);
     --sheet-shadow:0 -18px 50px rgba(35,32,48,.22);
   }
@@ -33,7 +33,7 @@
       --accent:#f2a93b; --accent-deep:#f2a93b; --on-accent:#241b08;
       --good:#0ca30c; --warn:#fab219; --bad:#e66767;
       --c-food:#c98500; --c-drinks:#3987e5; --c-out:#9085e9;
-      --c-transport:#199e70; --c-shop:#e66767; --c-other:#008300;
+      --c-transport:#199e70; --c-shop:#e66767; --c-other:#008300; --c-missing:#9a92b4;
       --shadow:0 10px 30px rgba(0,0,0,.4);
       --sheet-shadow:0 -18px 50px rgba(0,0,0,.55);
     }
@@ -151,6 +151,10 @@
   }
   .qamts button:active{background:color-mix(in srgb, var(--accent) 18%, var(--card2))}
   .qa-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .qa-wide{grid-column:1/-1}
+  .checkrow{display:flex; align-items:flex-start; gap:10px; padding:11px 13px; border-radius:14px;
+    background:var(--card2); border:1px solid var(--line); font-size:14px; color:var(--ink2); line-height:1.4}
+  .checkrow input{width:19px; height:19px; flex:none; margin:1px 0 0; accent-color:var(--accent-deep)}
   .qa-tile{
     background:var(--card2); border:1px solid var(--line); border-radius:18px;
     padding:20px 12px 16px; display:flex; flex-direction:column; align-items:center; gap:9px;
@@ -276,6 +280,7 @@
   }
   .btn:active{transform:scale(.98)}
   .btn svg{width:16px; height:16px; flex:none}
+  .btn:disabled{opacity:.45}
   .btn.primary{background:var(--accent); border-color:transparent; color:var(--on-accent)}
   .btn.danger{color:var(--bad)}
   .hint{font-size:12.5px; color:var(--ink3); margin-top:8px; line-height:1.5}
@@ -423,13 +428,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=3.1"></script>
+<script src="scan.js?v=3.2"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "3.1";
+  var APP_VERSION = "3.2";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -437,8 +442,11 @@
     {id:"out",       name:"Going out", v:"--c-out"},
     {id:"transport", name:"Transport", v:"--c-transport"},
     {id:"shop",      name:"Shopping",  v:"--c-shop"},
-    {id:"other",     name:"Other",     v:"--c-other"}
+    {id:"other",     name:"Other",     v:"--c-other"},
+    {id:"missing",   name:"Not logged", v:"--c-missing"}
   ];
+  /* "Not logged" is written by the cash check, never picked by hand */
+  var PICK_CATS = CATS.filter(function(c){ return c.id !== "missing"; });
   var CURRENCIES = [
     {code:"MAD", label:"Moroccan dirham (DH)"},
     {code:"USD", label:"US dollar ($)"},
@@ -476,21 +484,23 @@
         if(typeof s.restFrom !== "string") s.restFrom = "";
         /* carry over an old borrow limit into the new "money for rest of month" */
         if(s.restAmount === 0 && typeof s.borrowCap === "number" && s.borrowCap > 0){
-          s.restAmount = s.borrowCap; s.restFrom = todayIso();
+          s.restAmount = s.borrowCap; s.restFrom = todayIso(); s.restTs = Date.now();
         }
         /* "money for the rest of the month" belongs to the month you set it in.
            Once the month turns it's meaningless — last month's spending would
            eat a budget spread over the new month's days. Retire it and ask
            for a fresh number. */
         if(s.restFrom && s.restFrom.slice(0,7) !== todayIso().slice(0,7)){
-          s.restAmount = 0; s.restFrom = ""; s.restAsk = todayIso().slice(0,7);
+          s.restAmount = 0; s.restFrom = ""; s.restTs = 0; s.restAsk = todayIso().slice(0,7);
         }
         if(typeof s.restAsk !== "string") s.restAsk = "";
+        if(typeof s.restTs !== "number") s.restTs = 0;
+        if(typeof s.cashTs !== "number") s.cashTs = 0;
         return s;
       }
     }catch(e){}
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"" };
+             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0 };
   }
   function save(opts){
     try{
@@ -698,7 +708,8 @@
     out:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9V6.5A1.5 1.5 0 0 1 5 5h14a1.5 1.5 0 0 1 1.5 1.5V9a3 3 0 0 0 0 6v2.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5V15a3 3 0 0 0 0-6Z"/><path d="M14 5v2.5M14 11v2M14 16.5V19"/></svg>',
     transport:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15.5 6.5 9a2 2 0 0 1 2-1.5h7A2 2 0 0 1 17.5 9L19 15.5M5 15.5h14M5 15.5V19a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h8v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-3.5"/><path d="M7.5 12.5h.01M16.5 12.5h.01"/></svg>',
     shop:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8h12l1 12.5H5L6 8Z"/><path d="M9 10.5V6a3 3 0 0 1 6 0v4.5"/></svg>',
-    other:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5.6L12 14 3 8.6 12 3Z" opacity="0"/><path d="M3.5 12.5 11.5 4.5a1.7 1.7 0 0 1 1.2-.5h6.3a1.5 1.5 0 0 1 1.5 1.5v6.3c0 .45-.18.88-.5 1.2l-8 8a1.5 1.5 0 0 1-2.12 0l-6.38-6.38a1.5 1.5 0 0 1 0-2.12Z"/><circle cx="16" cy="8" r="1.1"/></svg>'
+    other:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5.6L12 14 3 8.6 12 3Z" opacity="0"/><path d="M3.5 12.5 11.5 4.5a1.7 1.7 0 0 1 1.2-.5h6.3a1.5 1.5 0 0 1 1.5 1.5v6.3c0 .45-.18.88-.5 1.2l-8 8a1.5 1.5 0 0 1-2.12 0l-6.38-6.38a1.5 1.5 0 0 1 0-2.12Z"/><circle cx="16" cy="8" r="1.1"/></svg>',
+    missing:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12v17l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4v-17Z"/><path d="M10 9.2a2 2 0 1 1 2.6 1.9c-.4.15-.6.5-.6.95v.6"/><path d="M12 15.6h.01"/></svg>'
   };
   function catIcon(id){ return CAT_IC[id] || CAT_IC.other; }
   function catTile(c, size){
@@ -850,7 +861,7 @@
         poolLine = rr < 0
           ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">'+fmt(-rr)+' past your '+fmt(state.restAmount)+' for the month</span></div>'
           : '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">'+fmt(rr)+' left of your '+fmt(state.restAmount)+' for the rest of the month</span></div>';
-        var pf = ledgerFlowSince(state.restFrom);
+        var pf = poolFlow();
         if(pf.out > 0 || pf.inn > 0){
           var bits2 = [];
           if(pf.out > 0) bits2.push('−'+fmt(pf.out)+' given out');
@@ -1064,7 +1075,7 @@
           (n==="Me"? "" : IC.person)+esc(n)+'</button>';
       }).join("");
     }
-    var catChips = CATS.map(function(c){
+    var catChips = PICK_CATS.map(function(c){
       return '<button class="chip'+(c.id==="out"?" sel":"")+'" data-spcat="'+c.id+'">' +
         '<span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+c.name+'</button>';
     }).join("");
@@ -1438,6 +1449,20 @@
   function spentSince(dIso){
     return total(state.expenses.filter(function(e){ return e.date >= dIso; }));
   }
+  /* The pool is anchored to a moment, not a day: set it at 6pm and the coffee
+     you logged at 9am that same morning is already paid for, so it must not be
+     subtracted again. Expenses before the anchor on the anchor day are out. */
+  function poolStartTs(){
+    if(!state.restFrom) return 0;
+    return state.restTs > 0 ? state.restTs : fromIso(state.restFrom).getTime();
+  }
+  function spentFromPool(){
+    var t = poolStartTs();
+    return total(state.expenses.filter(function(e){
+      if(e.date > state.restFrom) return true;
+      return e.date === state.restFrom && (e.ts || 0) >= t;
+    }));
+  }
   /* real cash moved with people since a date: money you handed over (out)
      and money handed to you (in). Paying someone back empties your pocket
      just like buying something does. */
@@ -1449,8 +1474,9 @@
     var repay = balanceBefore < 0 ? Math.min(amt, -balanceBefore) : 0;
     return { repay: repay, borrow: Math.round((amt - repay)*100)/100 };
   }
-  function ledgerFlowSince(dIso){
-    var t = fromIso(dIso).getTime(), inn = 0, out = 0, borrowed = 0;
+  function ledgerFlowSince(dIso, fromTs){
+    var t = fromTs > 0 ? fromTs : fromIso(dIso).getTime();
+    var inn = 0, out = 0, borrowed = 0;
     state.debts.forEach(function(d){
       var bal = 0;
       (d.log||[]).forEach(function(l){
@@ -1500,17 +1526,18 @@
      given to / received from people */
   function restRemaining(){
     if(!(state.restAmount > 0) || !state.restFrom) return null;
-    var f = ledgerFlowSince(state.restFrom);
-    return Math.round((state.restAmount - spentSince(state.restFrom) - f.net) * 100) / 100;
+    var f = poolFlow();
+    return Math.round((state.restAmount - spentFromPool() - f.net) * 100) / 100;
   }
+  function poolFlow(){ return ledgerFlowSince(state.restFrom, poolStartTs()); }
   /* money left ÷ days left. Spending today doesn't move today's number
      (it recomputes tomorrow), but cash given or received counts right away. */
   function autoDailyBudget(){
     var days = daysLeftInMonth();
     if(days <= 0) return 0;
     if(state.restAmount > 0 && state.restFrom){
-      var spentBefore = spentSince(state.restFrom) - spentOn(todayIso());
-      var net = ledgerFlowSince(state.restFrom).net;
+      var spentBefore = spentFromPool() - spentOn(todayIso());
+      var net = poolFlow().net;
       return Math.max(Math.floor((state.restAmount - spentBefore - net) / days), 0);
     }
     if(state.salary > 0){
@@ -1562,6 +1589,7 @@
       '<div class="field"><label class="micro" for="p-rest" style="display:block; margin-bottom:6px">Money for the rest of the month</label>' +
       '<input id="p-rest" type="text" inputmode="decimal" min="0" placeholder="e.g. 1000" value="'+(state.restAmount||"")+'"></div>' +
       '<button class="btn primary" id="p-rest-save">Set daily budget</button>' +
+      '<div style="height:9px"></div><button class="btn" id="p-cash">'+IC.wallet+'Check my cash</button>' +
       (rr !== null
         ? '<div class="hint">You can spend about <b class="money" style="color:var(--ink)">'+fmt(autoD)+'</b> a day — '+
           (rr<0? '<span style="color:var(--bad)">'+fmt(-rr)+' past your '+fmt(state.restAmount)+'</span>' : fmt(rr)+' left of '+fmt(state.restAmount))+
@@ -1928,7 +1956,7 @@
 
   function scanWithClaude(dataUrl){
     var b64 = dataUrl.split(",")[1];
-    var catIds = CATS.map(function(c){ return c.id; });
+    var catIds = PICK_CATS.map(function(c){ return c.id; });
     return fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -2054,6 +2082,118 @@
   var sheet = $("#sheet"), backdrop = $("#backdrop"), camera = $("#camera");
   var draft = null;
 
+  /* ---- cash check -------------------------------------------------------
+     You forget to log things. So instead of trusting the running total, count
+     what you really have and let the app work backwards: the gap is money you
+     spent without writing it down. It gets logged as a real expense under
+     "Not logged", so every other number stays true. */
+  function pendingBills(){
+    return state.commitments.reduce(function(s,c){
+      return s + (paidRec(c) ? 0 : billFor(c));
+    }, 0);
+  }
+  /* what the app believes you can still spend */
+  function appCash(){
+    var rr = restRemaining();
+    if(rr !== null) return rr;
+    if(state.salary > 0){
+      var pm = planMath();
+      return Math.round((pm.left - monthSpent() - ledgerFlowSince(monthStartIso()).net)*100)/100;
+    }
+    return null;
+  }
+  function logMissing(amt){
+    state.expenses.push({ id: uid(), ts: Date.now(), amount: Math.round(amt*100)/100,
+                          cat: "missing", note: "Not logged", date: todayIso(), photo: null });
+  }
+  function missingThisMonth(){
+    var mk = todayIso().slice(0,7);
+    return total(state.expenses.filter(function(e){
+      return e.cat === "missing" && e.date.slice(0,7) === mk;
+    }));
+  }
+
+  function openCashSheet(){
+    var expected = appCash();
+    if(expected === null){
+      openSheet('<h2>Check my cash</h2>' +
+        '<p class="hint" style="margin-top:0">First tell the app what you\'re working with — your salary, or your money for the rest of the month. Then it can compare that against what\'s really in your pocket.</p>' +
+        '<button class="btn primary" id="cash-plan">Open Plan</button>');
+      $("#cash-plan").addEventListener("click", function(){ closeSheet(); tab = "plan"; render(); window.scrollTo(0,0); });
+      return;
+    }
+    var pend = Math.round(pendingBills()*100)/100;
+    var last = state.cashTs ? new Date(state.cashTs) : null;
+    openSheet(
+      '<h2>Check my cash</h2>' +
+      '<p class="hint" style="margin-top:0">Count what you have right now — pocket and bank. Whatever\'s missing gets logged as spending you forgot to write down.</p>' +
+      '<div class="field"><label class="micro" for="cash-have">How much do you have?</label>' +
+      '<input id="cash-have" type="text" inputmode="decimal" placeholder="e.g. '+Math.max(Math.round(expected),0)+'" autofocus></div>' +
+      (pend > 0
+        ? '<label class="checkrow" for="cash-pend"><input type="checkbox" id="cash-pend" checked>' +
+          '<span>My bills this month aren\'t paid yet — I\'m counting the <b class="money">'+fmt(pend)+'</b> for them too</span></label>'
+        : "") +
+      '<div class="flow" id="cash-math" style="margin-top:14px"></div>' +
+      '<button class="btn primary" id="cash-go" disabled>Enter an amount</button>' +
+      (last? '<div class="hint">Last checked '+last.toLocaleDateString(undefined,{month:"short",day:"numeric"})+'.</div>' : "")
+    );
+
+    var inp = $("#cash-have"), go = $("#cash-go"), pendBox = $("#cash-pend");
+    function target(){ return expected + (pendBox && pendBox.checked ? pend : 0); }
+    function diffNow(){
+      var have = num(inp.value);
+      if(!(have >= 0) || inp.value.trim() === "") return null;
+      return Math.round((have - target())*100)/100;
+    }
+    function paint(){
+      var t = target(), d = diffNow();
+      inp.placeholder = "e.g. " + Math.max(Math.round(t), 0);
+      var rows = '<div class="flow-row"><span class="lbl">App says you have</span>' +
+        '<span class="val money">'+fmt(t)+'</span></div>';
+      if(d === null){
+        $("#cash-math").innerHTML = rows;
+        go.disabled = true; go.textContent = "Enter an amount";
+        return;
+      }
+      rows += '<div class="flow-row flow-left"><span class="lbl">'+(d<0? "Missing" : d>0? "Extra" : "Difference")+'</span>' +
+        '<span class="val money'+(d<0?" neg":"")+'">'+(d<0? "−" : d>0? "+" : "")+fmt(Math.abs(d))+'</span></div>';
+      $("#cash-math").innerHTML = rows;
+      go.disabled = false;
+      go.textContent = Math.abs(d) < 1 ? "Looks right — nothing to log"
+        : d < 0 ? "Log "+fmt(-d)+" as spending I didn't track"
+        : "Add "+fmt(d)+" to my money";
+    }
+    inp.addEventListener("input", paint);
+    if(pendBox) pendBox.addEventListener("change", paint);
+    paint();
+
+    go.addEventListener("click", function(){
+      var d = diffNow();
+      if(d === null) return;
+      state.cashTs = Date.now();
+      if(Math.abs(d) < 1){
+        save(); closeSheet(); render();
+        toast("Nice — the app matches your pocket");
+        return;
+      }
+      if(d < 0){
+        logMissing(-d);
+        save(); closeSheet(); render();
+        toast(fmt(-d)+" logged as “Not logged”");
+        return;
+      }
+      /* more than the app thought: it's money you can spend, so it joins the pool */
+      if(state.restAmount > 0 && state.restFrom){
+        state.restAmount = Math.round((state.restAmount + d)*100)/100;
+      }else{
+        state.restAmount = Math.round((num(inp.value))*100)/100;
+        state.restFrom = todayIso(); state.restTs = Date.now(); state.restAsk = "";
+      }
+      save(); closeSheet(); render();
+      toast(fmt(d)+" more than expected · "+fmt(autoDailyBudget())+"/day");
+    });
+  }
+
   function openSheet(html){
     sheet.innerHTML = '<div class="grab"></div><button class="sheet-x" aria-label="Close">✕</button>' + html;
     sheet.querySelector(".sheet-x").addEventListener("click", closeSheet);
@@ -2076,6 +2216,7 @@
       '<button class="qa-tile" id="qa-snap">'+IC.camera+'Snap receipt</button>' +
       '<button class="qa-tile" id="qa-split">'+IC.split+'Split a bill</button>' +
       '<button class="qa-tile" id="qa-friend">'+IC.person+'Friend money</button>' +
+      '<button class="qa-tile qa-wide" id="qa-cash">'+IC.wallet+'Check my cash</button>' +
       '</div>'
     );
     $("#qa-expense").addEventListener("click", function(){ openAdd(); });
@@ -2085,6 +2226,7 @@
     });
     $("#qa-split").addEventListener("click", openSplitSheet);
     $("#qa-friend").addEventListener("click", function(){ openBorrowSheet(0); });
+    $("#qa-cash").addEventListener("click", openCashSheet);
   }
 
   function setupChecklist(){
@@ -2124,7 +2266,7 @@
               photo: editing? editing.photo : null,
               editId: editing? editing.id : null,
               catManual: !!editing };
-    var chips = CATS.map(function(c){
+    var chips = PICK_CATS.map(function(c){
       return '<button class="chip'+(c.id===draft.cat?" sel":"")+'" data-cat="'+c.id+'">' +
         '<span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+c.name+'</button>';
     }).join("");
@@ -2380,17 +2522,19 @@
       var pRest = $("#p-rest-save");
       if(pRest) pRest.addEventListener("click", function(){
         var v = num($("#p-rest").value);
-        if(v > 0){ state.restAmount = Math.round(v*100)/100; state.restFrom = todayIso(); }
-        else { state.restAmount = 0; state.restFrom = ""; }
+        if(v > 0){ state.restAmount = Math.round(v*100)/100; state.restFrom = todayIso(); state.restTs = Date.now(); }
+        else { state.restAmount = 0; state.restFrom = ""; state.restTs = 0; }
         state.restAsk = "";
         save(); render();
         toast(state.restAmount>0 ? "Daily budget: "+fmt(autoDailyBudget())+"/day" : "Daily budget cleared");
       });
+      var pCash = $("#p-cash");
+      if(pCash) pCash.addEventListener("click", openCashSheet);
       var pRestReset = $("#p-rest-reset");
       if(pRestReset) pRestReset.addEventListener("click", function(){
         var left = restRemaining();
         if(left !== null && left > 0){ state.restAmount = left; }
-        state.restFrom = todayIso();
+        state.restFrom = todayIso(); state.restTs = Date.now();
         save(); render();
         toast("Counting fresh from today");
       });
@@ -2417,7 +2561,7 @@
                      scanModel:state.scanModel, expenses:state.expenses,
                      salary:state.salary, commitments:state.commitments, goals:state.goals,
                      swept:state.swept, payday:state.payday, debts:state.debts,
-                     restAmount:state.restAmount, restFrom:state.restFrom };  // apiKey deliberately excluded
+                     restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs };  // apiKey deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -2447,7 +2591,7 @@
                       payday:+d.payday||0,
                       debts:Array.isArray(d.debts)? d.debts : [],
                       restAmount:+d.restAmount||0,
-                      restFrom:(typeof d.restFrom==="string")? d.restFrom : "" };
+                      restFrom:(typeof d.restFrom==="string")? d.restFrom : "", restTs:+d.restTs||0, cashTs:+d.cashTs||0 };
             save(); render(); toast("Backup restored — "+state.expenses.length+" expenses");
           }catch(e){ toast("That file isn't a Weekend Wallet backup"); }
         };
@@ -2457,7 +2601,7 @@
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"" };
+                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0 };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
       });
