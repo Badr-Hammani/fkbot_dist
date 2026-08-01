@@ -423,13 +423,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=3.0"></script>
+<script src="scan.js?v=3.1"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "3.0";
+  var APP_VERSION = "3.1";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -472,18 +472,25 @@
         if(typeof s.backupTs !== "number") s.backupTs = 0;
         if(typeof s.nudgedAt !== "number") s.nudgedAt = 0;
         if(typeof s.lastCat !== "string") s.lastCat = "";
-        if(typeof s.dailyBudget !== "number") s.dailyBudget = 0;
         if(typeof s.restAmount !== "number") s.restAmount = 0;
         if(typeof s.restFrom !== "string") s.restFrom = "";
         /* carry over an old borrow limit into the new "money for rest of month" */
         if(s.restAmount === 0 && typeof s.borrowCap === "number" && s.borrowCap > 0){
           s.restAmount = s.borrowCap; s.restFrom = todayIso();
         }
+        /* "money for the rest of the month" belongs to the month you set it in.
+           Once the month turns it's meaningless — last month's spending would
+           eat a budget spread over the new month's days. Retire it and ask
+           for a fresh number. */
+        if(s.restFrom && s.restFrom.slice(0,7) !== todayIso().slice(0,7)){
+          s.restAmount = 0; s.restFrom = ""; s.restAsk = todayIso().slice(0,7);
+        }
+        if(typeof s.restAsk !== "string") s.restAsk = "";
         return s;
       }
     }catch(e){}
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], dailyBudget:0, restAmount:0, restFrom:"" };
+             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"" };
   }
   function save(opts){
     try{
@@ -824,16 +831,22 @@
         '</section>';
     }
 
+    /* new month, and last month you were running on a set-aside pool —
+       last month's number is gone, so ask for this month's */
+    if(state.restAsk === monthKey() && !(state.restAmount > 0)){
+      h += '<div class="suggest"><span class="txt">New month. How much do you have from today to the end of ' +
+        monthName + ' — borrowing included?</span><button data-task="plan" id="h-newmonth">Set it</button></div>';
+    }
+
     /* today card — everyday budget */
     var tb = todayBudget();
     if(tb > 0){
       var dLeft = tb - tSpent;
-      var isAuto = !(state.dailyBudget > 0);
       h += '<div class="sec"><span class="micro">Today</span>' +
-        '<span class="micro">'+(isAuto? daysLeftInMonth()+" days left this month" : "daily target")+'</span></div>';
+        '<span class="micro">'+daysLeftInMonth()+' days left this month</span></div>';
       var poolLine = "";
       var rr = restRemaining();
-      if(isAuto && rr !== null){
+      if(rr !== null){
         poolLine = rr < 0
           ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">'+fmt(-rr)+' past your '+fmt(state.restAmount)+' for the month</span></div>'
           : '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">'+fmt(rr)+' left of your '+fmt(state.restAmount)+' for the rest of the month</span></div>';
@@ -855,7 +868,7 @@
           : '<b>'+fmt(dLeft)+'</b> left today')+'</span></div>' +
         meterHtml(tSpent, tb) +
         '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(tSpent)+' of '+fmt(tb)+
-        (isAuto? ' · rebalances daily' : '')+'</span></div>' + poolLine + '</div>';
+        ' · rebalances daily</span></div>' + poolLine + '</div>';
     }
 
     /* weekend card */
@@ -1507,9 +1520,7 @@
     }
     return 0;
   }
-  function todayBudget(){
-    return state.dailyBudget > 0 ? state.dailyBudget : autoDailyBudget();
-  }
+  function todayBudget(){ return autoDailyBudget(); }
 
   function viewPlan(){
     var m = planMath();
@@ -2371,6 +2382,7 @@
         var v = num($("#p-rest").value);
         if(v > 0){ state.restAmount = Math.round(v*100)/100; state.restFrom = todayIso(); }
         else { state.restAmount = 0; state.restFrom = ""; }
+        state.restAsk = "";
         save(); render();
         toast(state.restAmount>0 ? "Daily budget: "+fmt(autoDailyBudget())+"/day" : "Daily budget cleared");
       });
@@ -2405,7 +2417,7 @@
                      scanModel:state.scanModel, expenses:state.expenses,
                      salary:state.salary, commitments:state.commitments, goals:state.goals,
                      swept:state.swept, payday:state.payday, debts:state.debts,
-                     dailyBudget:state.dailyBudget, restAmount:state.restAmount, restFrom:state.restFrom };  // apiKey deliberately excluded
+                     restAmount:state.restAmount, restFrom:state.restFrom };  // apiKey deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -2434,7 +2446,6 @@
                       swept:(d.swept && typeof d.swept==="object")? d.swept : {},
                       payday:+d.payday||0,
                       debts:Array.isArray(d.debts)? d.debts : [],
-                      dailyBudget:+d.dailyBudget||0,
                       restAmount:+d.restAmount||0,
                       restFrom:(typeof d.restFrom==="string")? d.restFrom : "" };
             save(); render(); toast("Backup restored — "+state.expenses.length+" expenses");
@@ -2446,7 +2457,7 @@
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], dailyBudget:0, restAmount:0, restFrom:"" };
+                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"" };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
       });
