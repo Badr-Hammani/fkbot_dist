@@ -422,13 +422,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=2.6"></script>
+<script src="scan.js?v=2.9"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "2.8";
+  var APP_VERSION = "2.9";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -799,11 +799,23 @@
           '<button id="h-owe">Manage</button></div>';
       }
     }else{
+      /* no salary set: show what actually left your pocket — spending plus
+         money you handed to people, minus what came back */
+      var nFlow = ledgerFlowSince(monthStartIso());
+      var gone = Math.round((mSpent + nFlow.net)*100)/100;
+      var nNote = "";
+      if(nFlow.out > 0 || nFlow.inn > 0){
+        var nb = [];
+        if(nFlow.out > 0) nb.push('<strong class="money">'+fmt(nFlow.out)+'</strong> given out');
+        if(nFlow.inn > 0) nb.push('<strong class="money">'+fmt(nFlow.inn)+'</strong> paid back to you');
+        nNote = ' · includes '+nb.join(" · ");
+      }
       h += '<section class="hero">' +
         '<div class="hero-top"><span class="hero-when">'+monthName+'</span>' +
         '<span class="hero-live" style="color:var(--ink2)">Today: <b class="money" style="color:var(--ink)">'+fmt(tSpent)+'</b></span></div>' +
-        '<div class="hero-amount money">'+fmt(mSpent)+'</div>' +
-        '<div class="hero-caption">spent this month · add your salary in <strong>Plan</strong> to see what\'s left</div>' +
+        '<div class="hero-amount money">'+(gone<0? "+"+fmt(-gone) : fmt(gone))+'</div>' +
+        '<div class="hero-caption">'+(gone<0? "came in this month" : "out of your pocket this month")+nNote+
+        ' · add your salary in <strong>Plan</strong> to see what\'s left</div>' +
         '</section>';
     }
 
@@ -886,23 +898,30 @@
 
     /* recent expenses (all days) */
     h += '<div class="sec"><span class="micro">Recent</span></div>';
-    var recent = state.expenses.slice()
-      .sort(function(a,b){ return a.date < b.date ? 1 : a.date > b.date ? -1 : (b.ts||0)-(a.ts||0); });
+    var recent = state.expenses.map(function(e){ return { date:e.date, ts:e.ts||0, exp:e }; })
+      .concat(ledgerItems().map(function(it){ return { date:it.date, ts:it.ts||0, led:it }; }))
+      .sort(function(a,b){ return a.date < b.date ? 1 : a.date > b.date ? -1 : b.ts-a.ts; });
     if(!recent.length){
       h += emptyBox(IC.receipt, 'Nothing logged yet.<br><b>Tap +</b> and snap the receipt — the amount fills in by itself.');
     }else{
       var days = {}, order = [];
-      recent.forEach(function(e){
-        if(!days[e.date]){ if(order.length >= 5) return; days[e.date] = []; order.push(e.date); }
-        days[e.date].push(e);
+      recent.forEach(function(r){
+        if(!days[r.date]){ if(order.length >= 5) return; days[r.date] = []; order.push(r.date); }
+        days[r.date].push(r);
       });
       order.forEach(function(d){
         var list = days[d];
         var dn = d===todayIso() ? "Today" :
           fromIso(d).toLocaleDateString(undefined,{weekday:"long", month:"short", day:"numeric"});
+        /* the day's real hit on your pocket: what you spent, plus money you
+           handed over, minus money that came back to you */
+        var dayOut = list.reduce(function(s,r){
+          return s + (r.exp ? r.exp.amount : -r.led.cash);
+        }, 0);
+        dayOut = Math.round(dayOut*100)/100;
         h += '<div class="daygroup"><div class="dayhead"><span class="micro">'+dn+'</span>' +
-          '<span class="total money">'+fmt(total(list))+'</span></div><div class="exp-list">';
-        list.forEach(function(e){ h += expRow(e); });
+          '<span class="total money">'+(dayOut<0? "+"+fmt(-dayOut) : fmt(dayOut))+'</span></div><div class="exp-list">';
+        list.forEach(function(r){ h += r.exp ? expRow(r.exp) : ledgerRow(r.led); });
         h += '</div></div>';
       });
     }
@@ -972,7 +991,7 @@
       return '<div class="flow-row" style="padding:5px 0"><span class="lbl">'+(l.dir==="b"?"they gave":"you gave")+
         (l.note? " · "+esc(l.note) : "")+
         ' · '+new Date(l.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+'</span>' +
-        '<span class="val money" style="color:'+(l.dir==="b"?"var(--bad)":"var(--good)")+'">'+(l.dir==="b"?"+":"−")+fmt(l.amt)+'</span></div>';
+        '<span class="val money" style="color:'+(l.dir==="b"?"var(--good)":"var(--bad)")+'">'+(l.dir==="b"?"+":"−")+fmt(l.amt)+'</span></div>';
     }).join("");
     openSheet(
       '<h2>'+esc(d.name)+'</h2>' +
@@ -1244,6 +1263,18 @@
       '<span class="exp-amt money">'+fmt(e.amount)+'</span></button>';
   }
 
+  var LEDGER_LABEL = { gave:"you gave", repaid:"paid you back", borrowed:"you borrowed", mixed:"paid you back" };
+  function ledgerRow(it){
+    var v = it.cash < 0 ? "--bad" : it.cash > 0 ? "--good" : "--ink2";
+    var sign = it.cash < 0 ? "−" : it.cash > 0 ? "+" : "";
+    return '<button class="exp" data-ledger="'+it.pid+'">' +
+      '<span class="exp-thumb" style="color:var('+v+'); background:color-mix(in srgb, var('+v+') 15%, var(--card2))">'+IC.person+'</span>' +
+      '<span class="exp-main"><span class="exp-title">'+esc(it.name)+'</span>' +
+      '<span class="exp-sub"><span class="cat-dot" style="background:var('+v+')"></span>'+
+      LEDGER_LABEL[it.kind]+(it.note? " · "+esc(it.note):"")+'</span></span>' +
+      '<span class="exp-amt money" style="color:var('+v+')">'+sign+fmt(it.amt)+'</span></button>';
+  }
+
   function catBreakdown(list, title){
     if(!list.length) return "";
     var byCat = {};
@@ -1396,6 +1427,30 @@
   function monthStartIso(){
     var n = new Date();
     return iso(new Date(n.getFullYear(), n.getMonth(), 1));
+  }
+  /* every person-money movement, flattened and dated, so it can sit in the
+     day list next to your expenses. cash = effect on your pocket that day. */
+  function ledgerItems(){
+    var out = [];
+    state.debts.forEach(function(d){
+      var bal = 0;
+      (d.log||[]).forEach(function(l){
+        var kind, cash;
+        if(l.dir === "b"){
+          var c = classifyIncoming(bal, l.amt);
+          bal += l.amt;
+          kind = c.repay <= 0 ? "borrowed" : c.repay >= l.amt ? "repaid" : "mixed";
+          cash = c.repay;                       // borrowed money isn't yours to spend twice
+        }else{
+          bal -= l.amt;
+          kind = "gave";
+          cash = -l.amt;                        // out of your pocket, same as spending
+        }
+        out.push({ pid:d.id, name:d.name, amt:l.amt, dir:l.dir, kind:kind, cash:cash,
+                   note:l.note||"", ts:l.ts, date: iso(new Date(l.ts)) });
+      });
+    });
+    return out;
   }
   /* what's left of the money you set aside, after spending AND after money
      given to / received from people */
@@ -2173,6 +2228,9 @@
     });
     shell.querySelectorAll("[data-exp]").forEach(function(b){
       b.addEventListener("click", function(ev){ ev.stopPropagation(); openDetail(b.getAttribute("data-exp")); });
+    });
+    shell.querySelectorAll("[data-ledger]").forEach(function(b){
+      b.addEventListener("click", function(ev){ ev.stopPropagation(); openDebtSheet(b.getAttribute("data-ledger")); });
     });
     shell.querySelectorAll("[data-wk]").forEach(function(b){
       function toggle(){
