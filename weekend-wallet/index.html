@@ -138,6 +138,7 @@
   }
   .ic-tile svg{width:19px; height:19px}
   .chip svg{width:14px; height:14px; flex:none}
+  .subline svg{width:13px; height:13px; vertical-align:-2px; margin-right:4px}
   .cat-name svg{width:15px; height:15px; flex:none}
   .goal-name svg{width:15px; height:15px; vertical-align:-2px; margin-right:5px; color:var(--accent-deep)}
   .panel h3 svg{width:16px; height:16px; vertical-align:-2.5px; margin-right:7px; color:var(--accent-deep)}
@@ -422,13 +423,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=2.9"></script>
+<script src="scan.js?v=3.0"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "2.9";
+  var APP_VERSION = "3.0";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -463,6 +464,7 @@
         if(typeof s.apiKey !== "string") s.apiKey = "";
         if(typeof s.salary !== "number") s.salary = 0;
         if(!Array.isArray(s.commitments)) s.commitments = [];
+        s.commitments.forEach(function(c){ if(!c.paid || typeof c.paid !== "object") c.paid = {}; });
         if(!Array.isArray(s.goals)) s.goals = [];
         if(!s.swept || typeof s.swept !== "object") s.swept = {};
         if(typeof s.payday !== "number") s.payday = 0;
@@ -587,6 +589,7 @@
     var dim = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
     state.commitments.forEach(function(c){
       if(!c.due) return;
+      if(paidRec(c)) return;                  // already handled this month
       var days = c.due - today;
       if(days < 0) days += dim;
       if(days <= 10) out.push({c:c, days:days});
@@ -782,7 +785,9 @@
         '<div class="hero-caption">'+(mLeft<0? "over this month" : "left this month") +
         ' · spent <strong class="money">'+fmt(mSpent)+'</strong> of <strong class="money">'+fmt(Math.max(spendable,0))+'</strong>'+flowNote+'</div>' +
         '<div class="meter">'+meterHtml(mSpent + Math.max(mFlow.net,0), Math.max(spendable,0))+
-        '<div class="meter-row"><span>after your loan, subscriptions & savings</span>'+paydayChip()+'</div></div>' +
+        '<div class="meter-row"><span>after your loan, subscriptions & savings' +
+        (pm.extra ? (pm.extra > 0 ? ' · '+fmt(pm.extra)+' more than usual' : ' · '+fmt(-pm.extra)+' less than usual') : "") +
+        '</span>'+paydayChip()+'</div></div>' +
         '</section>';
       var uncovered = Math.abs(Math.min(mLeft, 0)) - borrowedThisMonth();
       if(mLeft < 0 && uncovered >= 1){
@@ -1381,10 +1386,36 @@
     }
     return n;
   }
+  /* a bill's plan is the usual monthly amount, but the month you actually pay
+     it you can log a different figure — 2,770 on a 2,500 loan. From then on
+     that month uses the real number, so the extra comes out of your spending
+     money instead of quietly disappearing. */
+  function monthKey(){ return todayIso().slice(0,7); }
+  function paidRec(c, mk){ return (c.paid || {})[mk || monthKey()] || null; }
+  function billFor(c, mk){
+    var p = paidRec(c, mk);
+    return p && p.amt > 0 ? p.amt : c.amount;
+  }
+  function payCommitment(c, amt){
+    if(!c.paid) c.paid = {};
+    var prev = paidRec(c);
+    if(prev && c.kind === "loan") c.remaining = Math.round((c.remaining + prev.amt)*100)/100;
+    c.paid[monthKey()] = { amt: Math.round(amt*100)/100, ts: Date.now() };
+    if(c.kind === "loan") c.remaining = Math.max(Math.round((c.remaining - amt)*100)/100, 0);
+  }
+  function unpayCommitment(c){
+    var p = paidRec(c);
+    if(!p) return;
+    if(c.kind === "loan") c.remaining = Math.round((c.remaining + p.amt)*100)/100;
+    delete c.paid[monthKey()];
+  }
   function planMath(){
-    var bills = state.commitments.reduce(function(s,c){ return s + c.amount; }, 0);
+    var bills = 0, planned = 0;
+    state.commitments.forEach(function(c){ bills += billFor(c); planned += c.amount; });
     var savings = state.goals.reduce(function(s,g){ return s + (g.monthly||0); }, 0);
-    return { bills: bills, savings: savings, left: state.salary - bills - savings };
+    return { bills: Math.round(bills*100)/100, planned: Math.round(planned*100)/100,
+             extra: Math.round((bills - planned)*100)/100,
+             savings: savings, left: Math.round((state.salary - bills - savings)*100)/100 };
   }
   function daysLeftInMonth(){
     var now = new Date();
@@ -1529,16 +1560,22 @@
       '</div>';
 
     h += '<div class="sec"><span class="micro">Loan & subscriptions</span>' +
-      '<span class="micro money">'+(state.commitments.length? "− "+fmt(m.bills)+" / mo" : "")+'</span></div>';
+      '<span class="micro money">'+(state.commitments.length
+        ? "− "+fmt(m.bills)+(m.extra? " this month" : " / mo") : "")+'</span></div>';
     if(state.commitments.length){
       h += '<div class="row-list">';
       state.commitments.forEach(function(c){
         var ord = c.due===1||c.due===21||c.due===31 ? "st" : c.due===2||c.due===22 ? "nd" : c.due===3||c.due===23 ? "rd" : "th";
         var sub1 = (c.kind==="loan"?"Loan":"Subscription") + (c.due? " · due the "+c.due+ord : "");
         var months = c.kind==="loan" && c.remaining > 0 ? Math.max(Math.ceil(c.remaining/c.amount),1) : 0;
+        var p = paidRec(c), diff = p ? Math.round((p.amt - c.amount)*100)/100 : 0;
+        var paidLine = p
+          ? '<span class="subline hl money" style="color:'+(diff>0?"var(--bad)":"var(--good)")+'">'+IC.check+
+            ' paid '+fmt(p.amt)+' this month'+(diff? ' · '+fmt(Math.abs(diff))+(diff>0? ' more' : ' less')+' than usual' : "")+'</span>'
+          : "";
         h += '<button class="row-item" data-cm="'+c.id+'">' + kindTile(c.kind) +
           '<span class="name"><span class="ttl">'+esc(c.name)+'</span>' +
-          '<span class="subline">'+sub1+'</span>' +
+          '<span class="subline">'+sub1+'</span>' + paidLine +
           (months? '<span class="subline hl money">'+fmt(c.remaining)+' left · ≈ '+months+' month'+(months>1?"s":"")+' to go</span>' : "")+'</span>' +
           '<span class="amt money">'+fmt(c.amount)+' <small>/mo</small></span></button>';
       });
@@ -1601,6 +1638,26 @@
     return h;
   }
 
+  /* "this month I actually gave dad 2,770" — log the real figure without
+     touching the plan, and the difference lands on your spending money. */
+  function payBlock(c){
+    var p = paidRec(c);
+    var mName = new Date().toLocaleDateString(undefined,{month:"long"});
+    if(p){
+      var diff = Math.round((p.amt - c.amount)*100)/100;
+      return '<div class="field"><div class="micro">Paid in '+mName+'</div>' +
+        '<div class="flow-row" style="padding:6px 0"><span class="lbl">'+
+        new Date(p.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+
+        (diff? ' · '+fmt(Math.abs(diff))+(diff>0? ' more' : ' less')+' than the usual '+fmt(c.amount) : ' · the usual amount')+
+        '</span><span class="val money" style="color:var(--bad)">−'+fmt(p.amt)+'</span></div>' +
+        '<button class="btn ghost" id="c-unpay" style="color:var(--ink2)">Undo this payment</button></div>';
+    }
+    return '<div class="field"><label class="micro" for="c-paid">Paid in '+mName+'? (optional)</label>' +
+      '<input id="c-paid" type="text" inputmode="decimal" placeholder="'+c.amount+'" value="">' +
+      '<button class="btn" id="c-pay" style="margin-top:8px">Log this month\'s payment</button>' +
+      '<div class="hint">Some months you give more — put the real amount here and the difference comes off your spending money.</div></div>';
+  }
+
   function openCommitmentSheet(id){
     var c = null;
     if(id){ state.commitments.forEach(function(x){ if(x.id===id) c = x; }); }
@@ -1622,6 +1679,7 @@
       '<label class="micro" for="c-remaining">Loan balance left (optional)</label>' +
       '<input id="c-remaining" type="text" inputmode="decimal" min="0" placeholder="How much is still owed" value="'+(c && c.remaining? c.remaining:"")+'">' +
       '<div class="hint">Each saved edit updates this — the app shows roughly how many months are left.</div></div>' +
+      (c? payBlock(c) : "") +
       '<button class="btn primary" id="c-save">Save</button>' +
       (c? '<div style="height:10px"></div><button class="btn danger" id="c-del">Remove</button>' : "")
     );
@@ -1642,9 +1700,26 @@
       if(!name){ toast("Give it a name"); return; }
       if(!(amt > 0)){ toast("Enter the monthly amount"); return; }
       if(c){ c.name = name; c.amount = Math.round(amt*100)/100; c.kind = selKind; c.due = due; c.remaining = remaining; }
-      else state.commitments.push({ id: uid(), name: name, amount: Math.round(amt*100)/100, kind: selKind, due: due, remaining: remaining });
+      else state.commitments.push({ id: uid(), name: name, amount: Math.round(amt*100)/100, kind: selKind, due: due, remaining: remaining, paid: {} });
       save(); closeSheet(); render();
     });
+    if(c && $("#c-pay")){
+      $("#c-pay").addEventListener("click", function(){
+        var amt = num($("#c-paid").value) || num($("#c-amount").value);
+        if(!(amt > 0)){ toast("How much did you pay?"); return; }
+        payCommitment(c, amt);
+        save(); closeSheet(); render();
+        var d = Math.round((amt - c.amount)*100)/100;
+        toast(c.name+": "+fmt(amt)+" logged"+(d>0? " · "+fmt(d)+" more than usual" : d<0? " · "+fmt(-d)+" less than usual" : ""));
+      });
+    }
+    if(c && $("#c-unpay")){
+      $("#c-unpay").addEventListener("click", function(){
+        unpayCommitment(c);
+        save(); closeSheet(); render();
+        toast(c.name+" payment removed");
+      });
+    }
     if(c){
       var armed = false;
       $("#c-del").addEventListener("click", function(){
