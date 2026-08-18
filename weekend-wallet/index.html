@@ -138,6 +138,8 @@
   }
   .ic-tile svg{width:19px; height:19px}
   .chip svg{width:14px; height:14px; flex:none}
+  .linkish{background:none; border:0; padding:0; font:inherit; font-size:12.5px; font-weight:700;
+    letter-spacing:.02em; color:var(--accent-deep); text-transform:none}
   .subline svg{width:13px; height:13px; vertical-align:-2px; margin-right:4px}
   .cat-name svg{width:15px; height:15px; flex:none}
   .goal-name svg{width:15px; height:15px; vertical-align:-2px; margin-right:5px; color:var(--accent-deep)}
@@ -428,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=3.2"></script>
+<script src="scan.js?v=3.3"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "3.2";
+  var APP_VERSION = "3.3";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -925,37 +927,57 @@
     h += catBreakdown(state.expenses.filter(function(e){ return e.date.slice(0,7)===todayIso().slice(0,7); }),
                       "Where it went — "+monthName);
 
-    /* recent expenses (all days) */
-    h += '<div class="sec"><span class="micro">Recent</span></div>';
-    var recent = state.expenses.map(function(e){ return { date:e.date, ts:e.ts||0, exp:e }; })
-      .concat(ledgerItems().map(function(it){ return { date:it.date, ts:it.ts||0, led:it }; }))
-      .sort(function(a,b){ return a.date < b.date ? 1 : a.date > b.date ? -1 : b.ts-a.ts; });
-    if(!recent.length){
+    /* recent days — the newest few. Every day lives in History > Days. */
+    var groups = dayGroups(5);
+    h += '<div class="sec"><span class="micro">Recent</span>' +
+      (dayCount() > groups.length ? '<button class="linkish" data-task="history">See all '+dayCount()+' days</button>' : "")+'</div>';
+    if(!groups.length){
       h += emptyBox(IC.receipt, 'Nothing logged yet.<br><b>Tap +</b> and snap the receipt — the amount fills in by itself.');
     }else{
-      var days = {}, order = [];
-      recent.forEach(function(r){
-        if(!days[r.date]){ if(order.length >= 5) return; days[r.date] = []; order.push(r.date); }
-        days[r.date].push(r);
-      });
-      order.forEach(function(d){
-        var list = days[d];
-        var dn = d===todayIso() ? "Today" :
-          fromIso(d).toLocaleDateString(undefined,{weekday:"long", month:"short", day:"numeric"});
-        /* the day's real hit on your pocket: what you spent, plus money you
-           handed over, minus money that came back to you */
-        var dayOut = list.reduce(function(s,r){
-          return s + (r.exp ? r.exp.amount : -r.led.cash);
-        }, 0);
-        dayOut = Math.round(dayOut*100)/100;
-        h += '<div class="daygroup"><div class="dayhead"><span class="micro">'+dn+'</span>' +
-          '<span class="total money">'+(dayOut<0? "+"+fmt(-dayOut) : fmt(dayOut))+'</span></div><div class="exp-list">';
-        list.forEach(function(r){ h += r.exp ? expRow(r.exp) : ledgerRow(r.led); });
-        h += '</div></div>';
+      groups.forEach(function(g){
+        h += '<div class="daygroup"><div class="dayhead"><span class="micro">'+dayName(g.date)+'</span>' +
+          '<span class="total money">'+dayTotalText(g.out)+'</span></div><div class="exp-list">' +
+          g.items.map(dayRow).join("") + '</div></div>';
       });
     }
     return h;
   }
+
+  /* Expenses and person-money, merged and grouped by day, newest first.
+     limit 0 = every day there is. */
+  function dayGroups(limit){
+    var rows = state.expenses.map(function(e){ return { date:e.date, ts:e.ts||0, exp:e }; })
+      .concat(ledgerItems().map(function(it){ return { date:it.date, ts:it.ts||0, led:it }; }))
+      .sort(function(a,b){ return a.date < b.date ? 1 : a.date > b.date ? -1 : b.ts-a.ts; });
+    var days = {}, order = [];
+    rows.forEach(function(r){
+      if(!days[r.date]){
+        if(limit && order.length >= limit) return;
+        days[r.date] = []; order.push(r.date);
+      }
+      days[r.date].push(r);
+    });
+    return order.map(function(d){
+      /* the day's real hit on your pocket: what you spent, plus money you
+         handed over, minus money that came back to you */
+      var out = days[d].reduce(function(s,r){ return s + (r.exp ? r.exp.amount : -r.led.cash); }, 0);
+      return { date:d, items:days[d], out: Math.round(out*100)/100 };
+    });
+  }
+  function dayCount(){
+    var seen = {}, n = 0;
+    state.expenses.forEach(function(e){ if(!seen[e.date]){ seen[e.date]=1; n++; } });
+    ledgerItems().forEach(function(it){ if(!seen[it.date]){ seen[it.date]=1; n++; } });
+    return n;
+  }
+  function dayName(d){
+    if(d === todayIso()) return "Today";
+    var y = new Date(); y.setDate(y.getDate()-1);
+    if(d === iso(y)) return "Yesterday";
+    return fromIso(d).toLocaleDateString(undefined,{weekday:"long", month:"short", day:"numeric"});
+  }
+  function dayTotalText(out){ return out < 0 ? "+"+fmt(-out) : fmt(out); }
+  function dayRow(r){ return r.exp ? expRow(r.exp) : ledgerRow(r.led); }
 
   /* borrowing doesn't silently change your budget — you decide */
   function offerBudgetBump(d, newBorrow){
@@ -1323,14 +1345,48 @@
     return h + '</div>';
   }
 
-  var openWk = null;
-  var histMode = "weekends";
+  var openWk = null, openDay = null;
+  var histMode = "days";
   function viewHistory(){
     var h = '<div class="sec"><span class="micro">History</span></div>' +
       '<div class="chips">' +
+      '<button class="chip'+(histMode==="days"?" sel":"")+'" data-hist="days">'+IC.history+'Days</button>' +
       '<button class="chip'+(histMode==="weekends"?" sel":"")+'" data-hist="weekends">Weekends</button>' +
       '<button class="chip'+(histMode==="months"?" sel":"")+'" data-hist="months">Months</button></div>';
-    return h + (histMode==="months" ? historyMonths() : historyWeekends());
+    return h + (histMode==="months" ? historyMonths()
+              : histMode==="weekends" ? historyWeekends() : historyDays());
+  }
+
+  /* every day you ever logged — weekdays included, which the weekend and
+     month views can't show you. Tap a day to open it. */
+  function historyDays(){
+    var groups = dayGroups(0);
+    if(!groups.length){
+      return emptyBox(IC.history, 'Every day you log shows up here —<br>weekday or weekend, all the way back.');
+    }
+    var spent = groups.reduce(function(s,g){ return s + Math.max(g.out,0); }, 0);
+    var h = '<div class="stat-row">' +
+      '<div class="stat"><span class="micro">Days</span><div class="v money">'+groups.length+'</div></div>' +
+      '<div class="stat"><span class="micro">Avg a day</span><div class="v money">'+fmt(spent/groups.length)+'</div></div>' +
+      '<div class="stat"><span class="micro">Biggest</span><div class="v money">'+
+        fmt(Math.max.apply(null, groups.map(function(g){ return g.out; })))+'</div></div></div>';
+    var mk = "";
+    groups.forEach(function(g){
+      var m = g.date.slice(0,7);
+      if(m !== mk){
+        mk = m;
+        h += '<div class="sec"><span class="micro">'+fromIso(m+"-01").toLocaleDateString(undefined,{month:"long", year:"numeric"})+'</span>' +
+          '<span class="micro money">'+fmt(monthSpent(m))+'</span></div>';
+      }
+      var open = openDay === g.date;
+      h += '<div class="wk" data-day="'+g.date+'" role="button" tabindex="0" aria-expanded="'+open+'">' +
+        '<div class="wk-top"><span class="wk-label">'+dayName(g.date)+'</span>' +
+        '<span class="wk-amt money">'+dayTotalText(g.out)+'</span></div>' +
+        '<div class="wk-sub">'+g.items.length+' entr'+(g.items.length===1?"y":"ies")+'</div>' +
+        (open ? '<div class="wk-detail">'+g.items.map(dayRow).join("")+'</div>' : "") +
+        '</div>';
+    });
+    return h;
   }
 
   function historyMonths(){
@@ -2471,6 +2527,17 @@
         if(ev.key==="Enter" || ev.key===" "){ ev.preventDefault(); toggle(); }
       });
     });
+    shell.querySelectorAll("[data-day]").forEach(function(b){
+      function toggle(){
+        var k = b.getAttribute("data-day");
+        openDay = (openDay===k)? null : k;
+        render();
+      }
+      b.addEventListener("click", toggle);
+      b.addEventListener("keydown", function(ev){
+        if(ev.key==="Enter" || ev.key===" "){ ev.preventDefault(); toggle(); }
+      });
+    });
 
     /* plan + home shared rows */
     shell.querySelectorAll("[data-cm]").forEach(function(b){
@@ -2498,7 +2565,7 @@
     var addSplit = $("#p-add-split");
     if(addSplit) addSplit.addEventListener("click", openSplitSheet);
     shell.querySelectorAll("[data-hist]").forEach(function(b){
-      b.addEventListener("click", function(){ histMode = b.getAttribute("data-hist"); openWk = null; render(); });
+      b.addEventListener("click", function(){ histMode = b.getAttribute("data-hist"); openWk = null; openDay = null; render(); });
     });
 
     /* plan tab */
