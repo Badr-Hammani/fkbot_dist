@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=3.4"></script>
+<script src="scan.js?v=4.0"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "3.4";
+  var APP_VERSION = "4.0";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -498,11 +498,13 @@
         if(typeof s.restAsk !== "string") s.restAsk = "";
         if(typeof s.restTs !== "number") s.restTs = 0;
         if(typeof s.cashTs !== "number") s.cashTs = 0;
+        if(!s.wkPlan || typeof s.wkPlan !== "object") s.wkPlan = {};
+        if(typeof s.wkWeight !== "number" || !(s.wkWeight > 0)) s.wkWeight = 2;
         return s;
       }
     }catch(e){}
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0 };
+             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
   }
   function save(opts){
     try{
@@ -648,10 +650,17 @@
     });
     return sum;
   }
+  /* only offer to sweep money you really still have — the old version could
+     "save" the unspent part of a fixed weekend budget while the actual pool
+     was already in the red */
   function sweepInfo(){
     var fri = currentWeekend();
-    if(isLiveWeekend(fri) || state.swept[fri] || !state.goals.length || !(state.budget>0)) return null;
-    var left = Math.round((state.budget - total(expensesFor(fri)))*100)/100;
+    if(isLiveWeekend(fri) || state.swept[fri] || !state.goals.length) return null;
+    var plan = (state.wkPlan||{})[fri];
+    if(!(plan > 0)) return null;
+    var left = Math.round((plan - total(expensesFor(fri)))*100)/100;
+    var real = poolLeftForRates();
+    if(real !== null) left = Math.min(left, Math.floor(real));
     return left > 0 ? { fri: fri, amount: left } : null;
   }
 
@@ -884,23 +893,38 @@
         ' · rebalances daily</span></div>' + poolLine + '</div>';
     }
 
-    /* weekend card */
+    /* weekend card — the same pool, seen over Fri-Sun instead of one day */
     var fri = currentWeekend();
     var live = isLiveWeekend(fri);
     var wkSpent = total(expensesFor(fri));
-    var wkLeft = state.budget - wkSpent;
+    var rs = rateSplit();
     h += '<div class="sec"><span class="micro">'+(live? "This weekend" : "Last weekend")+'</span>' +
       (live? '<span class="hero-live"><span class="dot"></span>Live</span>'
            : '<span class="micro">next in '+(daysUntilFriday()||7)+' day'+((daysUntilFriday()||7)>1?"s":"")+'</span>')+'</div>';
-    if(state.budget > 0){
+    if(live){
+      var wkPlan = weekendPlan(fri, true);
+      if(wkPlan > 0){
+        var wkLeft = Math.round((wkPlan - wkSpent)*100)/100;
+        h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+weekendLabel(fri)+'</span>' +
+          '<span class="goal-amt money">'+(wkLeft<0
+            ? '<b style="color:var(--bad)">'+fmt(Math.abs(wkLeft))+'</b> over'
+            : '<b>'+fmt(wkLeft)+'</b> left')+'</span></div>' +
+          meterHtml(wkSpent, wkPlan) +
+          '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(wkSpent)+
+          ' of '+fmt(wkPlan)+' · set from the money you had on Friday</span></div></div>';
+      }else{
+        h += '<div class="empty">Set your salary or your money for the rest of the month in <b>Plan</b> — your weekend number comes out of it.</div>';
+      }
+    }else if(rs){
+      /* before the weekend: a forecast, not a target */
+      var soon = Math.round(rs.weekend * 3);
       h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+weekendLabel(fri)+'</span>' +
-        '<span class="goal-amt money">'+(wkLeft<0
-          ? '<b style="color:var(--bad)">'+fmt(Math.abs(wkLeft))+'</b> over'
-          : '<b>'+fmt(wkLeft)+'</b> '+(live?"left":"unspent"))+'</span></div>' +
-        meterHtml(wkSpent, state.budget) +
-        '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(wkSpent)+' of '+fmt(state.budget)+'</span></div></div>';
+        '<span class="goal-amt money"><b>'+fmt(wkSpent)+'</b> spent</span></div>' +
+        '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">' +
+        'At today\'s rate the coming weekend has about <b class="money">'+fmt(soon)+
+        '</b> — spend less this week and it grows.</span></div></div>';
     }else{
-      h += '<div class="empty">Set a weekend budget in Settings — or open <b>Plan</b> and tap "Use as budget".</div>';
+      h += '<div class="empty">Set your salary or your money for the rest of the month in <b>Plan</b> — your weekend number comes out of it.</div>';
     }
     var sw = sweepInfo();
     if(sw){
@@ -1464,22 +1488,40 @@
 
     var totals = keys.map(function(k){ return total(groups[k]); });
     var sum = totals.reduce(function(a,b){ return a+b; },0);
-    var under = totals.filter(function(t){ return t <= state.budget; }).length;
+    /* share of that month's spending is a fact we actually have; "on budget"
+       was scored against a number that was never real on those weekends */
+    var mSum = 0, wSum = 0;
+    keys.forEach(function(k){
+      var mk = k.slice(0,7), m = monthSpent(mk);
+      if(m > 0){ mSum += m; wSum += total(groups[k]); }
+    });
+    var share = mSum > 0 ? Math.round(wSum/mSum*100) : 0;
     var h = '<div class="stat-row">' +
       '<div class="stat"><span class="micro">Weekends</span><div class="v money">'+keys.length+'</div></div>' +
       '<div class="stat"><span class="micro">Avg spent</span><div class="v money">'+fmt(sum/keys.length)+'</div></div>' +
-      '<div class="stat"><span class="micro">On budget</span><div class="v money">'+under+'/'+keys.length+'</div></div>' +
+      '<div class="stat"><span class="micro">Of your spending</span><div class="v money">'+share+'%</div></div>' +
       '</div>';
 
+    var avg = sum/keys.length;
     keys.forEach(function(k){
-      var list = groups[k], t = total(list), over = t > state.budget;
+      var list = groups[k], t = total(list);
+      var plan = (state.wkPlan||{})[k] || 0;
+      var over = plan > 0 && t > plan;
+      var sub = list.length+' expense'+(list.length===1?"":"s");
+      if(plan > 0){
+        sub += over
+          ? ' · budget '+fmt(plan)+' · <span style="color:var(--bad); font-weight:700">'+fmt(t-plan)+' over</span>'
+          : ' · budget '+fmt(plan)+' · <span style="color:var(--good); font-weight:700">'+fmt(plan-t)+' under</span>';
+      }else{
+        sub += ' · '+(t > avg
+          ? '<span style="color:var(--ink2)">'+fmt(t-avg)+' above your average</span>'
+          : '<span style="color:var(--ink2)">'+fmt(avg-t)+' below your average</span>');
+      }
       h += '<div class="wk" data-wk="'+k+'" role="button" tabindex="0" aria-expanded="'+(openWk===k)+'"><div class="wk-top">' +
         '<span class="wk-label">'+weekendLabel(k, true)+(k===currentWeekend()?' · now':'')+'</span>' +
         '<span class="wk-amt money'+(over?" over":"")+'">'+fmt(t)+'</span></div>' +
-        '<div class="wk-sub">'+list.length+' expense'+(list.length===1?"":"s")+' · budget '+fmt(state.budget)+
-        (over? ' · <span style="color:var(--bad); font-weight:700">'+fmt(t-state.budget)+' over</span>'
-             : ' · <span style="color:var(--good); font-weight:700">'+fmt(state.budget-t)+' saved</span>')+'</div>' +
-        meterHtml(t, state.budget) +
+        '<div class="wk-sub">'+sub+'</div>' +
+        meterHtml(t, plan > 0 ? plan : Math.max(avg, 1)) +
         (openWk===k ? '<div class="wk-detail">' + list.slice().sort(function(a,b){return a.date<b.date?1:-1;}).map(expRow).join("") + '</div>' : "") +
         '</div>';
     });
@@ -1618,21 +1660,64 @@
   function poolFlow(){ return ledgerFlowSince(state.restFrom, poolStartTs()); }
   /* money left ÷ days left. Spending today doesn't move today's number
      (it recomputes tomorrow), but cash given or received counts right away. */
-  function autoDailyBudget(){
-    var days = daysLeftInMonth();
-    if(days <= 0) return 0;
+  /* ONE pool, split over the days you have left, with weekend days weighted
+     heavier than weekdays. Every number on Home — today, this weekend, the
+     month — comes out of this single function, so they cannot contradict
+     each other the way a fixed weekend budget always eventually did. */
+  function wkWeight(){
+    var k = state.wkWeight > 0 ? state.wkWeight : 2;
+    return Math.min(Math.max(k, 1), 3);
+  }
+  function isWeekendDay(dIso){ return weekendKeyOf(dIso) !== null; }
+  function weekendDaysLeft(){
+    var n = new Date(), dim = new Date(n.getFullYear(), n.getMonth()+1, 0).getDate(), c = 0;
+    for(var d = n.getDate(); d <= dim; d++){
+      if(isWeekendDay(iso(new Date(n.getFullYear(), n.getMonth(), d)))) c++;
+    }
+    return c;
+  }
+  /* money still to spend, ignoring today's own spending — today's number is
+     fixed at midnight so it can't shrink under you as you use it */
+  function poolLeftForRates(){
     if(state.restAmount > 0 && state.restFrom){
-      var spentBefore = spentFromPool() - spentOn(todayIso());
-      var net = poolFlow().net;
-      return Math.max(Math.floor((state.restAmount - spentBefore - net) / days), 0);
+      return state.restAmount - (spentFromPool() - spentOn(todayIso())) - poolFlow().net;
     }
     if(state.salary > 0){
-      var spentBeforeToday = monthSpent() - spentOn(todayIso());
-      var netM = ledgerFlowSince(monthStartIso()).net;
-      return Math.max(Math.floor((planMath().left - spentBeforeToday - netM) / days), 0);
+      return planMath().left - (monthSpent() - spentOn(todayIso())) - ledgerFlowSince(monthStartIso()).net;
     }
-    return 0;
+    return null;
   }
+  function rateSplit(){
+    var days = daysLeftInMonth();
+    if(days <= 0) return null;
+    var R = poolLeftForRates();
+    if(R === null) return null;
+    var we = weekendDaysLeft(), wd = days - we, k = wkWeight();
+    var u = wd + k*we;
+    if(u <= 0) return null;
+    return { R:R, days:days, we:we, wd:wd, k:k,
+             weekday: Math.max(Math.floor(R/u), 0),
+             weekend: Math.max(Math.floor(k*R/u), 0) };
+  }
+  function autoDailyBudget(){
+    var s = rateSplit();
+    if(!s) return 0;
+    return isWeekendDay(todayIso()) ? s.weekend : s.weekday;
+  }
+  /* The weekend's allowance is frozen the first time you open the app on or
+     after its Friday. A live number could never read "over" — it would just
+     keep shrinking — and it would rewrite your past weekends every time you
+     spent. */
+  function weekendPlan(fri, freeze){
+    if(!state.wkPlan) state.wkPlan = {};
+    if(state.wkPlan[fri] > 0) return state.wkPlan[fri];
+    var s = rateSplit();
+    if(!s) return 0;
+    var v = Math.max(Math.round(s.weekend * 3), 0);
+    if(freeze && v > 0 && todayIso() >= fri){ state.wkPlan[fri] = v; save(); }
+    return v;
+  }
+
   function todayBudget(){ return autoDailyBudget(); }
 
   function viewPlan(){
@@ -1922,9 +2007,13 @@
     }).join("");
     return '' +
       '<div class="sec"><span class="micro">Settings</span></div>' +
-      '<div class="panel"><h3>Weekend budget</h3><p>What you allow yourself each Friday–Sunday.</p>' +
-      '<div class="field"><input id="s-budget" type="text" inputmode="decimal" min="0" value="'+state.budget+'"></div>' +
-      '<div class="field"><label class="micro" for="s-currency">Currency</label><select id="s-currency">'+curOpts+'</select></div>' +
+      '<div class="panel"><h3>Weekends</h3><p>Your weekend number is worked out from the money you actually have left — it is not a fixed amount. This says how much heavier a weekend day is than a weekday.</p>' +
+      '<div class="chips" id="s-wkw">' +
+      [[1,'Same as a weekday'],[1.5,'A bit more'],[2,'Twice a weekday'],[3,'Three times']].map(function(o){
+        return '<button class="chip'+(wkWeight()===o[0]?" sel":"")+'" data-wkw="'+o[0]+'">'+o[1]+'</button>';
+      }).join("") + '</div>' +
+      (rateSplit()? '<div class="hint">Right now that is about <b class="money">'+fmt(rateSplit().weekday)+'</b> a weekday and <b class="money">'+fmt(rateSplit().weekend)+'</b> a weekend day.</div>' : '') +
+      '<div class="field" style="margin-top:12px"><label class="micro" for="s-currency">Currency</label><select id="s-currency">'+curOpts+'</select></div>' +
       '<button class="btn primary" id="s-save">Save changes</button></div>' +
 
       '<div class="panel"><h3>'+IC.sparkle+'Receipt scanning</h3>' +
@@ -1958,14 +2047,14 @@
       '<div class="brand-mark" aria-hidden="true">W</div>' +
       '<h1>Money for the weekend, sorted.</h1>' +
       '<p class="lede">Set a Friday-to-Sunday budget, snap receipts and let the amounts fill themselves in. All on your phone.</p>' +
-      '<div class="panel"><div class="field"><label class="micro" for="o-budget">Weekend budget</label>' +
-      '<input id="o-budget" type="text" inputmode="decimal" min="0" placeholder="e.g. 500"></div>' +
+      '<div class="panel"><div class="field"><label class="micro" for="o-budget">Money you have until the end of the month</label>' +
+      '<input id="o-budget" type="text" inputmode="decimal" min="0" placeholder="e.g. 2000"></div>' +
       '<div class="field"><label class="micro" for="o-currency">Currency</label><select id="o-currency">'+curOpts+'</select></div>' +
       '<button class="btn primary" id="o-go">Start tracking</button></div></div>';
     $("#o-go").addEventListener("click", function(){
       var b = num($("#o-budget").value);
-      if(!(b > 0)){ toast("Set a budget to get started"); $("#o-budget").focus(); return; }
-      state.budget = b;
+      if(!(b > 0)){ toast("Enter an amount to get started"); $("#o-budget").focus(); return; }
+      state.restAmount = b; state.restFrom = todayIso(); state.restTs = Date.now();
       state.currency = $("#o-currency").value;
       state.setup = true;
       save(); render();
@@ -2319,7 +2408,7 @@
     var items = [
       { done: state.salary > 0,            label: "Set your monthly salary",        go: "plan" },
       { done: state.commitments.length > 0, label: "Add your loan & subscriptions", go: "plan" },
-      { done: state.budget > 0,            label: "Set a weekend budget",           go: "plan" },
+      { done: state.restAmount > 0 || state.salary > 0, label: "Set your money for the month", go: "plan" },
       { done: state.expenses.length > 0,   label: "Log your first expense",         go: "add" }
     ];
     var open = items.filter(function(i){ return !i.done; });
@@ -2611,13 +2700,7 @@
         state.payday = (pd >= 1 && pd <= 31) ? pd : 0;
         save(); render(); toast("Salary saved");
       });
-      var apply = $("#p-apply");
-      if(apply) apply.addEventListener("click", function(){
-        var amt = parseFloat(this.getAttribute("data-amt"));
-        if(!(amt > 0)) return;
-        state.budget = amt;
-        save(); toast("Weekend budget set to "+fmt(amt));
-      });
+
       var pRest = $("#p-rest-save");
       if(pRest) pRest.addEventListener("click", function(){
         var v = num($("#p-rest").value);
@@ -2644,11 +2727,16 @@
     var sSave = $("#s-save");
     if(sSave){
       sSave.addEventListener("click", function(){
-        var b = num($("#s-budget").value);
-        if(!(b > 0)){ toast("Budget must be above zero"); return; }
-        state.budget = b;
         state.currency = $("#s-currency").value;
         save(); render(); toast("Saved");
+      });
+      var wkw = $("#s-wkw");
+      if(wkw) wkw.addEventListener("click", function(ev){
+        var b = ev.target.closest("[data-wkw]"); if(!b) return;
+        state.wkWeight = parseFloat(b.getAttribute("data-wkw"));
+        delete state.wkPlan[currentWeekend()];      // re-freeze this weekend at the new rate
+        save(); render();
+        toast(fmt(rateSplit().weekday)+" a weekday · "+fmt(rateSplit().weekend)+" a weekend day");
       });
       $("#s-scan-save").addEventListener("click", function(){
         state.apiKey = $("#s-key").value.trim();
@@ -2656,11 +2744,11 @@
         save(); toast(state.apiKey ? "Claude scanning is on" : "Using free on-phone scanning");
       });
       $("#s-export").addEventListener("click", function(){
-        var copy = { setup:state.setup, budget:state.budget, currency:state.currency,
+        var copy = { setup:state.setup, currency:state.currency,
                      scanModel:state.scanModel, expenses:state.expenses,
                      salary:state.salary, commitments:state.commitments, goals:state.goals,
                      swept:state.swept, payday:state.payday, debts:state.debts,
-                     restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs };  // apiKey deliberately excluded
+                     restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs, wkPlan:state.wkPlan, wkWeight:state.wkWeight };  // apiKey deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -2690,7 +2778,9 @@
                       payday:+d.payday||0,
                       debts:Array.isArray(d.debts)? d.debts : [],
                       restAmount:+d.restAmount||0,
-                      restFrom:(typeof d.restFrom==="string")? d.restFrom : "", restTs:+d.restTs||0, cashTs:+d.cashTs||0 };
+                      restFrom:(typeof d.restFrom==="string")? d.restFrom : "", restTs:+d.restTs||0, cashTs:+d.cashTs||0,
+                      wkPlan:(d.wkPlan && typeof d.wkPlan==="object")? d.wkPlan : {},
+                      wkWeight:+d.wkWeight||2 };
             save(); render(); toast("Backup restored — "+state.expenses.length+" expenses");
           }catch(e){ toast("That file isn't a Weekend Wallet backup"); }
         };
@@ -2700,7 +2790,7 @@
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
-                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0 };
+                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
       });
