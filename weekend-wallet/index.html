@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=3.3"></script>
+<script src="scan.js?v=3.4"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "3.3";
+  var APP_VERSION = "3.4";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1389,32 +1389,62 @@
     return h;
   }
 
+  /* what a month really cost you: what you spent, plus money you handed to
+     people, minus what came back. Same arithmetic as the Home screen — these
+     two must never disagree. */
+  function monthOut(mk){
+    var net = 0;
+    ledgerItems().forEach(function(it){ if(it.date.slice(0,7) === mk) net += -it.cash; });
+    return Math.round((monthSpent(mk) + net)*100)/100;
+  }
+  function monthGivenOut(mk){
+    var out = 0;
+    ledgerItems().forEach(function(it){ if(it.date.slice(0,7) === mk && it.cash < 0) out += -it.cash; });
+    return Math.round(out*100)/100;
+  }
+  function monthMissing(mk){
+    return total(state.expenses.filter(function(e){
+      return e.cat === "missing" && e.date.slice(0,7) === mk;
+    }));
+  }
+
   function historyMonths(){
-    var groups = {};
-    state.expenses.forEach(function(e){
-      var k = e.date.slice(0,7);
-      (groups[k] = groups[k]||[]).push(e);
-    });
-    var keys = Object.keys(groups).sort().reverse();
+    var seen = {};
+    state.expenses.forEach(function(e){ seen[e.date.slice(0,7)] = 1; });
+    ledgerItems().forEach(function(it){ seen[it.date.slice(0,7)] = 1; });
+    var keys = Object.keys(seen).sort().reverse();
     if(!keys.length){
       return emptyBox(IC.history, 'Every expense you log — weekday or weekend —<br>adds up here month by month.');
     }
-    var pm = planMath();
-    var spendable = state.salary > 0 ? Math.max(pm.left, 0) : 0;
+    var thisMk = todayIso().slice(0,7);
+    /* the plan only describes THIS month — applying it to old months would
+       invent a "saving" out of months you barely logged */
+    var spendable = state.salary > 0 ? Math.max(planMath().left, 0) : 0;
     var h = "";
     keys.forEach(function(k){
-      var list = groups[k], t = total(list);
+      var out = monthOut(k), now = k === thisMk;
+      var n = state.expenses.filter(function(e){ return e.date.slice(0,7)===k; }).length;
       var label = fromIso(k+"-01").toLocaleDateString(undefined,{month:"long", year:"numeric"});
-      var over = spendable > 0 && t > spendable;
+      var bits = [n+' expense'+(n===1?"":"s")];
+      var given = monthGivenOut(k), miss = monthMissing(k);
+      if(given > 0) bits.push('<span style="color:var(--bad)">'+fmt(given)+' given out</span>');
+      if(miss > 0) bits.push('<span style="color:var(--c-missing)">'+fmt(miss)+' not logged</span>');
+
       h += '<div class="wk"><div class="wk-top">' +
-        '<span class="wk-label">'+label+(k===todayIso().slice(0,7)?' · now':'')+'</span>' +
-        '<span class="wk-amt money'+(over?" over":"")+'">'+fmt(t)+'</span></div>' +
-        '<div class="wk-sub">'+list.length+' expense'+(list.length===1?"":"s")+
-        (spendable>0? ' · '+(over
-          ? '<span style="color:var(--bad); font-weight:700">'+fmt(t-spendable)+' over plan</span>'
-          : '<span style="color:var(--good); font-weight:700">'+fmt(spendable-t)+' under plan</span>') : "")+'</div>' +
-        (spendable>0? meterHtml(t, spendable) : "") +
-        '</div>';
+        '<span class="wk-label">'+label+(now?' · now':'')+'</span>' +
+        '<span class="wk-amt money">'+fmt(out)+'</span></div>' +
+        '<div class="wk-sub">'+bits.join(' · ')+'</div>';
+
+      if(now && spendable > 0){
+        var left = Math.round((spendable - out)*100)/100;
+        h += meterHtml(out, spendable) +
+          '<div class="wk-sub">'+(left < 0
+            ? '<span style="color:var(--bad); font-weight:700">'+fmt(-left)+' over</span> your '+fmt(spendable)+' plan'
+            : '<b class="money">'+fmt(left)+'</b> left of your '+fmt(spendable)+' plan')+
+          ' — <b>if you logged everything</b></div>' +
+          '<button class="btn" id="m-cash" style="margin-top:10px">'+IC.wallet+'Not what\'s in your pocket? Check my cash</button>';
+      }
+      h += '</div>';
     });
     return h;
   }
@@ -2564,6 +2594,8 @@
     if(addDebt) addDebt.addEventListener("click", function(){ openBorrowSheet(0); });
     var addSplit = $("#p-add-split");
     if(addSplit) addSplit.addEventListener("click", openSplitSheet);
+    var mCash = $("#m-cash");
+    if(mCash) mCash.addEventListener("click", openCashSheet);
     shell.querySelectorAll("[data-hist]").forEach(function(b){
       b.addEventListener("click", function(){ histMode = b.getAttribute("data-hist"); openWk = null; openDay = null; render(); });
     });
