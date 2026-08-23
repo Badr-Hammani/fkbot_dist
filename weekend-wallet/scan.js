@@ -78,15 +78,26 @@
     return null;
   }
 
-  /* dd/mm/yyyy (also dd-mm-yy, dd.mm.yyyy) → ISO, day-first preference */
+  /* dd/mm/yyyy (also dd-mm-yy, dd.mm.yyyy) or yyyy-mm-dd → ISO, day-first preference */
   function guessDate(text, now) {
     now = now || new Date();
-    var m = /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/.exec(text);
-    if (!m) return null;
-    var a = +m[1], b = +m[2], y = +m[3];
-    if (y < 100) y += 2000;
-    var day = a, month = b;
-    if (a <= 12 && b > 12) { day = b; month = a; }   // clearly mm/dd
+    var y, month, day;
+    // Try YYYY-MM-DD or YYYY/MM/DD first
+    var m = /(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/.exec(text);
+    if (m) {
+      y = +m[1];
+      month = +m[2];
+      day = +m[3];
+    } else {
+      m = /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/.exec(text);
+      if (!m) return null;
+      var a = +m[1], b = +m[2];
+      y = +m[3];
+      if (y < 100) y += 2000;
+      day = a;
+      month = b;
+      if (a <= 12 && b > 12) { day = b; month = a; }   // clearly mm/dd
+    }
     if (month < 1 || month > 12 || day < 1 || day > 31 || y < 2015 || y > now.getFullYear() + 1) return null;
     var d = new Date(y, month - 1, day);
     if (d.getDate() !== day) return null;

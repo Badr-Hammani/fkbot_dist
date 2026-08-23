@@ -457,7 +457,19 @@
     {code:"AED", label:"UAE dirham"},
     {code:"SAR", label:"Saudi riyal"},
     {code:"CAD", label:"Canadian dollar"},
-    {code:"TRY", label:"Turkish lira"}
+    {code:"TRY", label:"Turkish lira"},
+    {code:"INR", label:"Indian rupee (₹)"},
+    {code:"AUD", label:"Australian dollar (A$)"},
+    {code:"JPY", label:"Japanese yen (¥)"},
+    {code:"CHF", label:"Swiss franc (CHF)"},
+    {code:"CNY", label:"Chinese yuan (¥)"},
+    {code:"BRL", label:"Brazilian real (R$)"},
+    {code:"MXN", label:"Mexican peso ($)"},
+    {code:"ZAR", label:"South African rand (R)"},
+    {code:"KWD", label:"Kuwaiti dinar (KD)"},
+    {code:"QAR", label:"Qatari riyal (QR)"},
+    {code:"EGP", label:"Egyptian pound (EGP)"},
+    {code:"RUB", label:"Russian ruble (₽)"}
   ];
   var SCAN_MODELS = [
     {id:"claude-opus-4-8",  label:"Best accuracy — Claude Opus 4.8"},
@@ -470,8 +482,9 @@
       var raw = localStorage.getItem(KEY);
       if(raw){
         var s = JSON.parse(raw);
-        if(!s.scanModel) s.scanModel = "claude-opus-4-8";
         if(typeof s.apiKey !== "string") s.apiKey = "";
+        if(typeof s.geminiApiKey !== "string") s.geminiApiKey = "";
+        if(typeof s.scanProvider !== "string") s.scanProvider = s.apiKey ? "claude" : (s.geminiApiKey ? "gemini" : "free");
         if(typeof s.salary !== "number") s.salary = 0;
         if(!Array.isArray(s.commitments)) s.commitments = [];
         s.commitments.forEach(function(c){ if(!c.paid || typeof c.paid !== "object") c.paid = {}; });
@@ -503,7 +516,7 @@
         return s;
       }
     }catch(e){}
-    return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
+    return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", geminiApiKey:"", scanProvider:"free", scanModel:"claude-opus-4-8",
              salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
   }
   function save(opts){
@@ -1350,6 +1363,42 @@
       '<span class="exp-amt money" style="color:var('+v+')">'+sign+fmt(it.amt)+'</span></button>';
   }
 
+  function donutChartHtml(rows, byCat){
+    var totalVal = rows.reduce(function(s, c){ return s + byCat[c.id]; }, 0);
+    if(!totalVal) return "";
+    
+    var r = 38;
+    var circ = Math.round(2 * Math.PI * r * 10) / 10;
+    var accum = 0;
+    
+    var svg = '<svg width="105" height="105" viewBox="0 0 100 100" style="flex:none; transform: rotate(-90deg); display: block;">';
+    svg += '<circle cx="50" cy="50" r="'+r+'" fill="transparent" stroke="var(--card2)" stroke-width="10"/>';
+    
+    rows.forEach(function(c){
+      var v = byCat[c.id];
+      var pct = v / totalVal;
+      var strokeLen = Math.round(pct * circ * 10) / 10;
+      var dashoffset = Math.round(-accum * circ * 10) / 10;
+      
+      svg += '<circle cx="50" cy="50" r="'+r+'" fill="transparent" ' +
+             'stroke="var(' + c.v + ')" stroke-width="10" ' +
+             'stroke-dasharray="' + strokeLen + ' ' + (Math.round((circ - strokeLen)*10)/10) + '" ' +
+             'stroke-dashoffset="' + dashoffset + '" ' +
+             '/>';
+      accum += pct;
+    });
+    svg += '</svg>';
+    
+    var container = '<div class="donut-container" style="position: relative; width: 105px; height: 105px; flex: none; margin: 4px 0;">' +
+      svg +
+      '<div style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none;">' +
+      '<span class="micro" style="font-size: 8px; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: -1px;">Spent</span>' +
+      '<span class="money" style="font-weight: 800; font-size: 13px; color: var(--ink);">'+fmt(totalVal)+'</span>' +
+      '</div></div>';
+      
+    return container;
+  }
+
   function catBreakdown(list, title){
     if(!list.length) return "";
     var byCat = {};
@@ -1358,15 +1407,20 @@
       .sort(function(a,b){ return byCat[b.id]-byCat[a.id]; });
     if(!rows.length) return "";
     var max = byCat[rows[0].id];
-    var h = '<div class="sec"><span class="micro">'+title+'</span></div><div class="cats">';
+    var h = '<div class="sec"><span class="micro">'+title+'</span></div>';
+    
+    h += '<div style="display:flex; align-items:center; gap:14px; background:var(--card); border:1px solid var(--line); border-radius:18px; padding:12px 14px;">';
+    h += donutChartHtml(rows, byCat);
+    h += '<div class="cats" style="flex:1; background:none; border:0; padding:0; margin:0; width:100%;">';
     rows.forEach(function(c){
       var v = byCat[c.id];
-      h += '<div class="cat-row">' +
-        '<span class="cat-name" style="color:var(--ink)"><span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+c.name+'</span>' +
-        '<span class="cat-bar"><i style="width:'+(v/max*100).toFixed(1)+'%; background:var('+c.v+')"></i></span>' +
-        '<span class="cat-amt money">'+fmt(v)+'</span></div>';
+      h += '<div class="cat-row" style="padding: 7px 0;">' +
+        '<span class="cat-name" style="color:var(--ink); font-size: 13px;"><span style="color:var('+c.v+'); display:inline-flex; vertical-align: -2px; margin-right: 4px;">'+catIcon(c.id)+'</span>'+c.name+'</span>' +
+        '<span class="cat-bar" style="height: 6px;"><i style="width:'+(v/max*100).toFixed(1)+'%; background:var('+c.v+')"></i></span>' +
+        '<span class="cat-amt money" style="font-size: 13px;">'+fmt(v)+'</span></div>';
     });
-    return h + '</div>';
+    h += '</div></div>';
+    return h;
   }
 
   var openWk = null, openDay = null;
@@ -1473,6 +1527,47 @@
     return h;
   }
 
+  function weekendTrendChartHtml(keys, groups) {
+    if (!keys || keys.length < 2) return "";
+    var chartKeys = keys.slice(0, 5).reverse();
+    var totals = chartKeys.map(function(k){ return total(groups[k]); });
+    var max = Math.max.apply(null, totals) || 1;
+    
+    var h = '<div class="panel" style="padding: 16px 12px 10px; margin-top: 12px;"><h3 style="margin: 0 0 12px; font-size: 13.5px;">Weekend Trend (Last 5)</h3>';
+    h += '<svg viewBox="0 0 200 80" style="width: 100%; height: 110px; overflow: visible; display: block;">';
+    
+    // Y-axis grid lines (dashed)
+    h += '<line x1="10" y1="10" x2="190" y2="10" stroke="var(--line)" stroke-dasharray="2 2"/>';
+    h += '<line x1="10" y1="35" x2="190" y2="35" stroke="var(--line)" stroke-dasharray="2 2"/>';
+    h += '<line x1="10" y1="60" x2="190" y2="60" stroke="var(--line)"/>';
+    
+    var barW = 18;
+    var gap = 16;
+    var startX = 25;
+    
+    chartKeys.forEach(function(k, idx){
+      var t = totals[idx];
+      var pct = t / max;
+      var barH = Math.max(pct * 50, 2);
+      var x = startX + idx * (barW + gap);
+      var y = 60 - barH;
+      
+      var plan = (state.wkPlan||{})[k] || 0;
+      var isOver = plan > 0 && t > plan;
+      var color = isOver ? "var(--bad)" : "var(--accent)";
+      
+      h += '<rect x="'+x+'" y="'+y+'" width="'+barW+'" height="'+barH+'" rx="4" fill="'+color+'"/>';
+      h += '<text x="'+(x + barW/2)+'" y="'+(y - 4)+'" text-anchor="middle" font-size="7" font-weight="700" fill="var(--ink)" class="money">'+Math.round(t)+'</text>';
+      
+      var f = fromIso(k);
+      var lbl = String(f.getMonth()+1).padStart(2,"0") + "/" + String(f.getDate()).padStart(2,"0");
+      h += '<text x="'+(x + barW/2)+'" y="70" text-anchor="middle" font-size="7.5" font-weight="600" fill="var(--ink2)">'+lbl+'</text>';
+    });
+    
+    h += '</svg></div>';
+    return h;
+  }
+
   function historyWeekends(){
     var groups = {};
     state.expenses.forEach(function(e){
@@ -1501,6 +1596,8 @@
       '<div class="stat"><span class="micro">Avg spent</span><div class="v money">'+fmt(sum/keys.length)+'</div></div>' +
       '<div class="stat"><span class="micro">Of your spending</span><div class="v money">'+share+'%</div></div>' +
       '</div>';
+
+    h += weekendTrendChartHtml(keys, groups);
 
     var avg = sum/keys.length;
     keys.forEach(function(k){
@@ -2017,12 +2114,27 @@
       '<button class="btn primary" id="s-save">Save changes</button></div>' +
 
       '<div class="panel"><h3>'+IC.sparkle+'Receipt scanning</h3>' +
-      '<p>Receipts are read <b>free on your phone</b>. For much better accuracy, add a Claude API key — the photo is sent to Claude, which reads the total, store name and date for you.</p>' +
-      '<div class="field"><label class="micro" for="s-key">Claude API key (optional)</label>' +
-      '<input id="s-key" type="password" placeholder="sk-ant-…" autocomplete="off" value="'+esc(state.apiKey)+'"></div>' +
-      '<div class="field"><label class="micro" for="s-model">AI model</label><select id="s-model">'+modelOpts+'</select></div>' +
+      '<p>Receipts can be scanned <b>free on your phone</b> via local OCR. For much better accuracy (especially handwriting), configure a cloud API provider.</p>' +
+      '<div class="field"><label class="micro" for="s-provider">Scan Provider</label>' +
+      '<select id="s-provider">' +
+      '<option value="free"'+(state.scanProvider==="free"?" selected":"")+'>Free (Local OCR)</option>' +
+      '<option value="gemini"'+(state.scanProvider==="gemini"?" selected":"")+'>Gemini (Google AI Studio)</option>' +
+      '<option value="claude"'+(state.scanProvider==="claude"?" selected":"")+'>Claude (Anthropic)</option>' +
+      '</select></div>' +
+      
+      '<div class="field" id="s-gemini-key-container" style="'+(state.scanProvider==="gemini"?"":"display:none")+'">' +
+      '<label class="micro" for="s-gemini-key">Gemini API Key</label>' +
+      '<input id="s-gemini-key" type="password" placeholder="AIzaSy…" autocomplete="off" value="'+esc(state.geminiApiKey)+'"></div>' +
+      
+      '<div class="field" id="s-claude-key-container" style="'+(state.scanProvider==="claude"?"":"display:none")+'">' +
+      '<label class="micro" for="s-claude-key">Claude API key</label>' +
+      '<input id="s-claude-key" type="password" placeholder="sk-ant-…" autocomplete="off" value="'+esc(state.apiKey)+'"></div>' +
+      
+      '<div class="field" id="s-claude-model-container" style="'+(state.scanProvider==="claude"?"":"display:none")+'">' +
+      '<label class="micro" for="s-model">Claude Model</label><select id="s-model">'+modelOpts+'</select></div>' +
+      
       '<button class="btn" id="s-scan-save">Save scanning settings</button>' +
-      '<div class="hint">The key is stored only on this phone and never included in backups. Get one at console.anthropic.com — a scan costs a fraction of a cent.</div></div>' +
+      '<div class="hint">Keys are stored only on this phone and never uploaded to any backend. Get a Gemini key for free at aistudio.google.com.</div></div>' +
 
       '<div class="panel"><h3>'+IC.share+'Put it on your home screen</h3>' +
       '<p>In Safari tap the <b>Share</b> button, then <b>Add to Home Screen</b>. Weekend Wallet opens full-screen like a normal app — your data stays on this phone.</p></div>' +
@@ -2180,10 +2292,68 @@
     });
   }
 
+  function scanWithGemini(dataUrl){
+    var b64 = dataUrl.split(",")[1];
+    var catIds = PICK_CATS.map(function(c){ return c.id; });
+    var key = state.geminiApiKey;
+    return fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + key, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: "This is a photo of a receipt for a personal expense tracker. Extract the final total actually paid (after tax/tip), the merchant name, the purchase date, and pick the best category. Return ONLY a JSON object with keys: amount (number or null), merchant (string or null), category (one of: food, drinks, out, transport, shop, other), date (string YYYY-MM-DD or null)." },
+            { inlineData: { mimeType: "image/jpeg", data: b64 } }
+          ]
+        }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              amount: { type: "NUMBER", description: "Final total paid, number only" },
+              merchant: { type: "STRING", description: "Merchant / store name" },
+              category: { type: "STRING", enum: catIds },
+              date: { type: "STRING", description: "Purchase date YYYY-MM-DD" }
+            },
+            required: ["amount", "merchant", "category", "date"]
+          }
+        }
+      })
+    }).then(function(resp){
+      if(!resp.ok) return resp.json().catch(function(){ return {}; }).then(function(err){
+        var msg = err && err.error && err.error.message ? err.error.message : ("Gemini API error " + resp.status);
+        throw new Error(msg);
+      });
+      return resp.json();
+    }).then(function(data){
+      var text = "";
+      if(data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts[0]){
+        text = data.candidates[0].content.parts[0].text;
+      }
+      var parsed = JSON.parse(text.trim());
+      return {
+        amount: (typeof parsed.amount === "number" && parsed.amount > 0) ? parsed.amount : null,
+        merchant: parsed.merchant || null,
+        date: /^\d{4}-\d{2}-\d{2}$/.test(parsed.date || "") ? parsed.date : null,
+        category: CATS.some(function(c){ return c.id === parsed.category; }) ? parsed.category : null,
+        source: "gemini"
+      };
+    });
+  }
+
   function scanReceipt(dataUrl){
-    if(state.apiKey){
+    if(state.scanProvider === "gemini" && state.geminiApiKey){
+      return scanWithGemini(dataUrl).catch(function(err){
+        toast("Gemini scan failed — trying free scan");
+        return scanWithTesseract(dataUrl);
+      });
+    }
+    if(state.scanProvider === "claude" && state.apiKey){
       return scanWithClaude(dataUrl).catch(function(err){
-        toast("AI scan failed — trying free scan");
+        toast("Claude scan failed — trying free scan");
         return scanWithTesseract(dataUrl);
       });
     }
@@ -2756,17 +2926,32 @@
         save(); render();
         toast(fmt(rateSplit().weekday)+" a weekday · "+fmt(rateSplit().weekend)+" a weekend day");
       });
+      var sProvider = $("#s-provider");
+      if(sProvider){
+        sProvider.addEventListener("change", function(){
+          var prov = this.value;
+          $("#s-gemini-key-container").style.display = prov === "gemini" ? "" : "none";
+          $("#s-claude-key-container").style.display = prov === "claude" ? "" : "none";
+          $("#s-claude-model-container").style.display = prov === "claude" ? "" : "none";
+        });
+      }
       $("#s-scan-save").addEventListener("click", function(){
-        state.apiKey = $("#s-key").value.trim();
+        state.scanProvider = $("#s-provider").value;
+        state.geminiApiKey = $("#s-gemini-key").value.trim();
+        state.apiKey = $("#s-claude-key").value.trim();
         state.scanModel = $("#s-model").value;
-        save(); toast(state.apiKey ? "Claude scanning is on" : "Using free on-phone scanning");
+        save();
+        var msg = state.scanProvider === "free" ? "Using free on-phone scanning"
+                : state.scanProvider === "gemini" ? "Gemini scanning is on"
+                : "Claude scanning is on";
+        toast(msg);
       });
       $("#s-export").addEventListener("click", function(){
         var copy = { setup:state.setup, currency:state.currency,
-                     scanModel:state.scanModel, expenses:state.expenses,
+                     scanProvider:state.scanProvider, scanModel:state.scanModel, expenses:state.expenses,
                      salary:state.salary, commitments:state.commitments, goals:state.goals,
                      swept:state.swept, payday:state.payday, debts:state.debts,
-                     restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs, wkPlan:state.wkPlan, wkWeight:state.wkWeight };  // apiKey deliberately excluded
+                     restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs, wkPlan:state.wkPlan, wkWeight:state.wkWeight };  // keys deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -2787,7 +2972,8 @@
             var d = JSON.parse(r.result);
             if(!d || !Array.isArray(d.expenses)) throw 0;
             state = { setup:true, budget:+d.budget||0, currency:d.currency||"USD",
-                      expenses:d.expenses, apiKey:state.apiKey,
+                      expenses:d.expenses, apiKey:state.apiKey, geminiApiKey:state.geminiApiKey,
+                      scanProvider:d.scanProvider||state.scanProvider,
                       scanModel:d.scanModel||state.scanModel,
                       salary:+d.salary||0,
                       commitments:Array.isArray(d.commitments)? d.commitments : [],
@@ -2807,7 +2993,7 @@
       var wipeArmed = false;
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
-        state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", scanModel:"claude-opus-4-8",
+        state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", scanProvider:"free", scanModel:"claude-opus-4-8",
                   salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
