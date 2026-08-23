@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=4.0"></script>
+<script src="scan.js?v=4.1"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "4.0";
+  var APP_VERSION = "4.1";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -2262,10 +2262,24 @@
      what you really have and let the app work backwards: the gap is money you
      spent without writing it down. It gets logged as a real expense under
      "Not logged", so every other number stays true. */
-  function pendingBills(){
-    return state.commitments.reduce(function(s,c){
-      return s + (paidRec(c) ? 0 : billFor(c));
-    }, 0);
+  /* Money the plan has already taken off your spending figure but that is
+     probably still sitting in your account. Only bills whose due day is still
+     ahead: one due the 3rd, unlogged, on the 18th has almost certainly gone
+     out, and counting it would tell a broke user to log thousands as
+     "missing". Savings count too — nothing here moves that money for you. */
+  function setAside(){
+    var today = new Date().getDate(), bills = 0;
+    state.commitments.forEach(function(c){
+      if(paidRec(c) || !c.due || c.due < today) return;
+      bills += billFor(c);
+    });
+    var savings = state.goals.reduce(function(t,g){ return t + (g.monthly||0); }, 0);
+    bills = Math.round(bills*100)/100; savings = Math.round(savings*100)/100;
+    var parts = [];
+    if(bills > 0) parts.push(fmt(bills)+' of bills not due yet');
+    if(savings > 0) parts.push(fmt(savings)+' you plan to save');
+    return { bills: bills, savings: savings, parts: parts,
+             total: Math.round((bills + savings)*100)/100 };
   }
   /* what the app believes you can still spend */
   function appCash(){
@@ -2297,7 +2311,10 @@
       $("#cash-plan").addEventListener("click", function(){ closeSheet(); tab = "plan"; render(); window.scrollTo(0,0); });
       return;
     }
-    var pend = Math.round(pendingBills()*100)/100;
+    /* in pool mode the figure is one you typed yourself as "money I have", so
+       there is nothing for the app to add back */
+    var aside = restRemaining() === null ? setAside() : { total:0, parts:[] };
+    var pend = aside.total;
     var last = state.cashTs ? new Date(state.cashTs) : null;
     openSheet(
       '<h2>Check my cash</h2>' +
@@ -2306,7 +2323,8 @@
       '<input id="cash-have" type="text" inputmode="decimal" placeholder="e.g. '+Math.max(Math.round(expected),0)+'" autofocus></div>' +
       (pend > 0
         ? '<label class="checkrow" for="cash-pend"><input type="checkbox" id="cash-pend" checked>' +
-          '<span>My bills this month aren\'t paid yet — I\'m counting the <b class="money">'+fmt(pend)+'</b> for them too</span></label>'
+          '<span>That money is still in my account — <b class="money">'+fmt(pend)+'</b> ('+
+          aside.parts.join(' + ')+')</span></label>'
         : "") +
       '<div class="flow" id="cash-math" style="margin-top:14px"></div>' +
       '<button class="btn primary" id="cash-go" disabled>Enter an amount</button>' +
@@ -2317,7 +2335,7 @@
     function target(){ return expected + (pendBox && pendBox.checked ? pend : 0); }
     function diffNow(){
       var have = num(inp.value);
-      if(!(have >= 0) || inp.value.trim() === "") return null;
+      if(!(have >= 0) || have > 1e9 || inp.value.trim() === "") return null;
       return Math.round((have - target())*100)/100;
     }
     function paint(){
