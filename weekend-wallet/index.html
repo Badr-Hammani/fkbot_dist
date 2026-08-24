@@ -430,7 +430,7 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=4.1"></script>
+<script src="scan.js?v=4.2"></script>
 <script>
 (function(){
   "use strict";
@@ -799,6 +799,51 @@
     return '<span style="color:var(--accent-deep); font-weight:700">'+txt+'</span>';
   }
 
+  /* 7-day mini sparkline — shows daily spending as bars over last 7 days */
+  function dailySparklineHtml(){
+    var days = 7;
+    var bars = [];
+    for(var i = days - 1; i >= 0; i--){
+      var d = new Date(); d.setDate(d.getDate() - i);
+      var diso = iso(d);
+      bars.push({ diso: diso, amt: spentOn(diso), isToday: i === 0 });
+    }
+    var maxAmt = Math.max.apply(null, bars.map(function(b){ return b.amt; })) || 1;
+    var totalWeek = bars.reduce(function(s, b){ return s + b.amt; }, 0);
+    if(totalWeek === 0) return "";
+
+    var n = bars.length, viewW = 200, padL = 8, padR = 8, innerW = viewW - padL - padR;
+    var slot = innerW / n, barW = Math.max(slot * 0.55, 4);
+
+    var h = '<div style="background:var(--card); border:1px solid var(--line); border-radius:16px; padding:12px 14px 8px; margin:0 0 12px;">' +
+            '<div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">' +
+            '<span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--ink2);">Last 7 days</span>' +
+            '<span class="money" style="font-size:12px; font-weight:800; color:var(--ink);">'+fmt(totalWeek)+'</span>' +
+            '</div>';
+    h += '<svg viewBox="0 0 200 44" style="width:100%; height:44px; display:block; overflow:visible;">';
+
+    bars.forEach(function(b, idx){
+      var pct = b.amt / maxAmt;
+      var barH = Math.max(pct * 32, b.amt > 0 ? 3 : 0);
+      var cx = padL + slot * idx + slot / 2;
+      var x = cx - barW / 2;
+      var y = 34 - barH;
+      var color = b.isToday ? "var(--accent)" : "var(--ink3)";
+      var opacity = b.isToday ? "1" : (b.amt > 0 ? "0.6" : "0.2");
+
+      if(b.amt > 0 || b.isToday){
+        h += '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+barW.toFixed(1)+'" height="'+Math.max(barH,2).toFixed(1)+'" rx="2.5" fill="'+color+'" opacity="'+opacity+'"/>';
+      }
+
+      /* day label */
+      var dayLbl = b.isToday ? "Today" : new Date(b.diso.replace(/-/g,'/')).toLocaleDateString(undefined,{weekday:"short"}).slice(0,3);
+      h += '<text x="'+cx.toFixed(1)+'" y="43" text-anchor="middle" font-size="6.5" fill="'+(b.isToday?"var(--accent)":"var(--ink3)")+'" font-weight="'+(b.isToday?"800":"600")+'">'+dayLbl+'</text>';
+    });
+
+    h += '</svg></div>';
+    return h;
+  }
+
   function viewHome(){
     var monthName = new Date().toLocaleDateString(undefined,{month:"long"});
     var pm = planMath();
@@ -958,6 +1003,19 @@
           '<span class="amt money">'+fmt(u.c.amount)+'</span></button>';
       });
       h += '</div>';
+    }
+
+    /* 7-day sparkline */
+    h += dailySparklineHtml();
+
+    /* not-logged badge — alert if there's any untracked spending */
+    var missing = missingThisMonth();
+    if(missing > 0){
+      h += '<div style="display:flex; align-items:center; gap:10px; background:color-mix(in srgb, var(--bad) 10%, var(--card)); border:1px solid color-mix(in srgb, var(--bad) 25%, var(--line)); border-radius:14px; padding:10px 14px; margin:0 0 12px;">' +
+           '<span style="color:var(--bad); flex:none; display:flex;">'+catIcon("missing")+'</span>' +
+           '<span style="font-size:13px; color:var(--ink); flex:1;">' +
+           '<b class="money" style="color:var(--bad);">'+fmt(missing)+'</b> logged as <b>Not logged</b> this month — from your cash checks.</span>' +
+           '</div>';
     }
 
     /* month category breakdown */
@@ -1366,36 +1424,41 @@
   function donutChartHtml(rows, byCat){
     var totalVal = rows.reduce(function(s, c){ return s + byCat[c.id]; }, 0);
     if(!totalVal) return "";
-    
+
     var r = 38;
-    var circ = Math.round(2 * Math.PI * r * 10) / 10;
-    var accum = 0;
-    
+    var circ = 2 * Math.PI * r;
+    var accum = 0;   /* fraction of circle already drawn */
+    var gap = 0.012; /* tiny gap between segments as a fraction */
+
     var svg = '<svg width="105" height="105" viewBox="0 0 100 100" style="flex:none; transform: rotate(-90deg); display: block;">';
     svg += '<circle cx="50" cy="50" r="'+r+'" fill="transparent" stroke="var(--card2)" stroke-width="10"/>';
-    
+
     rows.forEach(function(c){
-      var v = byCat[c.id];
-      var pct = v / totalVal;
-      var strokeLen = Math.round(pct * circ * 10) / 10;
-      var dashoffset = Math.round(-accum * circ * 10) / 10;
-      
+      var pct = byCat[c.id] / totalVal;
+      var segGap = rows.length > 1 ? gap : 0;
+      var segFrac = Math.max(pct - segGap, 0.001);
+      var strokeLen = segFrac * circ;
+      /* dashoffset positions the start: SVG strokes draw from 3-o'clock;
+         offset = circ - accum*circ shifts segment to the right place */
+      var offset = circ * (1 - accum);
+
       svg += '<circle cx="50" cy="50" r="'+r+'" fill="transparent" ' +
              'stroke="var(' + c.v + ')" stroke-width="10" ' +
-             'stroke-dasharray="' + strokeLen + ' ' + (Math.round((circ - strokeLen)*10)/10) + '" ' +
-             'stroke-dashoffset="' + dashoffset + '" ' +
+             'stroke-dasharray="' + strokeLen.toFixed(2) + ' ' + (circ - strokeLen).toFixed(2) + '" ' +
+             'stroke-dashoffset="' + offset.toFixed(2) + '" ' +
+             'stroke-linecap="butt"' +
              '/>';
       accum += pct;
     });
     svg += '</svg>';
-    
+
     var container = '<div class="donut-container" style="position: relative; width: 105px; height: 105px; flex: none; margin: 4px 0;">' +
       svg +
       '<div style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none;">' +
       '<span class="micro" style="font-size: 8px; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: -1px;">Spent</span>' +
-      '<span class="money" style="font-weight: 800; font-size: 13px; color: var(--ink);">'+fmt(totalVal)+'</span>' +
+      '<span class="money" style="font-weight: 800; font-size: 12px; color: var(--ink);">'+fmt(totalVal)+'</span>' +
       '</div></div>';
-      
+
     return container;
   }
 
@@ -1532,38 +1595,60 @@
     var chartKeys = keys.slice(0, 5).reverse();
     var totals = chartKeys.map(function(k){ return total(groups[k]); });
     var max = Math.max.apply(null, totals) || 1;
-    
-    var h = '<div class="panel" style="padding: 16px 12px 10px; margin-top: 12px;"><h3 style="margin: 0 0 12px; font-size: 13.5px;">Weekend Trend (Last 5)</h3>';
-    h += '<svg viewBox="0 0 200 80" style="width: 100%; height: 110px; overflow: visible; display: block;">';
-    
-    // Y-axis grid lines (dashed)
-    h += '<line x1="10" y1="10" x2="190" y2="10" stroke="var(--line)" stroke-dasharray="2 2"/>';
-    h += '<line x1="10" y1="35" x2="190" y2="35" stroke="var(--line)" stroke-dasharray="2 2"/>';
-    h += '<line x1="10" y1="60" x2="190" y2="60" stroke="var(--line)"/>';
-    
-    var barW = 18;
-    var gap = 16;
-    var startX = 25;
-    
+    var avg = totals.reduce(function(a, b){ return a + b; }, 0) / totals.length;
+
+    var n = chartKeys.length;
+    /* dynamically space bars to fill the SVG width */
+    var viewW = 200, padL = 10, padR = 10, innerW = viewW - padL - padR;
+    var barW = Math.min(22, Math.floor(innerW / n * 0.55));
+    var slot = innerW / n;
+
+    var h = '<div class="panel" style="padding: 14px 12px 8px; margin-top: 12px;">' +
+            '<h3 style="margin: 0 0 10px; font-size: 13px; color: var(--ink2); font-weight: 700; text-transform: uppercase; letter-spacing: .04em;">Weekend Trend</h3>';
+    h += '<svg viewBox="0 0 200 82" style="width: 100%; height: 105px; overflow: visible; display: block;">';
+
+    /* avg reference line */
+    var avgY = 60 - Math.max((avg / max) * 50, 2);
+    h += '<line x1="'+padL+'" y1="'+avgY.toFixed(1)+'" x2="'+(viewW-padR)+'" y2="'+avgY.toFixed(1)+'" ' +
+         'stroke="var(--ink3)" stroke-dasharray="3 3" stroke-width="0.8"/>';
+    h += '<text x="'+(viewW-padR+2)+'" y="'+(avgY+3).toFixed(1)+'" font-size="5.5" fill="var(--ink3)">avg</text>';
+
+    /* baseline */
+    h += '<line x1="'+padL+'" y1="60" x2="'+(viewW-padR)+'" y2="60" stroke="var(--line)" stroke-width="0.8"/>';
+
     chartKeys.forEach(function(k, idx){
       var t = totals[idx];
       var pct = t / max;
-      var barH = Math.max(pct * 50, 2);
-      var x = startX + idx * (barW + gap);
+      var barH = Math.max(pct * 50, 3);
+      var cx = padL + slot * idx + slot / 2;
+      var x = cx - barW / 2;
       var y = 60 - barH;
-      
+
       var plan = (state.wkPlan||{})[k] || 0;
       var isOver = plan > 0 && t > plan;
-      var color = isOver ? "var(--bad)" : "var(--accent)";
-      
-      h += '<rect x="'+x+'" y="'+y+'" width="'+barW+'" height="'+barH+'" rx="4" fill="'+color+'"/>';
-      h += '<text x="'+(x + barW/2)+'" y="'+(y - 4)+'" text-anchor="middle" font-size="7" font-weight="700" fill="var(--ink)" class="money">'+Math.round(t)+'</text>';
-      
+      var hasPlan = plan > 0;
+      var color = isOver ? "var(--bad)" : hasPlan ? "var(--good)" : "var(--accent)";
+
+      /* bar */
+      h += '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+barW+'" height="'+barH.toFixed(1)+'" rx="3.5" fill="'+color+'" opacity="0.9"/>';
+
+      /* amount label above bar — use abbreviated fmt */
+      var amtLabel = Math.round(t) >= 1000 ? (Math.round(t/100)/10)+'k' : Math.round(t)+'';
+      h += '<text x="'+cx.toFixed(1)+'" y="'+(y - 3).toFixed(1)+'" text-anchor="middle" font-size="6.5" font-weight="800" fill="'+color+'">'+amtLabel+'</text>';
+
+      /* date label below baseline */
       var f = fromIso(k);
       var lbl = String(f.getMonth()+1).padStart(2,"0") + "/" + String(f.getDate()).padStart(2,"0");
-      h += '<text x="'+(x + barW/2)+'" y="70" text-anchor="middle" font-size="7.5" font-weight="600" fill="var(--ink2)">'+lbl+'</text>';
+      h += '<text x="'+cx.toFixed(1)+'" y="69" text-anchor="middle" font-size="7" font-weight="600" fill="var(--ink2)">'+lbl+'</text>';
+
+      /* plan indicator tick */
+      if(hasPlan){
+        var planY = 60 - Math.max((plan / max) * 50, 1);
+        h += '<line x1="'+(x-1)+'" y1="'+planY.toFixed(1)+'" x2="'+(x+barW+1)+'" y2="'+planY.toFixed(1)+'" ' +
+             'stroke="var(--ink3)" stroke-width="1" stroke-dasharray="2 1.5"/>';
+      }
     });
-    
+
     h += '</svg></div>';
     return h;
   }
@@ -2511,20 +2596,54 @@
     function paint(){
       var t = target(), d = diffNow();
       inp.placeholder = "e.g. " + Math.max(Math.round(t), 0);
+
+      /* header row always shows the expected amount */
       var rows = '<div class="flow-row"><span class="lbl">App says you have</span>' +
         '<span class="val money">'+fmt(t)+'</span></div>';
+
       if(d === null){
         $("#cash-math").innerHTML = rows;
         go.disabled = true; go.textContent = "Enter an amount";
         return;
       }
-      rows += '<div class="flow-row flow-left"><span class="lbl">'+(d<0? "Missing" : d>0? "Extra" : "Difference")+'</span>' +
-        '<span class="val money'+(d<0?" neg":"")+'">'+(d<0? "−" : d>0? "+" : "")+fmt(Math.abs(d))+'</span></div>';
+
+      var absD = Math.abs(d);
+      var have = num(inp.value);
+      var isGood = Math.abs(d) < 1;
+      var isMissing = d < 0;
+      var diffColor = isGood ? "var(--good)" : isMissing ? "var(--bad)" : "var(--accent-deep)";
+      var diffLabel = isGood ? "Spot on" : isMissing ? "Missing" : "Extra";
+
+      /* visual diff pill */
+      rows += '<div style="margin:12px 0 8px; padding:12px 14px; border-radius:14px; ' +
+              'background:color-mix(in srgb, '+diffColor+' 10%, var(--card2)); ' +
+              'border:1px solid color-mix(in srgb, '+diffColor+' 22%, var(--line));">' +
+              '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:'+(isGood?'0':'8px')+'">' +
+              '<span style="font-size:13px; font-weight:700; color:'+diffColor+';">'+diffLabel+'</span>' +
+              '<span class="money" style="font-size:17px; font-weight:900; color:'+diffColor+';">' +
+              (isGood ? '✓' : (isMissing ? '−' : '+')) + (isGood ? '' : fmt(absD)) +
+              '</span></div>';
+
+      /* mini progress bar: you have / expected */
+      if(!isGood && t > 0){
+        var barPct = Math.min(have / t * 100, 100).toFixed(1);
+        var extraPct = Math.max((have - t) / t * 100, 0).toFixed(1);
+        rows += '<div style="height:6px; background:var(--line); border-radius:3px; overflow:hidden; position:relative;">' +
+                '<div style="position:absolute; left:0; top:0; height:100%; width:'+barPct+'%; background:'+diffColor+'; border-radius:3px; transition:width .3s;"></div>' +
+                (parseFloat(extraPct) > 0 ? '<div style="position:absolute; left:'+barPct+'%; top:0; height:100%; width:'+extraPct+'%; background:'+diffColor+'; opacity:0.35; border-radius:3px;"></div>' : '') +
+                '</div>' +
+                '<div style="display:flex; justify-content:space-between; margin-top:4px;">' +
+                '<span style="font-size:10px; color:var(--ink3);">You have '+fmt(have)+'</span>' +
+                '<span style="font-size:10px; color:var(--ink3);">Expected '+fmt(t)+'</span>' +
+                '</div>';
+      }
+      rows += '</div>';
+
       $("#cash-math").innerHTML = rows;
       go.disabled = false;
-      go.textContent = Math.abs(d) < 1 ? "Looks right — nothing to log"
-        : d < 0 ? "Log "+fmt(-d)+" as spending I didn't track"
-        : "Add "+fmt(d)+" to my money";
+      go.textContent = isGood ? "Looks right — nothing to log"
+        : isMissing ? "Log "+fmt(absD)+" as spending I didn\u2019t track"
+        : "Got it — "+fmt(absD)+" more than expected";
     }
     inp.addEventListener("input", paint);
     if(pendBox) pendBox.addEventListener("change", paint);
@@ -2545,10 +2664,19 @@
         toast(fmt(-d)+" logged as “Not logged”");
         return;
       }
-      /* more than the app thought: it's money you can spend, so it joins the pool */
+      /* more than the app thought: add just the surplus to whatever pool we
+         have, or start a fresh pool with the amount they typed */
       if(state.restAmount > 0 && state.restFrom){
+        /* already in pool mode — just top it up by the difference */
         state.restAmount = Math.round((state.restAmount + d)*100)/100;
+      }else if(state.salary > 0){
+        /* salary mode: don't switch to pool mode; extra cash probably means
+           a different account or cash-in-hand not tracked. Just tell them. */
+        save(); closeSheet(); render();
+        toast(fmt(d)+" more than expected — make sure it\u2019s not from another account");
+        return;
       }else{
+        /* no budget set at all: seed the pool from what they actually have */
         state.restAmount = Math.round((num(inp.value))*100)/100;
         state.restFrom = todayIso(); state.restTs = Date.now(); state.restAsk = "";
       }
