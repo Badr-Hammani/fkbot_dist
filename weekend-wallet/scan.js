@@ -10,11 +10,12 @@
     var lastCom = s.lastIndexOf(",");
     if (lastDot > -1 && lastCom > -1) {
       if (lastCom > lastDot) {
-        s = s.replace(/\./g, "").replace(/,/g, function (m, i) { return i === s.lastIndexOf(",") ? "." : ""; });
-        // simpler: remove dots, convert final comma
-        s = s.split(",");
-        s = s.slice(0, -1).join("") + "." + s[s.length - 1];
+        // "1.234,56" — dots group thousands, the last comma is the decimal point
+        s = s.replace(/\./g, "");
+        var c = s.lastIndexOf(",");
+        s = s.slice(0, c).replace(/,/g, "") + "." + s.slice(c + 1);
       } else {
+        // "1,234.56" — commas group thousands
         s = s.replace(/,/g, "");
       }
     } else if (lastCom > -1) {

@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=4.2"></script>
+<script src="scan.js?v=4.4"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "4.3";
+  var APP_VERSION = "4.4";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -505,9 +505,7 @@
            Once the month turns it's meaningless — last month's spending would
            eat a budget spread over the new month's days. Retire it and ask
            for a fresh number. */
-        if(s.restFrom && s.restFrom.slice(0,7) !== todayIso().slice(0,7)){
-          s.restAmount = 0; s.restFrom = ""; s.restTs = 0; s.restAsk = todayIso().slice(0,7);
-        }
+        retireStalePool(s);
         if(typeof s.restAsk !== "string") s.restAsk = "";
         if(typeof s.restTs !== "number") s.restTs = 0;
         if(typeof s.cashTs !== "number") s.cashTs = 0;
@@ -519,6 +517,56 @@
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", geminiApiKey:"", scanProvider:"free", scanModel:"claude-opus-4-8",
              salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
   }
+  /* A backup is just a file — it can be edited, truncated or half-written.
+     One row without a date used to be saved and then throw on the next render,
+     leaving a white screen that survived every reload. Coerce what we can and
+     drop what we can't. */
+  var ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+  function cleanExpenses(list){
+    if(!Array.isArray(list)) return [];
+    return list.filter(function(e){
+      return e && typeof e === "object" && ISO_RE.test(e.date) && isFinite(+e.amount);
+    }).map(function(e){
+      return { id: e.id || uid(), ts: +e.ts || 0, amount: Math.round((+e.amount)*100)/100,
+               cat: typeof e.cat === "string" ? e.cat : "other",
+               note: typeof e.note === "string" ? e.note : "",
+               date: e.date, photo: typeof e.photo === "string" ? e.photo : null };
+    });
+  }
+  /* the rest of the shapes, coerced in place */
+  function cleanRows(){
+    state.commitments = (state.commitments||[]).filter(function(c){ return c && typeof c === "object"; })
+      .map(function(c){
+        return { id: c.id || uid(), name: String(c.name || "Bill"),
+                 amount: +c.amount || 0, kind: c.kind === "loan" ? "loan" : "sub",
+                 due: (+c.due >= 1 && +c.due <= 31) ? +c.due : 0,
+                 remaining: +c.remaining || 0,
+                 paid: (c.paid && typeof c.paid === "object") ? c.paid : {} };
+      });
+    state.goals = (state.goals||[]).filter(function(g){ return g && typeof g === "object"; })
+      .map(function(g){
+        return { id: g.id || uid(), name: String(g.name || "Goal"), target: +g.target || 0,
+                 saved: +g.saved || 0, monthly: +g.monthly || 0 };
+      });
+    state.debts = (state.debts||[]).filter(function(d){ return d && typeof d === "object"; })
+      .map(function(d){
+        var log = Array.isArray(d.log) ? d.log.filter(function(l){
+          return l && isFinite(+l.amt) && (l.dir === "b" || l.dir === "r");
+        }).map(function(l){
+          return { ts: +l.ts || 0, amt: +l.amt, dir: l.dir, note: String(l.note || ""),
+                   bumped: +l.bumped || 0 };
+        }) : [];
+        return { id: d.id || uid(), name: String(d.name || "Someone"),
+                 balance: +d.balance || 0, log: log };
+      });
+  }
+  /* "money for the rest of the month" belongs to the month you set it in */
+  function retireStalePool(s){
+    if(s.restFrom && s.restFrom.slice(0,7) !== todayIso().slice(0,7)){
+      s.restAmount = 0; s.restFrom = ""; s.restTs = 0; s.restAsk = todayIso().slice(0,7);
+    }
+  }
+
   function save(opts){
     try{
       localStorage.setItem(KEY, JSON.stringify(state));
@@ -1079,6 +1127,8 @@
     if(newBorrow > 0 && state.restAmount > 0){
       toastAction("Borrowed "+fmt(newBorrow)+" — add it to this month?", "Add", function(){
         state.restAmount = Math.round((state.restAmount + newBorrow)*100)/100;
+        var last = d.log && d.log.length ? d.log[d.log.length-1] : null;
+        if(last) last.bumped = newBorrow;      // so "Undo last entry" can reverse it
         save(); render();
         toast("Budget now "+fmt(state.restAmount)+" · "+fmt(autoDailyBudget())+"/day");
       }, 7000);
@@ -1156,6 +1206,11 @@
       var last = d.log.pop();
       if(!last) return;
       d.balance = Math.round((d.balance + (last.dir==="b" ? -last.amt : last.amt))*100)/100;
+      /* if this entry raised the month's money, take that back too — otherwise
+         undoing a borrow left the budget permanently inflated */
+      if(last.bumped > 0 && state.restAmount > 0){
+        state.restAmount = Math.round(Math.max(state.restAmount - last.bumped, 0)*100)/100;
+      }
       save(); closeSheet(); render(); toastBalance(d);
     });
     function submit(dir, btn){
@@ -1172,6 +1227,14 @@
     $("#d2-theygave").addEventListener("click", function(){ submit("b", this); });
     var armed = false;
     $("#d2-del").addEventListener("click", function(){
+      /* their log is what tells the budget that money left your pocket.
+         Deleting it while they still owe you hands you back cash you don't
+         have — settle up first. */
+      if(Math.abs(d.balance) >= 0.01){
+        toast(d.balance > 0 ? "Settle up with "+d.name+" first — you owe "+fmt(d.balance)
+                            : d.name+" still owes you "+fmt(-d.balance)+" — settle first");
+        return;
+      }
       if(!armed){ armed = true; this.textContent = "Tap again to remove"; return; }
       state.debts = state.debts.filter(function(x){ return x.id!==d.id; });
       save(); closeSheet(); render();
@@ -1229,10 +1292,20 @@
     function sharesFor(t){
       var parts = participants(), out = {};
       if(mode === "equal"){
-        var each = parts.length ? Math.round(t / parts.length * 100) / 100 : 0;
+        /* 100 between 3 is 33.33 each and a cent left over — the payer takes
+           the remainder so the shares always add up to the bill exactly */
+        var each = parts.length ? Math.floor(t / parts.length * 100) / 100 : 0;
         parts.forEach(function(n){ out[n] = each; });
+        var rest = Math.round((t - each * parts.length) * 100) / 100;
+        if(rest !== 0 && parts.length){
+          var taker = parts.indexOf(payer) > -1 ? payer : parts[0];
+          out[taker] = Math.round((out[taker] + rest) * 100) / 100;
+        }
       }else{
-        parts.forEach(function(n){ out[n] = Math.round((num(customShares[n]) || 0) * 100) / 100; });
+        parts.forEach(function(n){
+          var v = num(customShares[n]) || 0;
+          out[n] = v > 0 ? Math.round(v * 100) / 100 : 0;   // a negative share is not a share
+        });
       }
       return out;
     }
@@ -1315,9 +1388,12 @@
       var n = $("#sp-newname").value.trim();
       if(!n){ toast("Type the friend's name"); return; }
       if(n.toLowerCase()==="me"){ toast("You're already here"); return; }
-      var exists = people.some(function(p){ return p.toLowerCase()===n.toLowerCase(); });
-      if(!exists) people.push(n);
-      selected[n] = true;
+      /* "sara" must select the existing "Sara" chip, not add a second, invisible
+         participant that still takes a share */
+      var match = null;
+      people.forEach(function(p){ if(p.toLowerCase()===n.toLowerCase()) match = p; });
+      if(!match){ people.push(n); match = n; }
+      selected[match] = true;
       $("#sp-newname").value = "";
       rebuildChips();
     });
@@ -2151,9 +2227,18 @@
     if(g){
       var armed = false;
       $("#g-del").addEventListener("click", function(){
-        if(!armed){ armed = true; this.textContent = "Tap again to delete"; return; }
+        if(!armed){
+          armed = true;
+          /* say what is about to be thrown away — "Delete goal" gave no hint
+             that thousands of saved dirhams went with it */
+          this.textContent = g.saved > 0
+            ? "Tap again — this drops "+fmt(g.saved)+" saved"
+            : "Tap again to delete";
+          return;
+        }
         state.goals = state.goals.filter(function(x){ return x.id!==g.id; });
         save(); closeSheet(); render();
+        toast(g.saved > 0 ? g.name+" deleted · "+fmt(g.saved)+" removed from savings" : g.name+" deleted");
       });
     }
   }
@@ -2173,6 +2258,16 @@
     $("#gm-save").addEventListener("click", function(){
       var amt = num($("#gm-amount").value);
       if(!(amt > 0)){ toast("Enter an amount"); return; }
+      var room = Math.max(g.target - g.saved, 0);
+      if(amt > room && room >= 0){
+        /* don't quietly bank more than the goal needs */
+        var over = Math.round((amt - room)*100)/100;
+        g.saved = g.target;
+        save(); closeSheet(); render();
+        toast(room > 0 ? g.name+" is full — "+fmt(over)+" wasn't needed"
+                       : g.name+" is already at its target");
+        return;
+      }
       g.saved = Math.round((g.saved + amt)*100)/100;
       save(); closeSheet(); render();
       toast(g.saved >= g.target ? "Goal reached — well done!" : fmt(amt)+" added to "+g.name);
@@ -2587,13 +2682,25 @@
     );
 
     var inp = $("#cash-have"), go = $("#cash-go"), pendBox = $("#cash-pend");
+    /* A mis-tap here writes a real entry into your history — typing 0 would log
+       every last dirham as "Not logged". So a big difference takes two taps.
+       "Big" has to be relative, because this runs in any currency: it's half or
+       more of what the app expected. Everyday corrections stay one tap. */
+    var BIG_SHARE = 0.5, armed = false;
     function target(){ return expected + (pendBox && pendBox.checked ? pend : 0); }
+    function isBig(d){
+      var t = target();
+      return t > 0 && Math.abs(d) >= t * BIG_SHARE;
+    }
     function diffNow(){
       var have = num(inp.value);
       if(!(have >= 0) || have > 1e9 || inp.value.trim() === "") return null;
       return Math.round((have - target())*100)/100;
     }
     function paint(){
+      /* editing the amount or the checkbox cancels a confirm that was waiting,
+         so a second tap can never commit a number you no longer see */
+      armed = false;
       var t = target(), d = diffNow();
       inp.placeholder = "e.g. " + Math.max(Math.round(t), 0);
 
@@ -2652,6 +2759,12 @@
     go.addEventListener("click", function(){
       var d = diffNow();
       if(d === null) return;
+      if(!armed && Math.abs(d) >= 1 && isBig(d)){
+        armed = true;
+        this.textContent = d < 0 ? "Tap again to log " + fmt(-d)
+                                 : "Tap again to add " + fmt(d);
+        return;
+      }
       state.cashTs = Date.now();
       if(Math.abs(d) < 1){
         save(); closeSheet(); render();
@@ -3052,7 +3165,9 @@
         state.wkWeight = parseFloat(b.getAttribute("data-wkw"));
         delete state.wkPlan[currentWeekend()];      // re-freeze this weekend at the new rate
         save(); render();
-        toast(fmt(rateSplit().weekday)+" a weekday · "+fmt(rateSplit().weekend)+" a weekend day");
+        var r = rateSplit();
+        toast(r ? fmt(r.weekday)+" a weekday · "+fmt(r.weekend)+" a weekend day"
+                : "Saved — set your money in Plan to see the split");
       });
       var sProvider = $("#s-provider");
       if(sProvider){
@@ -3096,11 +3211,13 @@
         if(!f) return;
         var r = new FileReader();
         r.onload = function(){
+          var prev = null;
           try{
             var d = JSON.parse(r.result);
             if(!d || !Array.isArray(d.expenses)) throw 0;
+            prev = state;
             state = { setup:true, budget:+d.budget||0, currency:d.currency||"USD",
-                      expenses:d.expenses, apiKey:state.apiKey, geminiApiKey:state.geminiApiKey,
+                      expenses:cleanExpenses(d.expenses), apiKey:state.apiKey, geminiApiKey:state.geminiApiKey,
                       scanProvider:d.scanProvider||state.scanProvider,
                       scanModel:d.scanModel||state.scanModel,
                       salary:+d.salary||0,
@@ -3113,8 +3230,18 @@
                       restFrom:(typeof d.restFrom==="string")? d.restFrom : "", restTs:+d.restTs||0, cashTs:+d.cashTs||0,
                       wkPlan:(d.wkPlan && typeof d.wkPlan==="object")? d.wkPlan : {},
                       wkWeight:+d.wkWeight||2 };
-            save(); render(); toast("Backup restored — "+state.expenses.length+" expenses");
-          }catch(e){ toast("That file isn't a Weekend Wallet backup"); }
+            cleanRows();
+            retireStalePool(state);
+            /* draw BEFORE writing: a backup with one bad row used to be saved
+               and then throw on render, leaving a white screen that survived
+               every reload */
+            render();
+            save();
+            toast("Backup restored — "+state.expenses.length+" expenses");
+          }catch(e){
+            if(prev){ state = prev; try{ render(); }catch(e2){} }
+            toast("That file isn't a Weekend Wallet backup");
+          }
         };
         r.readAsText(f);
       });
