@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=4.9"></script>
+<script src="scan.js?v=5.0"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "4.9";
+  var APP_VERSION = "5.0";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -802,12 +802,23 @@
     if(amt < 1) return "";
     var who = usualLender();
     var already = borrowedThisMonth();
-    return '<div class="suggest"><span class="txt">You\'re <b class="money">' + fmt(amt) + '</b> past your money' +
-      (already > 0 ? ' beyond the ' + fmt(already) + ' you already logged' : '') + '. ' +
-      (who ? 'Add it to ' + esc(who.name) + '\'s loan?' : 'If someone covered you, keep track of it.') +
-      '</span><button id="h-borrow" data-amt="' + amt + '"' +
+    /* Always lead with the same figure shown in red above. Leading with the
+       not-yet-logged remainder made the app appear to contradict itself:
+       2,850 in red, "you're 1,050 past your money" underneath. */
+    var total = Math.round((amt + already) * 100) / 100;
+    var txt = 'You\'re <b class="money">' + fmt(total) + '</b> past your money. ';
+    if(already > 0){
+      txt += '<b class="money">' + fmt(already) + '</b> is already borrowed' +
+        (who ? ' from ' + esc(who.name) : '') + ' — ' +
+        (who ? 'add the other <b class="money">' + fmt(amt) + '</b>?'
+             : 'the other <b class="money">' + fmt(amt) + '</b> is not written down.');
+    }else{
+      txt += (who ? 'Add it to ' + esc(who.name) + '\'s loan?' : 'If someone covered you, keep track of it.');
+    }
+    return '<div class="suggest"><span class="txt">' + txt + '</span>' +
+      '<button id="h-borrow" data-amt="' + amt + '"' +
       (who ? ' data-who="' + esc(who.id) + '"' : '') + '>' +
-      (who ? 'Add to ' + esc(who.name) : 'Log it') + '</button></div>';
+      (who ? 'Add ' + fmt(amt) : 'Log it') + '</button></div>';
   }
 
   /* only offer to sweep money you really still have — the old version could

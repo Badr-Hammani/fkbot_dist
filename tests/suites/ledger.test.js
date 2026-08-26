@@ -163,6 +163,31 @@ exports.run = async function (t, env) {
     await app.close();
   }
   {
+    /* the offer must never state a different "over" figure than the one shown
+       in red — 2,850 on screen and "you're 1,050 past your money" underneath
+       reads as the app contradicting itself */
+    const app = await boot(browser, baseState({
+      restAmount: 3000, restFrom: "2026-08-01", restTs: 1,
+      debts: [person({ id: "dad", name: "Dad", balance: 1800,
+                       log: [{ ts: Date.parse("2026-08-06"), amt: 1800, dir: "b", note: "" }] })],
+      expenses: [expense({ amount: 5850, date: "2026-08-10", cat: "out" })]
+    }), { now: NOW });
+    const red = norm(await app.poolLine());
+    const txt = norm(await app.page.evaluate(() => {
+      const s = document.querySelector(".suggest"); return s ? s.textContent : "";
+    }));
+    t.has("the red line shows the full overspend", red, "MAD 2,850 past your MAD 3,000");
+    t.has("and the offer leads with the same figure", txt, "You're MAD 2,850 past your money");
+    t.has("it says what is already borrowed", txt, "MAD 1,800 is already borrowed from Dad");
+    t.has("and asks only for the rest", txt, "add the other MAD 1,050");
+    t.has("the button names the amount it will add", await app.page.evaluate(() => {
+      const b = document.querySelector("#h-borrow"); return b ? b.textContent : "";
+    }), "Add MAD 1,050");
+    await app.page.click("#h-borrow"); await app.page.waitForTimeout(400);
+    t.eq("and adds exactly that", (await app.stored()).debts[0].balance, 2850);
+    await app.close();
+  }
+  {
     /* the salary path keeps working */
     const app = await boot(browser, baseState({
       salary: 9000,
