@@ -201,6 +201,63 @@ exports.run = async function (t, env) {
     await app.close();
   }
   {
+    /* Being repaid is not borrowing. This counted every incoming entry as a
+       loan, so friends paying you back read as "already borrowed" — and since
+       repayments also raise what you can spend, the same money was subtracted
+       twice and the offer could vanish completely. */
+    const app = await boot(browser, baseState({
+      salary: 9000,
+      commitments: [{ id: "dad", name: "Dad", amount: 1000, kind: "loan", due: 5,
+                      remaining: 12000, paid: {}, borrowLog: [] }],
+      debts: [
+        person({ id: "h", name: "Hamza", balance: 0, log: [
+          { ts: Date.parse("2026-07-20"), amt: 1000, dir: "r", note: "" },
+          { ts: Date.parse("2026-08-06"), amt: 1000, dir: "b", note: "" }] }),
+        person({ id: "a", name: "Ali", balance: 0, log: [
+          { ts: Date.parse("2026-07-22"), amt: 800, dir: "r", note: "" },
+          { ts: Date.parse("2026-08-09"), amt: 800, dir: "b", note: "" }] })
+      ],
+      expenses: [expense({ amount: 10850, date: "2026-08-10", cat: "out" })]
+    }), { now: NOW });
+    const txt = norm(await app.page.evaluate(() => {
+      const s = document.querySelector(".suggest"); return s ? s.textContent : "NONE";
+    }));
+    t.no("repayments are not called borrowing", txt.includes("already borrowed"), txt);
+    t.has("and the offer still appears for the real overspend", txt, "You're MAD 1,050 past your money");
+    await app.close();
+  }
+  {
+    /* real borrowing is still recognised */
+    const app = await boot(browser, baseState({
+      restAmount: 3000, restFrom: "2026-08-01", restTs: 1,
+      commitments: [{ id: "dad", name: "Dad", amount: 1000, kind: "loan", due: 5,
+                      remaining: 12000, paid: {}, borrowLog: [] }],
+      debts: [person({ id: "k", name: "Karim", balance: 1800,
+                       log: [{ ts: Date.parse("2026-08-06"), amt: 1800, dir: "b", note: "" }] })],
+      expenses: [expense({ amount: 5850, date: "2026-08-10", cat: "out" })]
+    }), { now: NOW });
+    t.has("genuine borrowing counts", await app.page.evaluate(() => {
+      const s = document.querySelector(".suggest"); return s ? s.textContent : "";
+    }), "MAD 1,800 is already borrowed");
+    await app.close();
+  }
+  {
+    /* one payment that is part repayment, part new loan */
+    const app = await boot(browser, baseState({
+      restAmount: 3000, restFrom: "2026-08-01", restTs: 1,
+      commitments: [{ id: "dad", name: "Dad", amount: 1000, kind: "loan", due: 5,
+                      remaining: 12000, paid: {}, borrowLog: [] }],
+      debts: [person({ id: "h", name: "Hamza", balance: 1500, log: [
+        { ts: Date.parse("2026-07-20"), amt: 500, dir: "r", note: "" },
+        { ts: Date.parse("2026-08-09"), amt: 2000, dir: "b", note: "" }] })],
+      expenses: [expense({ amount: 5850, date: "2026-08-10", cat: "out" })]
+    }), { now: NOW });
+    t.has("only the loan half of a mixed payment counts", await app.page.evaluate(() => {
+      const s = document.querySelector(".suggest"); return s ? s.textContent : "";
+    }), "MAD 1,500 is already borrowed");
+    await app.close();
+  }
+  {
     /* nobody to name yet */
     const app = await boot(browser, baseState({
       restAmount: 1000, restFrom: "2026-08-01", restTs: 1,

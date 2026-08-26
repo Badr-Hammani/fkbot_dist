@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=5.2"></script>
+<script src="scan.js?v=5.3"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "5.2";
+  var APP_VERSION = "5.3";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -767,13 +767,15 @@
     if(d.balance < 0) return 'owes you <b class="money" style="color:var(--good)">'+fmt(-d.balance)+'</b>';
     return '<b style="color:var(--good)">all settled</b>';
   }
+  /* Money handed to you is one of two completely different things: a friend
+     paying back what they owed (your own cash returning) or a new loan. This
+     used to count every incoming entry as borrowing, so being repaid 1,800
+     read as "1,800 already borrowed" — and since repayments already raise what
+     you can spend, the same 1,800 was subtracted twice and the overspend
+     offer could disappear entirely. ledgerFlowSince already draws the
+     distinction properly; use it rather than a second, wrong copy. */
   function borrowedThisMonth(){
-    var start = new Date(); start.setDate(1); start.setHours(0,0,0,0);
-    var t = start.getTime(), sum = 0;
-    state.debts.forEach(function(d){
-      (d.log||[]).forEach(function(l){ if(l.dir==="b" && l.ts >= t) sum += l.amt; });
-    });
-    return sum;
+    return ledgerFlowSince(monthStartIso()).borrowed;
   }
   /* The person you actually borrow from — most borrowed from, over the whole
      history. Lets the app say "add it to Dad's loan" instead of making you
