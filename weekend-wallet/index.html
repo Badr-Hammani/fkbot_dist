@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=4.7"></script>
+<script src="scan.js?v=4.8"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "4.7";
+  var APP_VERSION = "4.8";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -3384,27 +3384,47 @@
 
   render();
 
-  /* ---------- auto-update check ---------- */
-  var lastUpdateCheck = 0;
-  function checkForUpdate(){
+  /* ---------- auto-update check ----------
+     This used to check only on load and on returning to the app, behind a
+     five minute limiter — so an app left open never noticed a new version,
+     and backgrounding it briefly did nothing either. It now actually polls
+     while it is on screen, and stops while it is not, so it costs nothing
+     in the background. */
+  var UPDATE_POLL_MS = (window.__UPDATE_POLL_MS || 2*60*1000);   /* test hook */
+  var UPDATE_MIN_GAP = (window.__UPDATE_MIN_GAP || 30*1000);
+  var lastUpdateCheck = 0, updateTimer = null, updateFound = false;
+
+  function checkForUpdate(force){
+    if(updateFound) return;
     var now = Date.now();
-    if(now - lastUpdateCheck < 5*60*1000) return;
+    if(!force && now - lastUpdateCheck < UPDATE_MIN_GAP) return;
     lastUpdateCheck = now;
     fetch("version.json?t=" + now, { cache: "no-store" })
       .then(function(r){ return r.json(); })
       .then(function(j){
         if(j && j.version && j.version !== APP_VERSION){
+          updateFound = true;
+          stopUpdatePolling();
           document.getElementById("updatebar").classList.add("show");
         }
       })
       .catch(function(){});
   }
+  function startUpdatePolling(){
+    stopUpdatePolling();
+    updateTimer = setInterval(function(){ checkForUpdate(true); }, UPDATE_POLL_MS);
+  }
+  function stopUpdatePolling(){
+    if(updateTimer){ clearInterval(updateTimer); updateTimer = null; }
+  }
   document.getElementById("updatebar-go").addEventListener("click", function(){
     location.replace(location.pathname + "?u=" + Date.now());
   });
-  checkForUpdate();
+  checkForUpdate(true);
+  startUpdatePolling();
   document.addEventListener("visibilitychange", function(){
-    if(document.visibilityState === "visible") checkForUpdate();
+    if(document.visibilityState === "visible"){ checkForUpdate(true); startUpdatePolling(); }
+    else stopUpdatePolling();
   });
 
   /* gentle backup reminder — data only lives on this phone */
