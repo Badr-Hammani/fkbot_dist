@@ -69,6 +69,57 @@ exports.run = async function (t, env) {
     await app.close();
   }
 
+  /* ---------- borrowing more against a loan you already have ---------- */
+  {
+    /* out of money, dad covers a 2,850 purchase, and "Dad" is a standing loan
+       in Plan — not a friends-ledger person. It must land on that loan. */
+    const app = await boot(browser, baseState({
+      salary: 9000,
+      commitments: [{ id: "dad", name: "Dad", amount: 1000, kind: "loan", due: 5,
+                      remaining: 12000, paid: {}, borrowLog: [] }],
+      expenses: [expense({ amount: 10850, date: "2026-08-10", cat: "out" })]
+    }), { now: NOW });
+
+    t.has("the offer names the loan, not a separate person", await app.page.evaluate(() => {
+      const s = document.querySelector(".suggest"); return s ? s.textContent : "";
+    }), "Add it to Dad?");
+    await app.page.click("#h-borrow"); await app.page.waitForTimeout(400);
+
+    let st = await app.stored();
+    t.eq("it goes onto what you owe on that loan", st.commitments[0].remaining, 14850);
+    t.eq("the monthly payment is untouched", st.commitments[0].amount, 1000);
+    t.eq("no stray ledger person is created", st.debts.length, 0);
+    t.has("and it says the new balance", await app.toast(), "you owe MAD 14,850");
+
+    await app.page.click("#toast button"); await app.page.waitForTimeout(400);
+    t.eq("undo takes it back off", (await app.stored()).commitments[0].remaining, 12000);
+
+    /* the same thing from the loan's own sheet */
+    await app.tab("plan");
+    await app.page.click('[data-cm="dad"]'); await app.page.waitForTimeout(400);
+    await app.page.fill("#c-borrow", "2850");
+    await app.page.click("#c-borrow-go"); await app.page.waitForTimeout(400);
+    st = await app.stored();
+    t.eq("Plan offers the same action", st.commitments[0].remaining, 14850);
+    t.eq("and records what was taken", st.commitments[0].borrowLog.map(l => l.amt).join(), "2850");
+    await app.tab("plan");
+    t.has("months-to-go follows the bigger balance", await app.page.evaluate(() => {
+      const r = document.querySelector('[data-cm="dad"] .hl'); return r ? r.textContent : "";
+    }), "MAD 14,850 left");
+    await app.close();
+  }
+  {
+    /* a subscription is not a loan — no borrowing against Netflix */
+    const app = await boot(browser, baseState({
+      salary: 9000,
+      commitments: [{ id: "n", name: "Netflix", amount: 65, kind: "sub", due: 12, remaining: 0, paid: {} }]
+    }), { now: NOW });
+    await app.tab("plan");
+    await app.page.click('[data-cm="n"]'); await app.page.waitForTimeout(400);
+    t.no("subscriptions get no borrow field", await app.page.evaluate(() => !!document.querySelector("#c-borrow")));
+    await app.close();
+  }
+
   /* ---------- reconcile against real cash ---------- */
   {
     const app = await boot(browser, baseState({

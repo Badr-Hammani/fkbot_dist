@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=5.0"></script>
+<script src="scan.js?v=5.1"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "5.0";
+  var APP_VERSION = "5.1";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -541,6 +541,9 @@
                  amount: +c.amount || 0, kind: c.kind === "loan" ? "loan" : "sub",
                  due: (+c.due >= 1 && +c.due <= 31) ? +c.due : 0,
                  remaining: +c.remaining || 0,
+                 borrowLog: Array.isArray(c.borrowLog) ? c.borrowLog.filter(function(l){
+                   return l && isFinite(+l.amt);
+                 }).map(function(l){ return { ts: +l.ts || 0, amt: +l.amt }; }) : [],
                  paid: (c.paid && typeof c.paid === "object") ? c.paid : {} };
       });
     state.goals = (state.goals||[]).filter(function(g){ return g && typeof g === "object"; })
@@ -800,25 +803,35 @@
   function overspendOffer(){
     var amt = uncoveredOverspend();
     if(amt < 1) return "";
-    var who = usualLender();
+    /* Prefer a loan you already have — "Dad" is usually a standing loan in
+       Plan, not a friends-ledger entry, and adding to the wrong one leaves you
+       with the same person owed money in two disconnected places. */
+    var loans = loanCommitments();
+    var target = null;
+    if(loans.length === 1) target = { kind: "loan", id: loans[0].id, name: loans[0].name };
+    else if(loans.length > 1){
+      var biggest = loans[0];
+      loans.forEach(function(c){ if((+c.remaining||0) > (+biggest.remaining||0)) biggest = c; });
+      target = { kind: "loan", id: biggest.id, name: biggest.name };
+    }else{
+      var who = usualLender();
+      if(who) target = { kind: "person", id: who.id, name: who.name };
+    }
     var already = borrowedThisMonth();
-    /* Always lead with the same figure shown in red above. Leading with the
-       not-yet-logged remainder made the app appear to contradict itself:
-       2,850 in red, "you're 1,050 past your money" underneath. */
     var total = Math.round((amt + already) * 100) / 100;
     var txt = 'You\'re <b class="money">' + fmt(total) + '</b> past your money. ';
     if(already > 0){
-      txt += '<b class="money">' + fmt(already) + '</b> is already borrowed' +
-        (who ? ' from ' + esc(who.name) : '') + ' — ' +
-        (who ? 'add the other <b class="money">' + fmt(amt) + '</b>?'
-             : 'the other <b class="money">' + fmt(amt) + '</b> is not written down.');
+      txt += '<b class="money">' + fmt(already) + '</b> is already borrowed — ' +
+        (target ? 'add the other <b class="money">' + fmt(amt) + '</b> to ' + esc(target.name) + '?'
+                : 'the other <b class="money">' + fmt(amt) + '</b> is not written down.');
     }else{
-      txt += (who ? 'Add it to ' + esc(who.name) + '\'s loan?' : 'If someone covered you, keep track of it.');
+      txt += (target ? 'Add it to ' + esc(target.name) + (target.kind === "loan" ? "" : "\u2019s loan") + '?'
+                     : 'If someone covered you, keep track of it.');
     }
     return '<div class="suggest"><span class="txt">' + txt + '</span>' +
       '<button id="h-borrow" data-amt="' + amt + '"' +
-      (who ? ' data-who="' + esc(who.id) + '"' : '') + '>' +
-      (who ? 'Add ' + fmt(amt) : 'Log it') + '</button></div>';
+      (target ? ' data-who="' + esc(target.id) + '" data-kind="' + target.kind + '"' : '') + '>' +
+      (target ? 'Add ' + fmt(amt) : 'Log it') + '</button></div>';
   }
 
   /* only offer to sweep money you really still have — the old version could
@@ -1923,6 +1936,25 @@
     var p = paidRec(c, mk);
     return p && p.amt > 0 ? p.amt : c.amount;
   }
+  /* Borrowing more against a standing loan: the balance owed goes up. This is
+     the counterpart to payCommitment, which brings it down. The monthly
+     payment is untouched, so this does not change what is reserved from your
+     salary — it changes how long the loan runs. */
+  function borrowOnCommitment(c, amt){
+    if(!(amt > 0)) return;
+    c.remaining = Math.round(((+c.remaining || 0) + amt) * 100) / 100;
+    if(!Array.isArray(c.borrowLog)) c.borrowLog = [];
+    c.borrowLog.push({ ts: Date.now(), amt: Math.round(amt * 100) / 100 });
+  }
+  function undoBorrowOnCommitment(c){
+    if(!Array.isArray(c.borrowLog) || !c.borrowLog.length) return 0;
+    var last = c.borrowLog.pop();
+    c.remaining = Math.max(Math.round(((+c.remaining || 0) - last.amt) * 100) / 100, 0);
+    return last.amt;
+  }
+  function loanCommitments(){
+    return state.commitments.filter(function(c){ return c.kind === "loan"; });
+  }
   function payCommitment(c, amt){
     if(!c.paid) c.paid = {};
     var prev = paidRec(c);
@@ -2251,6 +2283,23 @@
       '<div class="hint">Some months you give more — put the real amount here and the difference comes off your spending money.</div></div>';
   }
 
+  /* Taking more from a loan you already have — the case where you run out and
+     your dad covers a purchase. It goes onto what you still owe, not onto this
+     month's payment. */
+  function borrowBlock(c){
+    if(c.kind !== "loan") return "";
+    var log = Array.isArray(c.borrowLog) ? c.borrowLog : [];
+    var last = log.length ? log[log.length-1] : null;
+    return '<div class="field"><label class="micro" for="c-borrow">Borrowed more from ' + esc(c.name) + '?</label>' +
+      '<input id="c-borrow" type="text" inputmode="decimal" placeholder="e.g. 2000" value="">' +
+      '<button class="btn" id="c-borrow-go" style="margin-top:8px">' + IC.bank + 'Add it to what I owe</button>' +
+      (last ? '<div class="hint">Last added ' + fmt(last.amt) + ' on ' +
+        new Date(last.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"}) +
+        ' · <button id="c-borrow-undo" style="color:var(--accent-deep); font-weight:700; background:none; padding:0">undo</button></div>'
+        : '<div class="hint">Raises the balance you owe, not this month\'s payment.</div>') +
+      '</div>';
+  }
+
   function openCommitmentSheet(id){
     var c = null;
     if(id){ state.commitments.forEach(function(x){ if(x.id===id) c = x; }); }
@@ -2272,7 +2321,7 @@
       '<label class="micro" for="c-remaining">Loan balance left (optional)</label>' +
       '<input id="c-remaining" type="text" inputmode="decimal" min="0" placeholder="How much is still owed" value="'+(c && c.remaining? c.remaining:"")+'">' +
       '<div class="hint">Each saved edit updates this — the app shows roughly how many months are left.</div></div>' +
-      (c? payBlock(c) : "") +
+      (c? payBlock(c) + borrowBlock(c) : "") +
       '<button class="btn primary" id="c-save">Save</button>' +
       (c? '<div style="height:10px"></div><button class="btn danger" id="c-del">Remove</button>' : "")
     );
@@ -2304,6 +2353,23 @@
         save(); closeSheet(); render();
         var d = Math.round((amt - c.amount)*100)/100;
         toast(c.name+": "+fmt(amt)+" logged"+(d>0? " · "+fmt(d)+" more than usual" : d<0? " · "+fmt(-d)+" less than usual" : ""));
+      });
+    }
+    if(c && $("#c-borrow-go")){
+      $("#c-borrow-go").addEventListener("click", function(){
+        var amt = num($("#c-borrow").value);
+        if(!(amt > 0)){ toast("How much did you take?"); return; }
+        borrowOnCommitment(c, amt);
+        save(); closeSheet(); render();
+        toast(fmt(amt) + " added to " + c.name + " — you owe " + fmt(c.remaining));
+      });
+    }
+    if(c && $("#c-borrow-undo")){
+      $("#c-borrow-undo").addEventListener("click", function(){
+        var back = undoBorrowOnCommitment(c);
+        if(!back){ toast("Nothing to undo"); return; }
+        save(); closeSheet(); render();
+        toast("Removed " + fmt(back) + " — you owe " + fmt(c.remaining));
       });
     }
     if(c && $("#c-unpay")){
@@ -3258,7 +3324,21 @@
     if(borrowBtn) borrowBtn.addEventListener("click", function(){
       var amt = parseFloat(this.getAttribute("data-amt")) || 0;
       var who = this.getAttribute("data-who");
+      var kind = this.getAttribute("data-kind");
       if(!who || !(amt > 0)){ openBorrowSheet(amt); return; }
+      if(kind === "loan"){
+        var c = null;
+        state.commitments.forEach(function(x){ if(x.id === who) c = x; });
+        if(!c){ openBorrowSheet(amt); return; }
+        borrowOnCommitment(c, amt);
+        save(); render();
+        toastAction("Added " + fmt(amt) + " to " + c.name + " — you owe " + fmt(c.remaining), "Undo", function(){
+          undoBorrowOnCommitment(c);
+          save(); render();
+          toast("Removed");
+        }, 7000);
+        return;
+      }
       var d = null;
       state.debts.forEach(function(x){ if(x.id === who) d = x; });
       if(!d){ openBorrowSheet(amt); return; }
