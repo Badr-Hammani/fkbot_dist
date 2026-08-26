@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=4.4"></script>
+<script src="scan.js?v=4.5"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "4.4";
+  var APP_VERSION = "4.5";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -530,7 +530,7 @@
       return { id: e.id || uid(), ts: +e.ts || 0, amount: Math.round((+e.amount)*100)/100,
                cat: typeof e.cat === "string" ? e.cat : "other",
                note: typeof e.note === "string" ? e.note : "",
-               date: e.date, photo: typeof e.photo === "string" ? e.photo : null };
+               date: e.date, photo: safeImg(e.photo) || null };
     });
   }
   /* the rest of the shapes, coerced in place */
@@ -587,6 +587,15 @@
 
   /* ---------- helpers ---------- */
   function $(s, el){ return (el||document).querySelector(s); }
+  /* Anything the app stores can arrive from a backup file, and a backup is
+     just a file someone can edit. A photo is only ever produced here by canvas
+     toDataURL, so anything that is not an inline image is not a photo — it is
+     an injection attempt or corruption. Returns "" for everything else, and
+     every img src in the app goes through it. */
+  var IMG_DATA_RE = /^data:image\/(png|jpe?g|gif|webp|bmp);base64,[A-Za-z0-9+/=\s]*$/i;
+  function safeImg(src){
+    return (typeof src === "string" && IMG_DATA_RE.test(src)) ? src : "";
+  }
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){
     return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
   });}
@@ -966,14 +975,18 @@
         monthName + ' — borrowing included?</span><button data-task="plan" id="h-newmonth">Set it</button></div>';
     }
 
-    /* today card — everyday budget */
+    /* today card — everyday budget.
+       Shown whenever there is a budget to speak of, including when the rate has
+       fallen to zero. Hiding the card once you run out removed the one place
+       that says how far past you are — exactly when you need to see it. */
     var tb = todayBudget();
-    if(tb > 0){
+    var rrNow = restRemaining();
+    if(tb > 0 || rrNow !== null || state.salary > 0){
       var dLeft = tb - tSpent;
       h += '<div class="sec"><span class="micro">Today</span>' +
         '<span class="micro">'+daysLeftInMonth()+' days left this month</span></div>';
       var poolLine = "";
-      var rr = restRemaining();
+      var rr = rrNow;
       if(rr !== null){
         poolLine = rr < 0
           ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">'+fmt(-rr)+' past your '+fmt(state.restAmount)+' for the month</span></div>'
@@ -991,12 +1004,15 @@
       }
       h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+
         new Date().toLocaleDateString(undefined,{weekday:"long"})+'</span>' +
-        '<span class="goal-amt money">'+(dLeft<0
+        '<span class="goal-amt money">'+(tb <= 0
+          ? '<b style="color:var(--bad)">nothing left</b> today'
+          : dLeft<0
           ? '<b style="color:var(--bad)">'+fmt(Math.abs(dLeft))+'</b> over'
           : '<b>'+fmt(dLeft)+'</b> left today')+'</span></div>' +
-        meterHtml(tSpent, tb) +
-        '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(tSpent)+' of '+fmt(tb)+
-        ' · rebalances daily</span></div>' + poolLine + '</div>';
+        meterHtml(tSpent, Math.max(tb, tSpent, 1)) +
+        '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">'+(tb <= 0
+          ? 'spent '+fmt(tSpent)+' today · your money for the month is used up'
+          : 'spent '+fmt(tSpent)+' of '+fmt(tb)+' · rebalances daily')+'</span></div>' + poolLine + '</div>';
     }
 
     /* weekend card — the same pool, seen over Fri-Sun instead of one day */
@@ -1475,13 +1491,14 @@
 
   function expRow(e){
     var c = cat(e.cat);
-    var thumb = e.photo
-      ? '<span class="exp-thumb"><img src="'+e.photo+'" alt="Receipt"></span>'
+    var shot = safeImg(e.photo);
+    var thumb = shot
+      ? '<span class="exp-thumb"><img src="'+esc(shot)+'" alt="Receipt"></span>'
       : catTile(c, "big");
     return '<button class="exp" data-exp="'+e.id+'">' + thumb +
       '<span class="exp-main"><span class="exp-title">'+esc(e.note || c.name)+'</span>' +
       '<span class="exp-sub"><span class="cat-dot" style="background:var('+c.v+')"></span>'+c.name+
-      (e.photo? " · receipt":"")+'</span></span>' +
+      (shot? " · receipt":"")+'</span></span>' +
       '<span class="exp-amt money">'+fmt(e.amount)+'</span></button>';
   }
 
@@ -2578,7 +2595,7 @@
   function setPhotoUi(mode){
     var ic = $("#f-photo-ic"), t = $("#f-photo-t"), s = $("#f-photo-s");
     if(!ic || !draft) return;
-    if(draft.photo) ic.innerHTML = '<img src="'+draft.photo+'" alt="Receipt preview">';
+    if(safeImg(draft.photo)) ic.innerHTML = '<img src="'+esc(safeImg(draft.photo))+'" alt="Receipt preview">';
     if(mode === "scanning"){
       t.innerHTML = 'Reading the receipt…';
       s.innerHTML = "";
@@ -2999,7 +3016,7 @@
     pendingDelete = null;
     openSheet(
       '<h2>'+esc(e.note || c.name)+'</h2>' +
-      (e.photo? '<img class="detail-photo" src="'+e.photo+'" id="d-photo" alt="Receipt — tap to zoom">' : "") +
+      (safeImg(e.photo)? '<img class="detail-photo" src="'+esc(safeImg(e.photo))+'" id="d-photo" alt="Receipt — tap to zoom">' : "") +
       '<dl class="detail-grid">' +
       '<dt>Amount</dt><dd class="money">'+fmt(e.amount)+'</dd>' +
       '<dt>Category</dt><dd><span style="color:var('+c.v+'); display:inline-flex; width:15px; height:15px; vertical-align:-2px; margin-right:5px">'+catIcon(c.id)+'</span>'+c.name+'</dd>' +
@@ -3022,9 +3039,9 @@
       toast("Logged again — "+fmt(e.amount));
     });
     $("#d-edit").addEventListener("click", function(){ openAdd(e.id); });
-    if(e.photo){
+    if(safeImg(e.photo)){
       $("#d-photo").addEventListener("click", function(){
-        $("#viewer-img").src = e.photo;
+        $("#viewer-img").src = safeImg(e.photo);
         $("#viewer").classList.add("show");
       });
     }
