@@ -178,8 +178,8 @@ exports.run = async function (t, env) {
     }));
     t.has("the red line shows the full overspend", red, "MAD 2,850 past your MAD 3,000");
     t.has("and the offer leads with the same figure", txt, "You're MAD 2,850 past your money");
-    t.has("it says what is already borrowed", txt, "MAD 1,800 is already borrowed from Dad");
-    t.has("and asks only for the rest", txt, "add the other MAD 1,050");
+    t.has("it says what is already borrowed", txt, "MAD 1,800 is already borrowed");
+    t.has("and asks only for the rest, naming where it goes", txt, "add the other MAD 1,050 to Dad?");
     t.has("the button names the amount it will add", await app.page.evaluate(() => {
       const b = document.querySelector("#h-borrow"); return b ? b.textContent : "";
     }), "Add MAD 1,050");

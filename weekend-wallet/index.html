@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=5.1"></script>
+<script src="scan.js?v=5.2"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "5.1";
+  var APP_VERSION = "5.2";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -825,7 +825,7 @@
         (target ? 'add the other <b class="money">' + fmt(amt) + '</b> to ' + esc(target.name) + '?'
                 : 'the other <b class="money">' + fmt(amt) + '</b> is not written down.');
     }else{
-      txt += (target ? 'Add it to ' + esc(target.name) + (target.kind === "loan" ? "" : "\u2019s loan") + '?'
+      txt += (target ? 'Add it to ' + esc(target.name) + (target.kind === "loan" ? "" : "\'s loan") + '?'
                      : 'If someone covered you, keep track of it.');
     }
     return '<div class="suggest"><span class="txt">' + txt + '</span>' +
