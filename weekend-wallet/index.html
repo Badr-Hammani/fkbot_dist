@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=4.8"></script>
+<script src="scan.js?v=4.9"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "4.8";
+  var APP_VERSION = "4.9";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -772,6 +772,44 @@
     });
     return sum;
   }
+  /* The person you actually borrow from — most borrowed from, over the whole
+     history. Lets the app say "add it to Dad's loan" instead of making you
+     type his name every time you go over. */
+  function usualLender(){
+    var best = null, bestAmt = 0;
+    state.debts.forEach(function(d){
+      var sum = 0;
+      (d.log||[]).forEach(function(l){ if(l.dir === "b") sum += l.amt; });
+      if(sum > bestAmt){ bestAmt = sum; best = d; }
+    });
+    return best;
+  }
+  /* How far past your money you are, whichever way the budget is set up, minus
+     what you have already written down as borrowed this month. */
+  function uncoveredOverspend(){
+    var over = 0;
+    var rr = restRemaining();
+    if(rr !== null) over = rr < 0 ? -rr : 0;
+    else if(state.salary > 0){
+      var left = planMath().left - monthSpent() - ledgerFlowSince(monthStartIso()).net;
+      over = left < 0 ? -left : 0;
+    }
+    if(over <= 0) return 0;
+    return Math.round(Math.max(over - borrowedThisMonth(), 0) * 100) / 100;
+  }
+  function overspendOffer(){
+    var amt = uncoveredOverspend();
+    if(amt < 1) return "";
+    var who = usualLender();
+    var already = borrowedThisMonth();
+    return '<div class="suggest"><span class="txt">You\'re <b class="money">' + fmt(amt) + '</b> past your money' +
+      (already > 0 ? ' beyond the ' + fmt(already) + ' you already logged' : '') + '. ' +
+      (who ? 'Add it to ' + esc(who.name) + '\'s loan?' : 'If someone covered you, keep track of it.') +
+      '</span><button id="h-borrow" data-amt="' + amt + '"' +
+      (who ? ' data-who="' + esc(who.id) + '"' : '') + '>' +
+      (who ? 'Add to ' + esc(who.name) : 'Log it') + '</button></div>';
+  }
+
   /* only offer to sweep money you really still have — the old version could
      "save" the unspent part of a fixed weekend budget while the actual pool
      was already in the red */
@@ -985,11 +1023,9 @@
         (pm.extra ? (pm.extra > 0 ? ' · '+fmt(pm.extra)+' more than usual' : ' · '+fmt(-pm.extra)+' less than usual') : "") +
         '</span>'+paydayChip()+'</div></div>' +
         '</section>';
-      var uncovered = Math.abs(Math.min(mLeft, 0)) - borrowedThisMonth();
-      if(mLeft < 0 && uncovered >= 1){
-        h += '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(Math.abs(mLeft))+'</b> over' +
-          (borrowedThisMonth() > 0 ? ' — <b class="money">'+fmt(uncovered)+'</b> of it not logged yet.' : '. If your dad or a friend covered you, keep track of it.') +
-          '</span><button id="h-borrow" data-amt="'+Math.round(uncovered)+'">Log it</button></div>';
+      var offer = overspendOffer();
+      if(offer){
+        h += offer;
       }else if(iOweTotal() > 0 || owedToMeTotal() > 0){
         var bits = [];
         if(iOweTotal() > 0) bits.push('you owe <b class="money">'+fmt(iOweTotal())+'</b> ('+
@@ -1018,6 +1054,7 @@
         '<div class="hero-caption">'+(gone<0? "came in this month" : "out of your pocket this month")+nNote+
         ' · add your salary in <strong>Plan</strong> to see what\'s left</div>' +
         '</section>';
+      h += overspendOffer();
     }
 
     /* new month, and last month you were running on a set-aside pool —
@@ -3208,7 +3245,23 @@
     if(sweepBtn) sweepBtn.addEventListener("click", openSweepSheet);
     var borrowBtn = $("#h-borrow");
     if(borrowBtn) borrowBtn.addEventListener("click", function(){
-      openBorrowSheet(parseFloat(this.getAttribute("data-amt")) || 0);
+      var amt = parseFloat(this.getAttribute("data-amt")) || 0;
+      var who = this.getAttribute("data-who");
+      if(!who || !(amt > 0)){ openBorrowSheet(amt); return; }
+      var d = null;
+      state.debts.forEach(function(x){ if(x.id === who) d = x; });
+      if(!d){ openBorrowSheet(amt); return; }
+      /* one tap: it goes onto what you owe them, and because the app counts
+         borrowing as funding rather than income it does not quietly hand the
+         same money back to your budget */
+      ledgerAdd(d, "b", amt, "covered my overspend");
+      save(); render();
+      toastAction("Added " + fmt(amt) + " to " + d.name + " — you owe " + fmt(d.balance), "Undo", function(){
+        var last = d.log.pop();
+        if(last) d.balance = Math.round((d.balance - last.amt) * 100) / 100;
+        save(); render();
+        toast("Removed");
+      }, 7000);
     });
     var oweBtn = $("#h-owe");
     if(oweBtn) oweBtn.addEventListener("click", function(){ tab = "plan"; render(); window.scrollTo(0,0); });

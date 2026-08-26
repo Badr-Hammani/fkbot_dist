@@ -134,6 +134,65 @@ exports.run = async function (t, env) {
     await app.close();
   }
 
+  /* ---------- going past your money is a loan from someone ---------- */
+  {
+    /* the pool path: this used to offer nothing at all when you went over */
+    const app = await boot(browser, baseState({
+      restAmount: 3000, restFrom: "2026-08-01", restTs: 1,
+      debts: [person({ id: "dad", name: "Dad", balance: 1500,
+                       log: [{ ts: Date.parse("2026-07-05"), amt: 1500, dir: "b", note: "" }] })],
+      expenses: [expense({ amount: 5850, date: "2026-08-10", cat: "out" })]
+    }), { now: NOW });
+    t.has("it names the person you actually borrow from", await app.page.evaluate(() => {
+      const s = document.querySelector(".suggest"); return s ? s.textContent : "";
+    }), "Add it to Dad's loan?");
+    const poolBefore = norm(await app.poolLine());
+
+    await app.page.click("#h-borrow"); await app.page.waitForTimeout(400);
+    const st = await app.stored();
+    t.eq("one tap adds it to what you owe them", st.debts[0].balance, 4350);
+    t.eq("recorded as a real ledger entry", st.debts[0].log.length, 2);
+    t.eq("labelled so you know why", st.debts[0].log[1].note, "covered my overspend");
+    t.eq("and borrowing does not hand the money back to the budget",
+      norm(await app.poolLine()), poolBefore);
+    t.no("the offer is gone once logged", await app.page.evaluate(() => !!document.querySelector("#h-borrow")));
+
+    /* and it is undoable straight from the toast */
+    await app.page.click("#toast button"); await app.page.waitForTimeout(400);
+    t.eq("undo removes it again", (await app.stored()).debts[0].balance, 1500);
+    await app.close();
+  }
+  {
+    /* the salary path keeps working */
+    const app = await boot(browser, baseState({
+      salary: 9000,
+      debts: [person({ id: "dad", name: "Dad", balance: 0,
+                       log: [{ ts: Date.parse("2026-07-05"), amt: 900, dir: "b", note: "" }] })],
+      expenses: [expense({ amount: 11000, date: "2026-08-10", cat: "out" })]
+    }), { now: NOW });
+    t.has("salary overspend offers the same thing", await app.page.evaluate(() => {
+      const s = document.querySelector(".suggest"); return s ? s.textContent : "";
+    }), "Add it to Dad's loan?");
+    await app.close();
+  }
+  {
+    /* nobody to name yet */
+    const app = await boot(browser, baseState({
+      restAmount: 1000, restFrom: "2026-08-01", restTs: 1,
+      expenses: [expense({ amount: 2000, date: "2026-08-10" })]
+    }), { now: NOW });
+    t.has("with no lender known it stays generic", await app.page.evaluate(() => {
+      const b = document.querySelector("#h-borrow"); return b ? b.textContent : "";
+    }), "Log it");
+    await app.close();
+  }
+  {
+    /* and it never nags when you are inside your money */
+    const app = await boot(browser, baseState({ restAmount: 1000, restFrom: "2026-08-01", restTs: 1 }), { now: NOW });
+    t.no("no offer when you are not over", await app.page.evaluate(() => !!document.querySelector("#h-borrow")));
+    await app.close();
+  }
+
   /* ---------- classification of incoming money ---------- */
   {
     /* they owed you 300; they hand you 500 → 300 is repayment, 200 is a loan */
