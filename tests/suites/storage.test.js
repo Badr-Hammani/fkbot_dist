@@ -129,6 +129,63 @@ exports.run = async function (t, env) {
     await app.close();
   }
 
+  /* ---------- the automatic safety copy ---------- */
+  {
+    /* restoring the wrong file is recoverable */
+    const app = await boot(browser, baseState({
+      salary: 9000,
+      expenses: [expense({ id: "mine1", amount: 111, note: "Mine A" }),
+                 expense({ id: "mine2", amount: 222, note: "Mine B" })]
+    }), { now: NOW });
+    await importFile(app, { currency: "MAD", expenses: [expense({ id: "theirs", amount: 5, note: "Wrong file" })] });
+    t.eq("the wrong file was applied", (await app.stored()).expenses.length, 1);
+    t.ok("a safety copy exists", await app.page.evaluate(() =>
+      !!localStorage.getItem("weekend-wallet-v1-snapshot")));
+
+    await app.tab("settings");
+    t.ok("and the app offers to put it back", await app.page.evaluate(() => !!document.querySelector("#s-undo-restore")));
+    await app.page.click("#s-undo-restore"); await app.page.waitForTimeout(200);
+    t.has("it says what that will replace", await app.page.evaluate(() =>
+      document.querySelector("#s-undo-restore").textContent), "2 expenses");
+    await app.page.click("#s-undo-restore"); await app.page.waitForTimeout(500);
+
+    const back = await app.stored();
+    t.eq("the original data is back", back.expenses.length, 2);
+    t.eq("with the right records", back.expenses.map(e => e.note).sort().join(","), "Mine A,Mine B");
+
+    /* and the swap is reversible — the wrong file is now the safety copy */
+    await app.tab("settings");
+    await app.page.click("#s-undo-restore"); await app.page.waitForTimeout(200);
+    await app.page.click("#s-undo-restore"); await app.page.waitForTimeout(500);
+    const again = await app.stored();
+    t.eq("swapping back returns the other set", again.expenses.length, 1);
+    t.eq("nothing was destroyed in either direction", again.expenses[0].note, "Wrong file");
+    await app.close();
+  }
+  {
+    /* erasing everything is recoverable too */
+    const app = await boot(browser, baseState({
+      expenses: [expense({ id: "keep", amount: 42, note: "Precious" })]
+    }), { now: NOW });
+    await app.tab("settings");
+    await app.page.click("#s-wipe"); await app.page.waitForTimeout(200);
+    await app.page.click("#s-wipe"); await app.page.waitForTimeout(500);
+    const snap = await app.page.evaluate(() => JSON.parse(localStorage.getItem("weekend-wallet-v1-snapshot") || "null"));
+    t.ok("erasing takes a safety copy first", !!snap);
+    t.has("containing the erased data", snap ? snap.data : "", "Precious");
+    await app.close();
+  }
+  {
+    /* the format carries a version so a future migration has something to read */
+    const app = await boot(browser, baseState({ expenses: [expense({})] }), { now: NOW });
+    await app.page.click("#open-add"); await app.page.waitForTimeout(300);
+    await app.page.click("#qa-expense"); await app.page.waitForTimeout(350);
+    await app.page.fill("#f-amount", "5");
+    await app.page.click("#f-save"); await app.page.waitForTimeout(400);
+    t.eq("every write stamps the data version", (await app.stored()).v, 1);
+    await app.close();
+  }
+
   /* ---------- empty and duplicate data ---------- */
   {
     const app = await boot(browser, baseState({ expenses: [] }), { now: NOW });

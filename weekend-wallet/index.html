@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=4.6"></script>
+<script src="scan.js?v=4.7"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "4.6";
+  var APP_VERSION = "4.7";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -567,8 +567,60 @@
     }
   }
 
+  /* ---------- data safety ----------
+     Everything the user owns lives in one localStorage key. There is no server
+     and no second copy, so the two destructive operations — restoring a backup
+     and erasing everything — take a snapshot into a separate key first. It is
+     the same browser, so it does not survive a cleared profile; it does survive
+     the far more common case of restoring the wrong file or mistapping erase. */
+  var SNAP_KEY = KEY + "-snapshot";
+  var DATA_VERSION = 1;
+
+  function snapshot(reason){
+    try{
+      var raw = localStorage.getItem(KEY);
+      if(!raw) return false;
+      localStorage.setItem(SNAP_KEY, JSON.stringify({
+        v: DATA_VERSION, ts: Date.now(), reason: reason || "", data: raw
+      }));
+      return true;
+    }catch(e){ return false; }
+  }
+  function snapshotInfo(){
+    try{
+      var s = JSON.parse(localStorage.getItem(SNAP_KEY) || "null");
+      if(!s || typeof s.data !== "string") return null;
+      var d = JSON.parse(s.data);
+      if(!d || !Array.isArray(d.expenses)) return null;
+      return { ts: s.ts || 0, reason: s.reason || "", count: d.expenses.length, data: d };
+    }catch(e){ return null; }
+  }
+  /* Swap the safety copy with what is live, in one step. Taking a fresh
+     snapshot first would overwrite the copy being restored and destroy it —
+     the exact failure this whole mechanism exists to prevent. */
+  function restoreSnapshot(reason){
+    var info = snapshotInfo();
+    if(!info) return false;
+    var current = null;
+    try{ current = localStorage.getItem(KEY); }catch(e){}
+    state = info.data;
+    cleanRows();
+    retireStalePool(state);
+    state.expenses = cleanExpenses(state.expenses);
+    if(!save()) return false;
+    if(current){
+      try{
+        localStorage.setItem(SNAP_KEY, JSON.stringify({
+          v: DATA_VERSION, ts: Date.now(), reason: reason || "before putting the safety copy back", data: current
+        }));
+      }catch(e){}
+    }
+    return true;
+  }
+
   function save(opts){
     try{
+      state.v = DATA_VERSION;
       localStorage.setItem(KEY, JSON.stringify(state));
       return true;
     }catch(e){
@@ -2348,7 +2400,18 @@
       '<button class="btn" id="s-export">Download backup file</button>' +
       '<div style="height:10px"></div>' +
       '<button class="btn" id="s-import">Restore from backup</button>' +
-      '<input type="file" accept=".json,application/json" id="s-import-file" hidden></div>' +
+      '<input type="file" accept=".json,application/json" id="s-import-file" hidden>' +
+      (function(){
+        /* the automatic safety copy taken before anything destructive */
+        var snap = snapshotInfo();
+        if(!snap) return "";
+        var when = new Date(snap.ts).toLocaleDateString(undefined,{month:"short", day:"numeric"});
+        return '<div style="height:14px"></div><div class="hint" style="margin:0 0 8px">' +
+          'Safety copy from ' + esc(when) + ' — ' + snap.count + ' expense' + (snap.count===1?"":"s") +
+          (snap.reason ? ', taken ' + esc(snap.reason) : '') + '.</div>' +
+          '<button class="btn ghost" id="s-undo-restore" style="color:var(--ink2)">Put that copy back</button>';
+      })() +
+      '</div>' +
 
       '<div class="panel"><h3>'+IC.trash+'Start fresh</h3><p>Deletes every expense and receipt photo. This can\'t be undone.</p>' +
       '<button class="btn danger" id="s-wipe">Erase all data</button></div>' +
@@ -3250,6 +3313,23 @@
         toast("Backup downloaded");
       });
       $("#s-import").addEventListener("click", function(){ $("#s-import-file").click(); });
+      var undoRestore = $("#s-undo-restore");
+      if(undoRestore){
+        var undoArmed = false;
+        undoRestore.addEventListener("click", function(){
+          var snap = snapshotInfo();
+          if(!snap){ toast("No safety copy to put back"); return; }
+          if(!undoArmed){
+            undoArmed = true;
+            this.textContent = "Tap again — replaces what's here now with " + snap.count + " expenses";
+            return;
+          }
+          /* what is here now becomes the new safety copy in the same step, so
+             this is reversible in both directions rather than a one-way door */
+          if(restoreSnapshot("before putting the safety copy back")){ render(); toast("Safety copy restored"); }
+          else toast("That safety copy couldn't be read");
+        });
+      }
       $("#s-import-file").addEventListener("change", function(){
         var f = this.files && this.files[0]; this.value = "";
         if(!f) return;
@@ -3259,6 +3339,7 @@
           try{
             var d = JSON.parse(r.result);
             if(!d || !Array.isArray(d.expenses)) throw 0;
+            snapshot("before restoring a backup");
             prev = state;
             state = { setup:true, budget:+d.budget||0, currency:d.currency||"USD",
                       expenses:cleanExpenses(d.expenses), apiKey:state.apiKey, geminiApiKey:state.geminiApiKey,
@@ -3292,6 +3373,7 @@
       var wipeArmed = false;
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
+        snapshot("before erasing everything");
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", scanProvider:"free", scanModel:"claude-opus-4-8",
                   salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
         try{ localStorage.removeItem(KEY); }catch(e){}
