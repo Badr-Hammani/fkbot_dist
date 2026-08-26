@@ -430,13 +430,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=4.5"></script>
+<script src="scan.js?v=4.6"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "4.5";
+  var APP_VERSION = "4.6";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1859,9 +1859,17 @@
     if(!state.restFrom) return 0;
     return state.restTs > 0 ? state.restTs : fromIso(state.restFrom).getTime();
   }
+  function monthEndIso(){
+    var n = new Date();
+    return iso(new Date(n.getFullYear(), n.getMonth()+1, 0));
+  }
+  /* The pool is money for the rest of THIS month, so it is bounded at both
+     ends. Without the upper bound a single mistyped year — 2027 for 2026 —
+     was subtracted from today's budget and silently zeroed it. */
   function spentFromPool(){
-    var t = poolStartTs();
+    var t = poolStartTs(), end = monthEndIso();
     return total(state.expenses.filter(function(e){
+      if(e.date > end) return false;
       if(e.date > state.restFrom) return true;
       return e.date === state.restFrom && (e.ts || 0) >= t;
     }));
@@ -2941,9 +2949,28 @@
     $("#f-save").addEventListener("click", saveDraft);
   }
 
+  /* A year typo puts an expense somewhere it will never be seen again and
+     skews whichever month it lands in. Catch it where it is typed. */
+  function dateLooksWrong(d){
+    if(!d) return "";
+    var end = monthEndIso();
+    if(d > end){
+      var n = new Date(), nextEnd = iso(new Date(n.getFullYear(), n.getMonth()+2, 0));
+      if(d > nextEnd) return "That date is " + fromIso(d).toLocaleDateString(undefined,{month:"long", year:"numeric"}) + " — check the year";
+    }
+    if(d < "2015-01-01") return "That date looks too far back — check the year";
+    return "";
+  }
   function saveDraft(){
     var amt = num($("#f-amount").value);
     if(!(amt > 0)){ toast("Enter the amount first"); $("#f-amount").focus(); return; }
+    var dWarn = dateLooksWrong($("#f-date").value);
+    if(dWarn && !saveDraft.dateOk){
+      saveDraft.dateOk = true;                 /* one warning, then take them at their word */
+      toast(dWarn + " · tap Save again to keep it");
+      return;
+    }
+    saveDraft.dateOk = false;
     if(draft.editId){
       var ex = null;
       state.expenses.forEach(function(x){ if(x.id===draft.editId) ex = x; });

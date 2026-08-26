@@ -165,6 +165,54 @@ exports.run = async function (t, env) {
     await app.close();
   }
 
+  /* ---------- future dates must not drain the present ---------- */
+  {
+    /* a mistyped year used to be subtracted from this month's pool, zeroing
+       today's budget with no explanation anywhere on screen */
+    const app = await boot(browser, baseState({
+      restAmount: 1000, restFrom: "2026-08-18", restTs: 1,
+      expenses: [expense({ amount: 5000, date: "2027-01-01", note: "typo" })]
+    }), { now: NOW });
+    t.has("next year's expense leaves this month's pool alone", await app.poolLine(),
+      "MAD 1,000 left of your MAD 1,000");
+    t.eq("and today's budget survives", await app.todayLeft(), "MAD 50 left today");
+    await app.close();
+  }
+  {
+    /* the boundary itself: the last day of this month still counts */
+    const app = await boot(browser, baseState({
+      restAmount: 1000, restFrom: "2026-08-18", restTs: 1,
+      expenses: [expense({ amount: 200, date: "2026-08-31" })]
+    }), { now: NOW });
+    t.has("the last day of the month is still this month", await app.poolLine(),
+      "MAD 800 left of your MAD 1,000");
+    await app.close();
+  }
+  {
+    /* first day of next month is out */
+    const app = await boot(browser, baseState({
+      restAmount: 1000, restFrom: "2026-08-18", restTs: 1,
+      expenses: [expense({ amount: 200, date: "2026-09-01" })]
+    }), { now: NOW });
+    t.has("the first day of next month is not", await app.poolLine(),
+      "MAD 1,000 left of your MAD 1,000");
+    await app.close();
+  }
+  {
+    /* typing a wild date warns once before it is accepted */
+    const app = await boot(browser, baseState({ salary: 9000 }), { now: NOW });
+    await app.page.click("#open-add"); await app.page.waitForTimeout(300);
+    await app.page.click("#qa-expense"); await app.page.waitForTimeout(350);
+    await app.page.fill("#f-amount", "100");
+    await app.page.fill("#f-date", "2027-01-01");
+    await app.page.click("#f-save"); await app.page.waitForTimeout(350);
+    t.eq("a far-future date is not saved on the first tap", (await app.stored()).expenses.length, 0);
+    t.has("and it says why", await app.toast(), "check the year");
+    await app.page.click("#f-save"); await app.page.waitForTimeout(350);
+    t.eq("but a second tap accepts it", (await app.stored()).expenses.length, 1);
+    await app.close();
+  }
+
   /* ---------- known-open defects, kept visible ---------- */
   t.todo("currency switch converts stored amounts",
     "P0: fmt() relabels without converting — needs a product decision on semantics");
