@@ -439,13 +439,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=5.5"></script>
+<script src="scan.js?v=5.6"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "5.5";
+  var APP_VERSION = "5.6";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -485,6 +485,7 @@
     {id:"claude-haiku-4-5", label:"Cheaper & faster — Claude Haiku 4.5"}
   ];
 
+  var ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
   var state = load();
   state.expenses = cleanExpenses(state.expenses);
   cleanRows();
@@ -533,7 +534,6 @@
      One row without a date used to be saved and then throw on the next render,
      leaving a white screen that survived every reload. Coerce what we can and
      drop what we can't. */
-  var ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
   function cleanExpenses(list){
     if(!Array.isArray(list)) return [];
     return list.filter(function(e){
