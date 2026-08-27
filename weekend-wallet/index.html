@@ -439,13 +439,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=5.4"></script>
+<script src="scan.js?v=5.5"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "5.4";
+  var APP_VERSION = "5.5";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -543,17 +543,21 @@
       return { id: e.id || uid(), ts: +e.ts || 0, amount: Math.round((+e.amount)*100)/100,
                cat: validCat ? e.cat : "other",
                note: typeof e.note === "string" ? e.note : "",
-               date: e.date, photo: safePhoto(e.photo) || null };
+               date: e.date, photo: safePhoto(e.photo) || null,
+               loanId: typeof e.loanId === "string" ? e.loanId : "",
+               loanAdded: +e.loanAdded > 0 ? Math.round((+e.loanAdded)*100)/100 : 0 };
     });
   }
   /* the rest of the shapes, coerced in place */
   function cleanRows(){
     state.commitments = (state.commitments||[]).filter(function(c){ return c && typeof c === "object"; })
       .map(function(c){
-        return { id: c.id || uid(), name: String(c.name || "Bill"),
+      return { id: c.id || uid(), name: String(c.name || "Bill"),
                  amount: +c.amount || 0, kind: c.kind === "loan" ? "loan" : "sub",
                  due: (+c.due >= 1 && +c.due <= 31) ? +c.due : 0,
                  remaining: +c.remaining || 0,
+                 coverShortfall: c.kind === "loan" && (c.coverShortfall === true ||
+                   (c.coverShortfall == null && String(c.name || "").trim().toLowerCase() === "dad")),
                  paid: (c.paid && typeof c.paid === "object") ? c.paid : {} };
       });
     state.goals = (state.goals||[]).filter(function(g){ return g && typeof g === "object"; })
@@ -1494,13 +1498,16 @@
   function expRow(e){
     var c = cat(e.cat);
     var photo = safePhoto(e.photo);
+    var loan = null;
+    if(e.loanAdded > 0) state.commitments.forEach(function(x){ if(x.id === e.loanId) loan = x; });
+    var loanLine = e.loanAdded > 0 ? ' · '+esc(loan ? loan.name : "loan")+' covered '+fmt(e.loanAdded) : "";
     var thumb = photo
       ? '<span class="exp-thumb"><img src="'+esc(photo)+'" alt="Receipt"></span>'
       : catTile(c, "big");
     return '<button class="exp" data-exp="'+esc(e.id)+'">' + thumb +
       '<span class="exp-main"><span class="exp-title">'+esc(e.note || c.name)+'</span>' +
       '<span class="exp-sub"><span class="cat-dot" style="background:var('+c.v+')"></span>'+c.name+
-      (photo? " · receipt":"")+'</span></span>' +
+      (photo? " · receipt":"")+loanLine+'</span></span>' +
       '<span class="exp-amt money">'+fmt(e.amount)+'</span></button>';
   }
 
@@ -1846,6 +1853,41 @@
              extra: Math.round((bills - planned)*100)/100,
              savings: savings, left: Math.round((state.salary - bills - savings)*100)/100 };
   }
+  function shortfallLoan(){
+    var found = null;
+    state.commitments.some(function(c){
+      if(c.kind === "loan" && c.coverShortfall){ found = c; return true; }
+      return false;
+    });
+    return found;
+  }
+  function moneyAvailableBeforeExpense(){
+    var available = null;
+    if(state.restAmount > 0 && state.restFrom) available = restRemaining();
+    else if(state.salary > 0) available = planMath().left - monthSpent() - ledgerFlowSince(monthStartIso()).net;
+    return available === null || !isFinite(available) ? null : Math.round(available*100)/100;
+  }
+  function adjustLoanRemaining(id, delta){
+    if(!id || !delta) return null;
+    var loan = null;
+    state.commitments.forEach(function(c){ if(c.id === id && c.kind === "loan") loan = c; });
+    if(!loan) return null;
+    loan.remaining = Math.max(Math.round((+loan.remaining + delta)*100)/100, 0);
+    return loan;
+  }
+  function applyExpenseShortfall(e){
+    var loan = shortfallLoan();
+    if(!loan) return { loan:null, amount:0 };
+    var available = moneyAvailableBeforeExpense();
+    if(available === null) return { loan:null, amount:0 };
+    var amount = available > 0 ? Math.max(e.amount - available, 0) : e.amount;
+    amount = Math.round(amount*100)/100;
+    if(!(amount > 0)) return { loan:null, amount:0 };
+    loan.remaining = Math.round((+loan.remaining + amount)*100)/100;
+    e.loanId = loan.id;
+    e.loanAdded = amount;
+    return { loan:loan, amount:amount };
+  }
   function daysLeftInMonth(){
     var now = new Date();
     var dim = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
@@ -2063,6 +2105,7 @@
         h += '<button class="row-item" data-cm="'+esc(c.id)+'">' + kindTile(c.kind) +
           '<span class="name"><span class="ttl">'+esc(c.name)+'</span>' +
           '<span class="subline">'+sub1+'</span>' + paidLine +
+          (c.coverShortfall ? '<span class="subline hl" style="color:var(--warn)">uncovered spending → this loan</span>' : "") +
           (months? '<span class="subline hl money">'+fmt(c.remaining)+' left · ≈ '+months+' month'+(months>1?"s":"")+' to go</span>' : "")+'</span>' +
           '<span class="amt money">'+fmt(c.amount)+' <small>/mo</small></span></button>';
       });
@@ -2165,7 +2208,9 @@
       '<div class="field" id="c-loanx" style="'+(kind==="loan"?"":"display:none")+'">' +
       '<label class="micro" for="c-remaining">Loan balance left (optional)</label>' +
       '<input id="c-remaining" type="text" inputmode="decimal" min="0" placeholder="How much is still owed" value="'+(c && c.remaining? c.remaining:"")+'">' +
-      '<div class="hint">Each saved edit updates this — the app shows roughly how many months are left.</div></div>' +
+      '<div class="hint">Each saved edit updates this — the app shows roughly how many months are left.</div>' +
+      '<label class="checkrow" for="c-cover" style="margin-top:10px"><input type="checkbox" id="c-cover"'+(c && c.coverShortfall?" checked":"")+'>' +
+      '<span><b>Cover spending shortfalls with this loan</b><br><span class="hint" style="display:block; margin-top:3px">When an expense is more than your available money, add only the missing amount to this loan.</span></span></label></div>' +
       (c? payBlock(c) : "") +
       '<button class="btn primary" id="c-save">Save</button>' +
       (c? '<div style="height:10px"></div><button class="btn danger" id="c-del">Remove</button>' : "")
@@ -2184,10 +2229,11 @@
       var due = parseInt($("#c-due").value, 10);
       due = (due >= 1 && due <= 31) ? due : 0;
       var remaining = selKind==="loan" ? (num($("#c-remaining").value) || 0) : 0;
+      var coverShortfall = selKind === "loan" && !!$("#c-cover").checked;
       if(!name){ toast("Give it a name"); return; }
       if(!(amt > 0)){ toast("Enter the monthly amount"); return; }
-      if(c){ c.name = name; c.amount = Math.round(amt*100)/100; c.kind = selKind; c.due = due; c.remaining = remaining; }
-      else state.commitments.push({ id: uid(), name: name, amount: Math.round(amt*100)/100, kind: selKind, due: due, remaining: remaining, paid: {} });
+      if(c){ c.name = name; c.amount = Math.round(amt*100)/100; c.kind = selKind; c.due = due; c.remaining = remaining; c.coverShortfall = coverShortfall; }
+      else state.commitments.push({ id: uid(), name: name, amount: Math.round(amt*100)/100, kind: selKind, due: due, remaining: remaining, coverShortfall: coverShortfall, paid: {} });
       save(); closeSheet(); render();
     });
     if(c && $("#c-pay")){
@@ -3001,12 +3047,30 @@
       var ex = null;
       state.expenses.forEach(function(x){ if(x.id===draft.editId) ex = x; });
       if(ex){
+        var old = { amount:ex.amount, cat:ex.cat, note:ex.note, date:ex.date,
+                    photo:ex.photo, loanId:ex.loanId, loanAdded:ex.loanAdded };
+        var pos = state.expenses.indexOf(ex);
+        if(pos > -1) state.expenses.splice(pos, 1);
+        if(old.loanAdded > 0) adjustLoanRemaining(old.loanId, -old.loanAdded);
         ex.amount = Math.round(amt*100)/100;
         ex.cat = draft.cat;
         ex.note = $("#f-note").value.trim();
         ex.date = $("#f-date").value || ex.date;
         ex.photo = draft.photo;
-        save(); toast("Updated");
+        ex.loanId = "";
+        ex.loanAdded = 0;
+        var coverage = applyExpenseShortfall(ex);
+        if(pos > -1) state.expenses.splice(pos, 0, ex);
+        if(save({retryWithoutPhoto:ex})){
+          toast(coverage.amount > 0
+            ? "Updated · "+fmt(coverage.amount)+" added to "+coverage.loan.name+" loan"
+            : "Updated");
+        }else{
+          if(coverage.amount > 0) adjustLoanRemaining(coverage.loan.id, -coverage.amount);
+          ex.amount = old.amount; ex.cat = old.cat; ex.note = old.note; ex.date = old.date;
+          ex.photo = old.photo; ex.loanId = old.loanId; ex.loanAdded = old.loanAdded;
+          if(old.loanAdded > 0) adjustLoanRemaining(old.loanId, old.loanAdded);
+        }
       }
       closeSheet(); render();
       return;
@@ -3017,16 +3081,23 @@
       cat: draft.cat,
       note: $("#f-note").value.trim(),
       date: $("#f-date").value || todayIso(),
-      photo: draft.photo
+      photo: draft.photo,
+      loanId: "",
+      loanAdded: 0
     };
     state.lastCat = e.cat;
+    var coverage = applyExpenseShortfall(e);
     state.expenses.push(e);
     if(save({retryWithoutPhoto:e})){
       var wk = weekendKeyOf(e.date);
-      toast(wk ? (isLiveWeekend(wk) ? "Added to this weekend — "+fmt(e.amount)
-                                    : "Added to the "+weekendLabel(wk)+" weekend")
-               : "Added — "+fmt(e.amount));
+      var added = wk ? (isLiveWeekend(wk) ? "Added to this weekend — "+fmt(e.amount)
+                                         : "Added to the "+weekendLabel(wk)+" weekend")
+                     : "Added — "+fmt(e.amount);
+      toast(coverage.amount > 0
+        ? added+" · "+fmt(coverage.amount)+" added to "+coverage.loan.name+" loan"
+        : added);
     } else {
+      if(coverage.amount > 0) adjustLoanRemaining(coverage.loan.id, -coverage.amount);
       state.expenses.pop();
     }
     closeSheet(); render();
@@ -3075,6 +3146,7 @@
       '<dt>Category</dt><dd><span style="color:var('+c.v+'); display:inline-flex; width:15px; height:15px; vertical-align:-2px; margin-right:5px">'+catIcon(c.id)+'</span>'+c.name+'</dd>' +
       '<dt>Date</dt><dd>'+fromIso(e.date).toLocaleDateString(undefined,{weekday:"short", day:"numeric", month:"short", year:"numeric"})+'</dd>' +
       '<dt>Weekend</dt><dd>'+weekendLabel(weekendOf(e.date), true)+'</dd>' +
+      (e.loanAdded > 0 ? '<dt>Loan added</dt><dd>'+fmt(e.loanAdded)+' to Dad\'s loan</dd>' : '') +
       '</dl>' +
       '<button class="btn primary" id="d-again">Log this again today</button>' +
       '<div style="height:10px"></div>' +
@@ -3085,11 +3157,20 @@
     $("#d-again").addEventListener("click", function(){
       this.disabled = true;
       var copy = { id: uid(), ts: Date.now(), amount: e.amount, cat: e.cat,
-                   note: e.note, date: todayIso(), photo: null };
+                   note: e.note, date: todayIso(), photo: null, loanId: "", loanAdded: 0 };
       state.lastCat = e.cat;
+      var coverage = applyExpenseShortfall(copy);
       state.expenses.push(copy);
-      save(); closeSheet(); render();
-      toast("Logged again — "+fmt(e.amount));
+      if(save()){
+        closeSheet(); render();
+        toast(coverage.amount > 0
+          ? "Logged again — "+fmt(e.amount)+" · "+fmt(coverage.amount)+" added to "+coverage.loan.name+" loan"
+          : "Logged again — "+fmt(e.amount));
+      }else{
+        if(coverage.amount > 0) adjustLoanRemaining(coverage.loan.id, -coverage.amount);
+        state.expenses.pop();
+        closeSheet(); render();
+      }
     });
     $("#d-edit").addEventListener("click", function(){ openAdd(e.id); });
     if(safePhoto(e.photo)){
@@ -3101,9 +3182,11 @@
     }
     $("#d-del").addEventListener("click", function(){
       this.disabled = true;
+      if(e.loanAdded > 0) adjustLoanRemaining(e.loanId, -e.loanAdded);
       state.expenses = state.expenses.filter(function(x){ return x.id!==e.id; });
       save(); closeSheet(); render();
       toastAction("Deleted "+fmt(e.amount), "Undo", function(){
+        if(e.loanAdded > 0) adjustLoanRemaining(e.loanId, e.loanAdded);
         state.expenses.push(e);
         save(); render();
         toast("Restored");
