@@ -5,7 +5,9 @@
 
   /* "1 234,56" / "1,234.56" / "234.5" / "120" → number (or NaN) */
   function parseAmountToken(s) {
-    s = String(s).replace(/\s/g, "");
+    var numeric = String(s).match(/[+-]?\d[\d.,'\u2019\s]*/);
+    if (!numeric) return NaN;
+    s = numeric[0].replace(/\s/g, "").replace(/[\u2019']/g, "");
     var lastDot = s.lastIndexOf(".");
     var lastCom = s.lastIndexOf(",");
     if (lastDot > -1 && lastCom > -1) {
@@ -25,20 +27,28 @@
       } else {
         s = s.replace(/,/g, "");
       }
+    } else if (lastDot > -1) {
+      var dotDecimals = s.length - lastDot - 1;
+      if (dotDecimals < 1 || dotDecimals > 2 || s.indexOf(".") !== lastDot) {
+        s = s.replace(/\./g, "");
+      }
     }
     return parseFloat(s);
   }
 
-  var NUM_RE = /\d{1,3}(?:[ .,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?/g;
+  var NUM_RE = /\d{1,3}(?:[ .,'\u2019]\d{2,3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?/g;
+  var DATE_TOKEN_RE = /\b(?:\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})\b/g;
 
   function numbersIn(line) {
     var out = [];
     var m, raw;
+    DATE_TOKEN_RE.lastIndex = 0;
+    line = String(line).replace(DATE_TOKEN_RE, " ");
     NUM_RE.lastIndex = 0;
     while ((m = NUM_RE.exec(line)) !== null) {
       raw = m[0];
       var digits = raw.replace(/\D/g, "");
-      if (digits.length > 7) continue;               // phone numbers, barcodes
+      if (digits.length > 7 && !/[.,'\u2019\s]/.test(raw)) continue; // unformatted phone numbers, barcodes
       if (/^(19|20)\d{2}$/.test(raw)) continue;      // bare years
       var n = parseAmountToken(raw);
       if (isFinite(n) && n >= 0.2 && n <= 200000) out.push(n);
@@ -82,37 +92,37 @@
   /* dd/mm/yyyy (also dd-mm-yy, dd.mm.yyyy) or yyyy-mm-dd → ISO, day-first preference */
   function guessDate(text, now) {
     now = now || new Date();
-    var y, month, day;
-    // Try YYYY-MM-DD or YYYY/MM/DD first
-    var m = /(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/.exec(text);
-    if (m) {
-      y = +m[1];
-      month = +m[2];
-      day = +m[3];
-    } else {
-      m = /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/.exec(text);
-      if (!m) return null;
-      var a = +m[1], b = +m[2];
-      y = +m[3];
-      if (y < 100) y += 2000;
-      day = a;
-      month = b;
-      if (a <= 12 && b > 12) { day = b; month = a; }   // clearly mm/dd
+    var dateRe = /(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})|(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/g;
+    var m, y, month, day;
+    while ((m = dateRe.exec(text)) !== null) {
+      if (m[1]) {
+        y = +m[1];
+        month = +m[2];
+        day = +m[3];
+      } else {
+        var a = +m[4], b = +m[5];
+        y = +m[6];
+        if (y < 100) y += 2000;
+        day = a;
+        month = b;
+        if (a <= 12 && b > 12) { day = b; month = a; }   // clearly mm/dd
+      }
+      if (month < 1 || month > 12 || day < 1 || day > 31 || y < 2015 || y > now.getFullYear() + 1) continue;
+      var d = new Date(y, month - 1, day);
+      if (d.getDate() !== day) continue;
+      var ageDays = (now - d) / 86400000;
+      if (ageDays < -2 || ageDays > 400) continue;
+      return y + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
     }
-    if (month < 1 || month > 12 || day < 1 || day > 31 || y < 2015 || y > now.getFullYear() + 1) return null;
-    var d = new Date(y, month - 1, day);
-    if (d.getDate() !== day) return null;
-    var ageDays = (now - d) / 86400000;
-    if (ageDays < -2 || ageDays > 400) return null;
-    return y + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+    return null;
   }
 
   var CATEGORY_RULES = [
     { cat: "drinks", re: /\bbar\b|\bpub\b|lounge|brasserie|bi[eè]re|beer|\bwine\b|cocktail|chicha|shisha|juice|jus\b|soda|coca|red\s*bull|monster/i },
-    { cat: "out", re: /cin[eé]|movie|megarama|bowling|karting|\bclub\b|billetterie|concert|festival|spa\b|hammam|game|gaming|playstation|ps5|match\b|foot\b|five\b|billard|pool\b|snooker|padel/i },
+    { cat: "out", re: /cin[eé]|movie|megarama|bowling|karting|\bclub\b|billetterie|concert|festival|spa\b|hammam|\bgame\b|gaming|playstation|ps5|match\b|foot\b|five\b|billard|pool\b|snooker|padel/i },
     { cat: "transport", re: /taxi|uber|careem|indrive|bolt\b|oncf|\bctm\b|tram|train\b|\bbus\b|parking|autoroute|p[eé]age|afriquia|winxo|petromin|station|essence|gasoil|fuel|carburant|car\s*wash|moto\b/i },
-    { cat: "shop", re: /zara|bershka|pull\s*&?\s*bear|kiabi|decathlon|electro|pharmacie|pharmacy|parfumerie|boutique|store|shop|v[eê]tement|chaussure|shoes|sneaker|clothes|t-?shirt|jean\b|amazon|aliexpress|jumia|cadeau|gift\b|montre|watch\b/i },
-    { cat: "food", re: /caf[eé]|coffee|kahwa|9ahwa|restaurant|resto|pizz|burger|tacos|kebab|shawarma|panini|sandwich|sushi|pasta|couscous|taji?ne|tagine|snack|grill|food|breakfast|brunch|lunch|dinner|d[eé]jeuner|d[iî]ner|petit\s*dej|boulangerie|patisserie|p[aâ]tisserie|glovo|mcdo|mcdonald|kfc|dominos|marjane|carrefour|acima|aswak|\bbim\b|hanout|market|supermarch|grocer|[eé]picerie|fruit|l[eé]gume/i }
+    { cat: "shop", re: /zara|bershka|pull\s*&?\s*bear|kiabi|decathlon|electro|pharmacie|pharmacy|parfumerie|boutique|\bstore\b|\bshop\b|v[eê]tement|chaussure|shoes|sneaker|clothes|t-?shirt|jean\b|amazon|aliexpress|jumia|cadeau|gift\b|montre|watch\b/i },
+    { cat: "food", re: /caf[eé]|coffee|kahwa|9ahwa|restaurant|\bresto\b|pizz|burger|tacos|kebab|shawarma|panini|sandwich|sushi|pasta|couscous|taji?ne|tagine|snack|grill|food|breakfast|brunch|lunch|dinner|d[eé]jeuner|d[iî]ner|petit\s*dej|boulangerie|patisserie|p[aâ]tisserie|glovo|mcdo|mcdonald|kfc|dominos|marjane|carrefour|acima|aswak|\bbim\b|hanout|market|supermarch|grocer|[eé]picerie|fruit|l[eé]gume/i }
   ];
 
   function guessCategory(text) {

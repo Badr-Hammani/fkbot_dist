@@ -17,7 +17,7 @@
   :root{
     color-scheme: light;
     --bg:#f7f5f0; --card:#ffffff; --card2:#f1eee6; --line:#e5e1d5;
-    --ink:#232030; --ink2:#6b6880; --ink3:#96929f;
+    --ink:#232030; --ink2:#6b6880; --ink3:#6f6b78;
     --accent:#e89e24; --accent-deep:#8a5a00; --on-accent:#241b08;
     --good:#006300; --warn:#b97900; --bad:#d03b3b;
     --c-food:#eda100; --c-drinks:#2a78d6; --c-out:#4a3aa7;
@@ -29,7 +29,7 @@
     :root{
       color-scheme: dark;
       --bg:#17152a; --card:#232135; --card2:#2b2946; --line:#37344f;
-      --ink:#f2f0fa; --ink2:#a6a2bc; --ink3:#7d7996;
+      --ink:#f2f0fa; --ink2:#a6a2bc; --ink3:#a19db6;
       --accent:#f2a93b; --accent-deep:#f2a93b; --on-accent:#241b08;
       --good:#0ca30c; --warn:#fab219; --bad:#e66767;
       --c-food:#c98500; --c-drinks:#3987e5; --c-out:#9085e9;
@@ -109,8 +109,10 @@
 
   .cats{background:var(--card); border:1px solid var(--line); border-radius:18px; padding:6px 16px}
   .cat-row{display:grid; grid-template-columns:110px 1fr auto; gap:12px; align-items:center; padding:11px 0; border-bottom:1px solid var(--line)}
+  .cat-row > *{min-width:0}
   .cat-row:last-child{border-bottom:0}
   .cat-name{display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600}
+  .cat-name{min-width:0}
   .cat-dot{width:10px; height:10px; border-radius:4px; flex:none}
   .cat-bar{height:8px; border-radius:4px; background:var(--card2); overflow:hidden}
   .cat-bar i{display:block; height:100%; border-radius:4px; min-width:3px}
@@ -313,6 +315,13 @@
   .addbtn svg{width:26px; height:26px}
   .addbtn:active{transform:scale(.94)}
 
+  .cat-breakdown{min-width:0}
+  @media (max-width:380px){
+    .cat-breakdown{flex-direction:column !important; align-items:stretch !important; gap:8px !important}
+    .cat-breakdown .donut-container{align-self:center}
+    .cat-breakdown .cat-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:8px}
+  }
+
   .backdrop{
     position:fixed; inset:0; background:rgba(12,10,24,.55); z-index:60;
     opacity:0; pointer-events:none; transition:opacity .25s ease;
@@ -422,21 +431,21 @@
 <body>
 
 <div id="updatebar"><span>A new version is ready</span><button id="updatebar-go">Update</button></div>
-<div id="shell"></div>
+<main id="shell"></main>
 
-<div class="backdrop" id="backdrop"></div>
-<div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
-<div class="viewer" id="viewer"><button class="close" id="viewer-close">Close</button><img id="viewer-img" alt="Receipt photo"></div>
+<div class="backdrop" id="backdrop" aria-hidden="true"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-hidden="true"></div>
+<div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="Receipt photo" aria-hidden="true"><button class="close" id="viewer-close">Close</button><img id="viewer-img" alt="Receipt photo"></div>
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=5.3"></script>
+<script src="scan.js?v=5.4"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "5.3";
+  var APP_VERSION = "5.4";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -477,6 +486,8 @@
   ];
 
   var state = load();
+  state.expenses = cleanExpenses(state.expenses);
+  cleanRows();
   function load(){
     try{
       var raw = localStorage.getItem(KEY);
@@ -497,6 +508,7 @@
         if(typeof s.lastCat !== "string") s.lastCat = "";
         if(typeof s.restAmount !== "number") s.restAmount = 0;
         if(typeof s.restFrom !== "string") s.restFrom = "";
+        s.expenses = cleanExpenses(s.expenses);
         /* carry over an old borrow limit into the new "money for rest of month" */
         if(s.restAmount === 0 && typeof s.borrowCap === "number" && s.borrowCap > 0){
           s.restAmount = s.borrowCap; s.restFrom = todayIso(); s.restTs = Date.now();
@@ -527,10 +539,11 @@
     return list.filter(function(e){
       return e && typeof e === "object" && ISO_RE.test(e.date) && isFinite(+e.amount);
     }).map(function(e){
+      var validCat = CATS.some(function(c){ return c.id === e.cat; });
       return { id: e.id || uid(), ts: +e.ts || 0, amount: Math.round((+e.amount)*100)/100,
-               cat: typeof e.cat === "string" ? e.cat : "other",
+               cat: validCat ? e.cat : "other",
                note: typeof e.note === "string" ? e.note : "",
-               date: e.date, photo: safeImg(e.photo) || null };
+               date: e.date, photo: safePhoto(e.photo) || null };
     });
   }
   /* the rest of the shapes, coerced in place */
@@ -541,9 +554,6 @@
                  amount: +c.amount || 0, kind: c.kind === "loan" ? "loan" : "sub",
                  due: (+c.due >= 1 && +c.due <= 31) ? +c.due : 0,
                  remaining: +c.remaining || 0,
-                 borrowLog: Array.isArray(c.borrowLog) ? c.borrowLog.filter(function(l){
-                   return l && isFinite(+l.amt);
-                 }).map(function(l){ return { ts: +l.ts || 0, amt: +l.amt }; }) : [],
                  paid: (c.paid && typeof c.paid === "object") ? c.paid : {} };
       });
     state.goals = (state.goals||[]).filter(function(g){ return g && typeof g === "object"; })
@@ -570,60 +580,8 @@
     }
   }
 
-  /* ---------- data safety ----------
-     Everything the user owns lives in one localStorage key. There is no server
-     and no second copy, so the two destructive operations — restoring a backup
-     and erasing everything — take a snapshot into a separate key first. It is
-     the same browser, so it does not survive a cleared profile; it does survive
-     the far more common case of restoring the wrong file or mistapping erase. */
-  var SNAP_KEY = KEY + "-snapshot";
-  var DATA_VERSION = 1;
-
-  function snapshot(reason){
-    try{
-      var raw = localStorage.getItem(KEY);
-      if(!raw) return false;
-      localStorage.setItem(SNAP_KEY, JSON.stringify({
-        v: DATA_VERSION, ts: Date.now(), reason: reason || "", data: raw
-      }));
-      return true;
-    }catch(e){ return false; }
-  }
-  function snapshotInfo(){
-    try{
-      var s = JSON.parse(localStorage.getItem(SNAP_KEY) || "null");
-      if(!s || typeof s.data !== "string") return null;
-      var d = JSON.parse(s.data);
-      if(!d || !Array.isArray(d.expenses)) return null;
-      return { ts: s.ts || 0, reason: s.reason || "", count: d.expenses.length, data: d };
-    }catch(e){ return null; }
-  }
-  /* Swap the safety copy with what is live, in one step. Taking a fresh
-     snapshot first would overwrite the copy being restored and destroy it —
-     the exact failure this whole mechanism exists to prevent. */
-  function restoreSnapshot(reason){
-    var info = snapshotInfo();
-    if(!info) return false;
-    var current = null;
-    try{ current = localStorage.getItem(KEY); }catch(e){}
-    state = info.data;
-    cleanRows();
-    retireStalePool(state);
-    state.expenses = cleanExpenses(state.expenses);
-    if(!save()) return false;
-    if(current){
-      try{
-        localStorage.setItem(SNAP_KEY, JSON.stringify({
-          v: DATA_VERSION, ts: Date.now(), reason: reason || "before putting the safety copy back", data: current
-        }));
-      }catch(e){}
-    }
-    return true;
-  }
-
   function save(opts){
     try{
-      state.v = DATA_VERSION;
       localStorage.setItem(KEY, JSON.stringify(state));
       return true;
     }catch(e){
@@ -642,18 +600,13 @@
 
   /* ---------- helpers ---------- */
   function $(s, el){ return (el||document).querySelector(s); }
-  /* Anything the app stores can arrive from a backup file, and a backup is
-     just a file someone can edit. A photo is only ever produced here by canvas
-     toDataURL, so anything that is not an inline image is not a photo — it is
-     an injection attempt or corruption. Returns "" for everything else, and
-     every img src in the app goes through it. */
-  var IMG_DATA_RE = /^data:image\/(png|jpe?g|gif|webp|bmp);base64,[A-Za-z0-9+/=\s]*$/i;
-  function safeImg(src){
-    return (typeof src === "string" && IMG_DATA_RE.test(src)) ? src : "";
-  }
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){
     return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
   });}
+  function safePhoto(s){
+    s = typeof s === "string" ? s : "";
+    return /^data:image\/(?:gif|jpe?g|png|webp|bmp|svg\+xml);/i.test(s) ? s : "";
+  }
   function cat(id){ for(var i=0;i<CATS.length;i++){ if(CATS[i].id===id) return CATS[i]; } return CATS[CATS.length-1]; }
   function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
@@ -767,75 +720,14 @@
     if(d.balance < 0) return 'owes you <b class="money" style="color:var(--good)">'+fmt(-d.balance)+'</b>';
     return '<b style="color:var(--good)">all settled</b>';
   }
-  /* Money handed to you is one of two completely different things: a friend
-     paying back what they owed (your own cash returning) or a new loan. This
-     used to count every incoming entry as borrowing, so being repaid 1,800
-     read as "1,800 already borrowed" — and since repayments already raise what
-     you can spend, the same 1,800 was subtracted twice and the overspend
-     offer could disappear entirely. ledgerFlowSince already draws the
-     distinction properly; use it rather than a second, wrong copy. */
   function borrowedThisMonth(){
-    return ledgerFlowSince(monthStartIso()).borrowed;
-  }
-  /* The person you actually borrow from — most borrowed from, over the whole
-     history. Lets the app say "add it to Dad's loan" instead of making you
-     type his name every time you go over. */
-  function usualLender(){
-    var best = null, bestAmt = 0;
+    var start = new Date(); start.setDate(1); start.setHours(0,0,0,0);
+    var t = start.getTime(), sum = 0;
     state.debts.forEach(function(d){
-      var sum = 0;
-      (d.log||[]).forEach(function(l){ if(l.dir === "b") sum += l.amt; });
-      if(sum > bestAmt){ bestAmt = sum; best = d; }
+      (d.log||[]).forEach(function(l){ if(l.dir==="b" && l.ts >= t) sum += l.amt; });
     });
-    return best;
+    return sum;
   }
-  /* How far past your money you are, whichever way the budget is set up, minus
-     what you have already written down as borrowed this month. */
-  function uncoveredOverspend(){
-    var over = 0;
-    var rr = restRemaining();
-    if(rr !== null) over = rr < 0 ? -rr : 0;
-    else if(state.salary > 0){
-      var left = planMath().left - monthSpent() - ledgerFlowSince(monthStartIso()).net;
-      over = left < 0 ? -left : 0;
-    }
-    if(over <= 0) return 0;
-    return Math.round(Math.max(over - borrowedThisMonth(), 0) * 100) / 100;
-  }
-  function overspendOffer(){
-    var amt = uncoveredOverspend();
-    if(amt < 1) return "";
-    /* Prefer a loan you already have — "Dad" is usually a standing loan in
-       Plan, not a friends-ledger entry, and adding to the wrong one leaves you
-       with the same person owed money in two disconnected places. */
-    var loans = loanCommitments();
-    var target = null;
-    if(loans.length === 1) target = { kind: "loan", id: loans[0].id, name: loans[0].name };
-    else if(loans.length > 1){
-      var biggest = loans[0];
-      loans.forEach(function(c){ if((+c.remaining||0) > (+biggest.remaining||0)) biggest = c; });
-      target = { kind: "loan", id: biggest.id, name: biggest.name };
-    }else{
-      var who = usualLender();
-      if(who) target = { kind: "person", id: who.id, name: who.name };
-    }
-    var already = borrowedThisMonth();
-    var total = Math.round((amt + already) * 100) / 100;
-    var txt = 'You\'re <b class="money">' + fmt(total) + '</b> past your money. ';
-    if(already > 0){
-      txt += '<b class="money">' + fmt(already) + '</b> is already borrowed — ' +
-        (target ? 'add the other <b class="money">' + fmt(amt) + '</b> to ' + esc(target.name) + '?'
-                : 'the other <b class="money">' + fmt(amt) + '</b> is not written down.');
-    }else{
-      txt += (target ? 'Add it to ' + esc(target.name) + (target.kind === "loan" ? "" : "\'s loan") + '?'
-                     : 'If someone covered you, keep track of it.');
-    }
-    return '<div class="suggest"><span class="txt">' + txt + '</span>' +
-      '<button id="h-borrow" data-amt="' + amt + '"' +
-      (target ? ' data-who="' + esc(target.id) + '" data-kind="' + target.kind + '"' : '') + '>' +
-      (target ? 'Add ' + fmt(amt) : 'Log it') + '</button></div>';
-  }
-
   /* only offer to sweep money you really still have — the old version could
      "save" the unspent part of a fixed weekend budget while the actual pool
      was already in the red */
@@ -934,6 +826,7 @@
     html += tabbar();
     shell.innerHTML = html;
     bindView();
+    syncToggleSemantics(shell);
   }
 
   function topbar(){
@@ -1049,9 +942,11 @@
         (pm.extra ? (pm.extra > 0 ? ' · '+fmt(pm.extra)+' more than usual' : ' · '+fmt(-pm.extra)+' less than usual') : "") +
         '</span>'+paydayChip()+'</div></div>' +
         '</section>';
-      var offer = overspendOffer();
-      if(offer){
-        h += offer;
+      var uncovered = Math.abs(Math.min(mLeft, 0)) - borrowedThisMonth();
+      if(mLeft < 0 && uncovered >= 1){
+        h += '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(Math.abs(mLeft))+'</b> over' +
+          (borrowedThisMonth() > 0 ? ' — <b class="money">'+fmt(uncovered)+'</b> of it not logged yet.' : '. If your dad or a friend covered you, keep track of it.') +
+          '</span><button id="h-borrow" data-amt="'+Math.round(uncovered)+'">Log it</button></div>';
       }else if(iOweTotal() > 0 || owedToMeTotal() > 0){
         var bits = [];
         if(iOweTotal() > 0) bits.push('you owe <b class="money">'+fmt(iOweTotal())+'</b> ('+
@@ -1080,7 +975,6 @@
         '<div class="hero-caption">'+(gone<0? "came in this month" : "out of your pocket this month")+nNote+
         ' · add your salary in <strong>Plan</strong> to see what\'s left</div>' +
         '</section>';
-      h += overspendOffer();
     }
 
     /* new month, and last month you were running on a set-aside pool —
@@ -1090,18 +984,14 @@
         monthName + ' — borrowing included?</span><button data-task="plan" id="h-newmonth">Set it</button></div>';
     }
 
-    /* today card — everyday budget.
-       Shown whenever there is a budget to speak of, including when the rate has
-       fallen to zero. Hiding the card once you run out removed the one place
-       that says how far past you are — exactly when you need to see it. */
+    /* today card — everyday budget */
     var tb = todayBudget();
-    var rrNow = restRemaining();
-    if(tb > 0 || rrNow !== null || state.salary > 0){
+    if(tb > 0){
       var dLeft = tb - tSpent;
       h += '<div class="sec"><span class="micro">Today</span>' +
         '<span class="micro">'+daysLeftInMonth()+' days left this month</span></div>';
       var poolLine = "";
-      var rr = rrNow;
+      var rr = restRemaining();
       if(rr !== null){
         poolLine = rr < 0
           ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">'+fmt(-rr)+' past your '+fmt(state.restAmount)+' for the month</span></div>'
@@ -1119,15 +1009,12 @@
       }
       h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+
         new Date().toLocaleDateString(undefined,{weekday:"long"})+'</span>' +
-        '<span class="goal-amt money">'+(tb <= 0
-          ? '<b style="color:var(--bad)">nothing left</b> today'
-          : dLeft<0
+        '<span class="goal-amt money">'+(dLeft<0
           ? '<b style="color:var(--bad)">'+fmt(Math.abs(dLeft))+'</b> over'
           : '<b>'+fmt(dLeft)+'</b> left today')+'</span></div>' +
-        meterHtml(tSpent, Math.max(tb, tSpent, 1)) +
-        '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">'+(tb <= 0
-          ? 'spent '+fmt(tSpent)+' today · your money for the month is used up'
-          : 'spent '+fmt(tSpent)+' of '+fmt(tb)+' · rebalances daily')+'</span></div>' + poolLine + '</div>';
+        meterHtml(tSpent, tb) +
+        '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(tSpent)+' of '+fmt(tb)+
+        ' · rebalances daily</span></div>' + poolLine + '</div>';
     }
 
     /* weekend card — the same pool, seen over Fri-Sun instead of one day */
@@ -1175,7 +1062,7 @@
       h += '<div class="sec"><span class="micro">Coming up</span></div><div class="row-list">';
       up.forEach(function(u){
         var soon = u.days <= 1;
-        h += '<button class="row-item" data-cm="'+u.c.id+'">' + kindTile(u.c.kind) +
+        h += '<button class="row-item" data-cm="'+esc(u.c.id)+'">' + kindTile(u.c.kind) +
           '<span class="name"><span class="ttl">'+esc(u.c.name)+'</span>' +
           '<span class="subline" style="'+(soon?"color:var(--bad); font-weight:700":"")+'">' +
           (u.days===0? "due today" : u.days===1? "due tomorrow" : "due in "+u.days+" days")+'</span></span>' +
@@ -1582,7 +1469,7 @@
     var sw = sweepInfo();
     if(!sw) return;
     var rows = state.goals.map(function(g){
-      return '<button class="row-item" data-sweep-goal="'+g.id+'">' +
+      return '<button class="row-item" data-sweep-goal="'+esc(g.id)+'">' +
         '<span class="name">'+esc(g.name)+'</span>' +
         '<span class="amt money">'+fmt(g.saved)+' / '+fmt(g.target)+'</span></button>';
     }).join("");
@@ -1606,14 +1493,14 @@
 
   function expRow(e){
     var c = cat(e.cat);
-    var shot = safeImg(e.photo);
-    var thumb = shot
-      ? '<span class="exp-thumb"><img src="'+esc(shot)+'" alt="Receipt"></span>'
+    var photo = safePhoto(e.photo);
+    var thumb = photo
+      ? '<span class="exp-thumb"><img src="'+esc(photo)+'" alt="Receipt"></span>'
       : catTile(c, "big");
-    return '<button class="exp" data-exp="'+e.id+'">' + thumb +
+    return '<button class="exp" data-exp="'+esc(e.id)+'">' + thumb +
       '<span class="exp-main"><span class="exp-title">'+esc(e.note || c.name)+'</span>' +
       '<span class="exp-sub"><span class="cat-dot" style="background:var('+c.v+')"></span>'+c.name+
-      (shot? " · receipt":"")+'</span></span>' +
+      (photo? " · receipt":"")+'</span></span>' +
       '<span class="exp-amt money">'+fmt(e.amount)+'</span></button>';
   }
 
@@ -1621,7 +1508,7 @@
   function ledgerRow(it){
     var v = it.cash < 0 ? "--bad" : it.cash > 0 ? "--good" : "--ink2";
     var sign = it.cash < 0 ? "−" : it.cash > 0 ? "+" : "";
-    return '<button class="exp" data-ledger="'+it.pid+'">' +
+    return '<button class="exp" data-ledger="'+esc(it.pid)+'">' +
       '<span class="exp-thumb" style="color:var('+v+'); background:color-mix(in srgb, var('+v+') 15%, var(--card2))">'+IC.person+'</span>' +
       '<span class="exp-main"><span class="exp-title">'+esc(it.name)+'</span>' +
       '<span class="exp-sub"><span class="cat-dot" style="background:var('+v+')"></span>'+
@@ -1680,7 +1567,7 @@
     var max = byCat[rows[0].id];
     var h = '<div class="sec"><span class="micro">'+title+'</span></div>';
     
-    h += '<div style="display:flex; align-items:center; gap:14px; background:var(--card); border:1px solid var(--line); border-radius:18px; padding:12px 14px;">';
+    h += '<div class="cat-breakdown" style="display:flex; align-items:center; gap:14px; background:var(--card); border:1px solid var(--line); border-radius:18px; padding:12px 14px;">';
     h += donutChartHtml(rows, byCat);
     h += '<div class="cats" style="flex:1; background:none; border:0; padding:0; margin:0; width:100%;">';
     rows.forEach(function(c){
@@ -1938,25 +1825,6 @@
     var p = paidRec(c, mk);
     return p && p.amt > 0 ? p.amt : c.amount;
   }
-  /* Borrowing more against a standing loan: the balance owed goes up. This is
-     the counterpart to payCommitment, which brings it down. The monthly
-     payment is untouched, so this does not change what is reserved from your
-     salary — it changes how long the loan runs. */
-  function borrowOnCommitment(c, amt){
-    if(!(amt > 0)) return;
-    c.remaining = Math.round(((+c.remaining || 0) + amt) * 100) / 100;
-    if(!Array.isArray(c.borrowLog)) c.borrowLog = [];
-    c.borrowLog.push({ ts: Date.now(), amt: Math.round(amt * 100) / 100 });
-  }
-  function undoBorrowOnCommitment(c){
-    if(!Array.isArray(c.borrowLog) || !c.borrowLog.length) return 0;
-    var last = c.borrowLog.pop();
-    c.remaining = Math.max(Math.round(((+c.remaining || 0) - last.amt) * 100) / 100, 0);
-    return last.amt;
-  }
-  function loanCommitments(){
-    return state.commitments.filter(function(c){ return c.kind === "loan"; });
-  }
   function payCommitment(c, amt){
     if(!c.paid) c.paid = {};
     var prev = paidRec(c);
@@ -1993,17 +1861,9 @@
     if(!state.restFrom) return 0;
     return state.restTs > 0 ? state.restTs : fromIso(state.restFrom).getTime();
   }
-  function monthEndIso(){
-    var n = new Date();
-    return iso(new Date(n.getFullYear(), n.getMonth()+1, 0));
-  }
-  /* The pool is money for the rest of THIS month, so it is bounded at both
-     ends. Without the upper bound a single mistyped year — 2027 for 2026 —
-     was subtracted from today's budget and silently zeroed it. */
   function spentFromPool(){
-    var t = poolStartTs(), end = monthEndIso();
+    var t = poolStartTs();
     return total(state.expenses.filter(function(e){
-      if(e.date > end) return false;
       if(e.date > state.restFrom) return true;
       return e.date === state.restFrom && (e.ts || 0) >= t;
     }));
@@ -2200,7 +2060,7 @@
           ? '<span class="subline hl money" style="color:'+(diff>0?"var(--bad)":"var(--good)")+'">'+IC.check+
             ' paid '+fmt(p.amt)+' this month'+(diff? ' · '+fmt(Math.abs(diff))+(diff>0? ' more' : ' less')+' than usual' : "")+'</span>'
           : "";
-        h += '<button class="row-item" data-cm="'+c.id+'">' + kindTile(c.kind) +
+        h += '<button class="row-item" data-cm="'+esc(c.id)+'">' + kindTile(c.kind) +
           '<span class="name"><span class="ttl">'+esc(c.name)+'</span>' +
           '<span class="subline">'+sub1+'</span>' + paidLine +
           (months? '<span class="subline hl money">'+fmt(c.remaining)+' left · ≈ '+months+' month'+(months>1?"s":"")+' to go</span>' : "")+'</span>' +
@@ -2228,7 +2088,7 @@
             (last.note? " · "+esc(last.note) : "")+" · "+new Date(last.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})
           : "no activity yet";
         var tint = d.balance > 0 ? "--bad" : d.balance < 0 ? "--good" : "--warn";
-        h += '<button class="row-item" data-debt="'+d.id+'">' +
+        h += '<button class="row-item" data-debt="'+esc(d.id)+'">' +
           '<span class="ic-tile" style="color:var('+tint+'); background:color-mix(in srgb, var('+tint+') 14%, var(--card2))">'+IC.person+'</span>' +
           '<span class="name"><span class="ttl">'+esc(d.name)+'</span>' +
           '<span class="subline">'+sub+'</span></span>' +
@@ -2254,8 +2114,8 @@
           '<div class="meter-track"><div class="meter-fill'+(done?"":"")+'" style="width:'+pct.toFixed(1)+'%; '+(done?"background:var(--good)":"")+'"></div></div>' +
           '<div class="goal-foot"><span class="goal-pct'+(done?" done":"")+'">'+(done? "Goal reached!" : Math.round(pct)+"%"+(g.monthly? " · "+fmt(g.monthly)+"/mo planned":""))+'</span>' +
           '<span class="goal-actions">' +
-          '<button class="mini-btn" data-goal-edit="'+g.id+'">Edit</button>' +
-          '<button class="mini-btn primary" data-goal-add="'+g.id+'">Add money</button>' +
+          '<button class="mini-btn" data-goal-edit="'+esc(g.id)+'">Edit</button>' +
+          '<button class="mini-btn primary" data-goal-add="'+esc(g.id)+'">Add money</button>' +
           '</span></div></div>';
       });
     }else{
@@ -2285,23 +2145,6 @@
       '<div class="hint">Some months you give more — put the real amount here and the difference comes off your spending money.</div></div>';
   }
 
-  /* Taking more from a loan you already have — the case where you run out and
-     your dad covers a purchase. It goes onto what you still owe, not onto this
-     month's payment. */
-  function borrowBlock(c){
-    if(c.kind !== "loan") return "";
-    var log = Array.isArray(c.borrowLog) ? c.borrowLog : [];
-    var last = log.length ? log[log.length-1] : null;
-    return '<div class="field"><label class="micro" for="c-borrow">Borrowed more from ' + esc(c.name) + '?</label>' +
-      '<input id="c-borrow" type="text" inputmode="decimal" placeholder="e.g. 2000" value="">' +
-      '<button class="btn" id="c-borrow-go" style="margin-top:8px">' + IC.bank + 'Add it to what I owe</button>' +
-      (last ? '<div class="hint">Last added ' + fmt(last.amt) + ' on ' +
-        new Date(last.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"}) +
-        ' · <button id="c-borrow-undo" style="color:var(--accent-deep); font-weight:700; background:none; padding:0">undo</button></div>'
-        : '<div class="hint">Raises the balance you owe, not this month\'s payment.</div>') +
-      '</div>';
-  }
-
   function openCommitmentSheet(id){
     var c = null;
     if(id){ state.commitments.forEach(function(x){ if(x.id===id) c = x; }); }
@@ -2323,7 +2166,7 @@
       '<label class="micro" for="c-remaining">Loan balance left (optional)</label>' +
       '<input id="c-remaining" type="text" inputmode="decimal" min="0" placeholder="How much is still owed" value="'+(c && c.remaining? c.remaining:"")+'">' +
       '<div class="hint">Each saved edit updates this — the app shows roughly how many months are left.</div></div>' +
-      (c? payBlock(c) + borrowBlock(c) : "") +
+      (c? payBlock(c) : "") +
       '<button class="btn primary" id="c-save">Save</button>' +
       (c? '<div style="height:10px"></div><button class="btn danger" id="c-del">Remove</button>' : "")
     );
@@ -2355,23 +2198,6 @@
         save(); closeSheet(); render();
         var d = Math.round((amt - c.amount)*100)/100;
         toast(c.name+": "+fmt(amt)+" logged"+(d>0? " · "+fmt(d)+" more than usual" : d<0? " · "+fmt(-d)+" less than usual" : ""));
-      });
-    }
-    if(c && $("#c-borrow-go")){
-      $("#c-borrow-go").addEventListener("click", function(){
-        var amt = num($("#c-borrow").value);
-        if(!(amt > 0)){ toast("How much did you take?"); return; }
-        borrowOnCommitment(c, amt);
-        save(); closeSheet(); render();
-        toast(fmt(amt) + " added to " + c.name + " — you owe " + fmt(c.remaining));
-      });
-    }
-    if(c && $("#c-borrow-undo")){
-      $("#c-borrow-undo").addEventListener("click", function(){
-        var back = undoBorrowOnCommitment(c);
-        if(!back){ toast("Nothing to undo"); return; }
-        save(); closeSheet(); render();
-        toast("Removed " + fmt(back) + " — you owe " + fmt(c.remaining));
       });
     }
     if(c && $("#c-unpay")){
@@ -2516,18 +2342,7 @@
       '<button class="btn" id="s-export">Download backup file</button>' +
       '<div style="height:10px"></div>' +
       '<button class="btn" id="s-import">Restore from backup</button>' +
-      '<input type="file" accept=".json,application/json" id="s-import-file" hidden>' +
-      (function(){
-        /* the automatic safety copy taken before anything destructive */
-        var snap = snapshotInfo();
-        if(!snap) return "";
-        var when = new Date(snap.ts).toLocaleDateString(undefined,{month:"short", day:"numeric"});
-        return '<div style="height:14px"></div><div class="hint" style="margin:0 0 8px">' +
-          'Safety copy from ' + esc(when) + ' — ' + snap.count + ' expense' + (snap.count===1?"":"s") +
-          (snap.reason ? ', taken ' + esc(snap.reason) : '') + '.</div>' +
-          '<button class="btn ghost" id="s-undo-restore" style="color:var(--ink2)">Put that copy back</button>';
-      })() +
-      '</div>' +
+      '<input type="file" accept=".json,application/json" id="s-import-file" hidden></div>' +
 
       '<div class="panel"><h3>'+IC.trash+'Start fresh</h3><p>Deletes every expense and receipt photo. This can\'t be undone.</p>' +
       '<button class="btn danger" id="s-wipe">Erase all data</button></div>' +
@@ -2782,7 +2597,8 @@
   function setPhotoUi(mode){
     var ic = $("#f-photo-ic"), t = $("#f-photo-t"), s = $("#f-photo-s");
     if(!ic || !draft) return;
-    if(safeImg(draft.photo)) ic.innerHTML = '<img src="'+esc(safeImg(draft.photo))+'" alt="Receipt preview">';
+    var photo = safePhoto(draft.photo);
+    if(photo) ic.innerHTML = '<img src="'+esc(photo)+'" alt="Receipt preview">';
     if(mode === "scanning"){
       t.innerHTML = 'Reading the receipt…';
       s.innerHTML = "";
@@ -2809,7 +2625,34 @@
 
   /* ---------- add / detail sheets ---------- */
   var sheet = $("#sheet"), backdrop = $("#backdrop"), camera = $("#camera");
-  var draft = null;
+  var draft = null, sheetReturnFocus = null, bodyOverflowBeforeSheet = "";
+
+  function syncToggleSemantics(root){
+    if(!root) return;
+    root.querySelectorAll('.chip[data-cat], .chip[data-mode], .chip[data-spcat], .chip[data-kind], .chip[data-wkw], .chip[data-hist]').forEach(function(b){
+      b.setAttribute("aria-pressed", b.classList.contains("sel") ? "true" : "false");
+    });
+    root.querySelectorAll("[data-tab]").forEach(function(b){
+      if(b.classList.contains("active")) b.setAttribute("aria-current", "page");
+      else b.removeAttribute("aria-current");
+    });
+  }
+
+  sheet.addEventListener("click", function(){
+    setTimeout(function(){ syncToggleSemantics(sheet); }, 0);
+  });
+  document.addEventListener("keydown", function(ev){
+    if(!sheet.classList.contains("show")) return;
+    if(ev.key === "Escape"){
+      ev.preventDefault(); closeSheet(); return;
+    }
+    if(ev.key !== "Tab") return;
+    var focusable = Array.prototype.slice.call(sheet.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+    if(!focusable.length) return;
+    var first = focusable[0], last = focusable[focusable.length-1];
+    if(ev.shiftKey && document.activeElement === first){ ev.preventDefault(); last.focus(); }
+    else if(!ev.shiftKey && document.activeElement === last){ ev.preventDefault(); first.focus(); }
+  });
 
   /* ---- cash check -------------------------------------------------------
      You forget to log things. So instead of trusting the running total, count
@@ -3003,16 +2846,39 @@
   }
 
   function openSheet(html){
+    sheetReturnFocus = document.activeElement;
+    bodyOverflowBeforeSheet = document.body.style.overflow;
     sheet.innerHTML = '<div class="grab"></div><button class="sheet-x" aria-label="Close">✕</button>' + html;
+    var title = sheet.querySelector("h2");
+    if(title){ title.id = "sheet-title"; sheet.setAttribute("aria-labelledby", "sheet-title"); }
+    else { sheet.removeAttribute("aria-labelledby"); sheet.setAttribute("aria-label", "Dialog"); }
+    sheet.setAttribute("aria-hidden", "false");
+    backdrop.setAttribute("aria-hidden", "false");
+    shell.setAttribute("aria-hidden", "true");
+    if("inert" in shell) shell.inert = true;
+    document.body.style.overflow = "hidden";
+    syncToggleSemantics(sheet);
     sheet.querySelector(".sheet-x").addEventListener("click", closeSheet);
     backdrop.classList.add("show");
-    requestAnimationFrame(function(){ sheet.classList.add("show"); });
+    requestAnimationFrame(function(){
+      sheet.classList.add("show");
+      var first = sheet.querySelector('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+      if(first) first.focus();
+    });
   }
   function closeSheet(){
     sheet.classList.remove("show");
     backdrop.classList.remove("show");
+    sheet.setAttribute("aria-hidden", "true");
+    backdrop.setAttribute("aria-hidden", "true");
+    shell.setAttribute("aria-hidden", "false");
+    if("inert" in shell) shell.inert = false;
+    document.body.style.overflow = bodyOverflowBeforeSheet;
     draft = null;
     scanRun++;
+    var focus = sheetReturnFocus;
+    sheetReturnFocus = null;
+    if(focus && document.contains(focus)) focus.focus();
   }
   backdrop.addEventListener("click", closeSheet);
 
@@ -3128,28 +2994,9 @@
     $("#f-save").addEventListener("click", saveDraft);
   }
 
-  /* A year typo puts an expense somewhere it will never be seen again and
-     skews whichever month it lands in. Catch it where it is typed. */
-  function dateLooksWrong(d){
-    if(!d) return "";
-    var end = monthEndIso();
-    if(d > end){
-      var n = new Date(), nextEnd = iso(new Date(n.getFullYear(), n.getMonth()+2, 0));
-      if(d > nextEnd) return "That date is " + fromIso(d).toLocaleDateString(undefined,{month:"long", year:"numeric"}) + " — check the year";
-    }
-    if(d < "2015-01-01") return "That date looks too far back — check the year";
-    return "";
-  }
   function saveDraft(){
     var amt = num($("#f-amount").value);
     if(!(amt > 0)){ toast("Enter the amount first"); $("#f-amount").focus(); return; }
-    var dWarn = dateLooksWrong($("#f-date").value);
-    if(dWarn && !saveDraft.dateOk){
-      saveDraft.dateOk = true;                 /* one warning, then take them at their word */
-      toast(dWarn + " · tap Save again to keep it");
-      return;
-    }
-    saveDraft.dateOk = false;
     if(draft.editId){
       var ex = null;
       state.expenses.forEach(function(x){ if(x.id===draft.editId) ex = x; });
@@ -3222,7 +3069,7 @@
     pendingDelete = null;
     openSheet(
       '<h2>'+esc(e.note || c.name)+'</h2>' +
-      (safeImg(e.photo)? '<img class="detail-photo" src="'+esc(safeImg(e.photo))+'" id="d-photo" alt="Receipt — tap to zoom">' : "") +
+      (safePhoto(e.photo)? '<img class="detail-photo" src="'+esc(safePhoto(e.photo))+'" id="d-photo" alt="Receipt — tap to zoom">' : "") +
       '<dl class="detail-grid">' +
       '<dt>Amount</dt><dd class="money">'+fmt(e.amount)+'</dd>' +
       '<dt>Category</dt><dd><span style="color:var('+c.v+'); display:inline-flex; width:15px; height:15px; vertical-align:-2px; margin-right:5px">'+catIcon(c.id)+'</span>'+c.name+'</dd>' +
@@ -3245,10 +3092,11 @@
       toast("Logged again — "+fmt(e.amount));
     });
     $("#d-edit").addEventListener("click", function(){ openAdd(e.id); });
-    if(safeImg(e.photo)){
+    if(safePhoto(e.photo)){
       $("#d-photo").addEventListener("click", function(){
-        $("#viewer-img").src = safeImg(e.photo);
+        $("#viewer-img").src = safePhoto(e.photo);
         $("#viewer").classList.add("show");
+        $("#viewer").setAttribute("aria-hidden", "false");
       });
     }
     $("#d-del").addEventListener("click", function(){
@@ -3263,8 +3111,8 @@
     });
   }
 
-  $("#viewer-close").addEventListener("click", function(){ $("#viewer").classList.remove("show"); });
-  $("#viewer").addEventListener("click", function(ev){ if(ev.target===this) this.classList.remove("show"); });
+  $("#viewer-close").addEventListener("click", function(){ $("#viewer").classList.remove("show"); $("#viewer").setAttribute("aria-hidden", "true"); });
+  $("#viewer").addEventListener("click", function(ev){ if(ev.target===this){ this.classList.remove("show"); this.setAttribute("aria-hidden", "true"); } });
 
   /* ---------- view event wiring ---------- */
   function bindView(){
@@ -3324,37 +3172,7 @@
     if(sweepBtn) sweepBtn.addEventListener("click", openSweepSheet);
     var borrowBtn = $("#h-borrow");
     if(borrowBtn) borrowBtn.addEventListener("click", function(){
-      var amt = parseFloat(this.getAttribute("data-amt")) || 0;
-      var who = this.getAttribute("data-who");
-      var kind = this.getAttribute("data-kind");
-      if(!who || !(amt > 0)){ openBorrowSheet(amt); return; }
-      if(kind === "loan"){
-        var c = null;
-        state.commitments.forEach(function(x){ if(x.id === who) c = x; });
-        if(!c){ openBorrowSheet(amt); return; }
-        borrowOnCommitment(c, amt);
-        save(); render();
-        toastAction("Added " + fmt(amt) + " to " + c.name + " — you owe " + fmt(c.remaining), "Undo", function(){
-          undoBorrowOnCommitment(c);
-          save(); render();
-          toast("Removed");
-        }, 7000);
-        return;
-      }
-      var d = null;
-      state.debts.forEach(function(x){ if(x.id === who) d = x; });
-      if(!d){ openBorrowSheet(amt); return; }
-      /* one tap: it goes onto what you owe them, and because the app counts
-         borrowing as funding rather than income it does not quietly hand the
-         same money back to your budget */
-      ledgerAdd(d, "b", amt, "covered my overspend");
-      save(); render();
-      toastAction("Added " + fmt(amt) + " to " + d.name + " — you owe " + fmt(d.balance), "Undo", function(){
-        var last = d.log.pop();
-        if(last) d.balance = Math.round((d.balance - last.amt) * 100) / 100;
-        save(); render();
-        toast("Removed");
-      }, 7000);
+      openBorrowSheet(parseFloat(this.getAttribute("data-amt")) || 0);
     });
     var oweBtn = $("#h-owe");
     if(oweBtn) oweBtn.addEventListener("click", function(){ tab = "plan"; render(); window.scrollTo(0,0); });
@@ -3459,23 +3277,6 @@
         toast("Backup downloaded");
       });
       $("#s-import").addEventListener("click", function(){ $("#s-import-file").click(); });
-      var undoRestore = $("#s-undo-restore");
-      if(undoRestore){
-        var undoArmed = false;
-        undoRestore.addEventListener("click", function(){
-          var snap = snapshotInfo();
-          if(!snap){ toast("No safety copy to put back"); return; }
-          if(!undoArmed){
-            undoArmed = true;
-            this.textContent = "Tap again — replaces what's here now with " + snap.count + " expenses";
-            return;
-          }
-          /* what is here now becomes the new safety copy in the same step, so
-             this is reversible in both directions rather than a one-way door */
-          if(restoreSnapshot("before putting the safety copy back")){ render(); toast("Safety copy restored"); }
-          else toast("That safety copy couldn't be read");
-        });
-      }
       $("#s-import-file").addEventListener("change", function(){
         var f = this.files && this.files[0]; this.value = "";
         if(!f) return;
@@ -3485,7 +3286,8 @@
           try{
             var d = JSON.parse(r.result);
             if(!d || !Array.isArray(d.expenses)) throw 0;
-            snapshot("before restoring a backup");
+            var hasData = state.expenses.length || state.commitments.length || state.goals.length || state.debts.length;
+            if(hasData && !window.confirm("Restore this backup and replace the current money data on this device?")) return;
             prev = state;
             state = { setup:true, budget:+d.budget||0, currency:d.currency||"USD",
                       expenses:cleanExpenses(d.expenses), apiKey:state.apiKey, geminiApiKey:state.geminiApiKey,
@@ -3519,7 +3321,9 @@
       var wipeArmed = false;
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
-        snapshot("before erasing everything");
+        if(!window.confirm("Erase every expense, receipt photo, loan, goal, and setting from this device?")){
+          wipeArmed = false; this.textContent = "Erase all data"; return;
+        }
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", scanProvider:"free", scanModel:"claude-opus-4-8",
                   salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
         try{ localStorage.removeItem(KEY); }catch(e){}
@@ -3530,48 +3334,35 @@
 
   render();
 
-  /* ---------- auto-update check ----------
-     This used to check only on load and on returning to the app, behind a
-     five minute limiter — so an app left open never noticed a new version,
-     and backgrounding it briefly did nothing either. It now actually polls
-     while it is on screen, and stops while it is not, so it costs nothing
-     in the background. */
-  var UPDATE_POLL_MS = (window.__UPDATE_POLL_MS || 2*60*1000);   /* test hook */
-  var UPDATE_MIN_GAP = (window.__UPDATE_MIN_GAP || 30*1000);
-  var lastUpdateCheck = 0, updateTimer = null, updateFound = false;
-
-  function checkForUpdate(force){
-    if(updateFound) return;
+  /* ---------- auto-update check ---------- */
+  var lastUpdateCheck = 0;
+  function checkForUpdate(){
     var now = Date.now();
-    if(!force && now - lastUpdateCheck < UPDATE_MIN_GAP) return;
+    if(now - lastUpdateCheck < 5*60*1000) return;
     lastUpdateCheck = now;
     fetch("version.json?t=" + now, { cache: "no-store" })
       .then(function(r){ return r.json(); })
       .then(function(j){
         if(j && j.version && j.version !== APP_VERSION){
-          updateFound = true;
-          stopUpdatePolling();
           document.getElementById("updatebar").classList.add("show");
         }
       })
       .catch(function(){});
   }
-  function startUpdatePolling(){
-    stopUpdatePolling();
-    updateTimer = setInterval(function(){ checkForUpdate(true); }, UPDATE_POLL_MS);
-  }
-  function stopUpdatePolling(){
-    if(updateTimer){ clearInterval(updateTimer); updateTimer = null; }
-  }
   document.getElementById("updatebar-go").addEventListener("click", function(){
     location.replace(location.pathname + "?u=" + Date.now());
   });
-  checkForUpdate(true);
-  startUpdatePolling();
+  checkForUpdate();
   document.addEventListener("visibilitychange", function(){
-    if(document.visibilityState === "visible"){ checkForUpdate(true); startUpdatePolling(); }
-    else stopUpdatePolling();
+    if(document.visibilityState === "visible") checkForUpdate();
   });
+
+  /* register service worker for offline PWA support */
+  if("serviceWorker" in navigator){
+    window.addEventListener("load", function(){
+      navigator.serviceWorker.register("sw.js").catch(function(){});
+    });
+  }
 
   /* gentle backup reminder — data only lives on this phone */
   setTimeout(function(){
