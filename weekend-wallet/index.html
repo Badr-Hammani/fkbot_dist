@@ -21,7 +21,7 @@
     --accent:#e89e24; --accent-deep:#8a5a00; --on-accent:#241b08;
     --good:#006300; --warn:#b97900; --bad:#d03b3b;
     --c-food:#eda100; --c-drinks:#2a78d6; --c-out:#4a3aa7;
-    --c-transport:#1baf7a; --c-shop:#e34948; --c-other:#008300; --c-missing:#7a7391;
+    --c-transport:#1baf7a; --c-shop:#e34948; --c-other:#008300; --c-missing:#7a7391; --spotify:#138a43;
     --shadow:0 10px 30px rgba(35,32,48,.12);
     --sheet-shadow:0 -18px 50px rgba(35,32,48,.22);
   }
@@ -33,7 +33,7 @@
       --accent:#f2a93b; --accent-deep:#f2a93b; --on-accent:#241b08;
       --good:#0ca30c; --warn:#fab219; --bad:#e66767;
       --c-food:#c98500; --c-drinks:#3987e5; --c-out:#9085e9;
-      --c-transport:#199e70; --c-shop:#e66767; --c-other:#008300; --c-missing:#9a92b4;
+      --c-transport:#199e70; --c-shop:#e66767; --c-other:#008300; --c-missing:#9a92b4; --spotify:#1ed760;
       --shadow:0 10px 30px rgba(0,0,0,.4);
       --sheet-shadow:0 -18px 50px rgba(0,0,0,.55);
     }
@@ -498,13 +498,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=5.7"></script>
+<script src="scan.js?v=5.8"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "5.7";
+  var APP_VERSION = "5.8";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -841,6 +841,7 @@
     banknote:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5h.01M18 14.5h.01"/></svg>',
     bank:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9 12 4l8.5 5v1.5h-17V9Z"/><path d="M5.5 10.5V17M9.8 10.5V17M14.2 10.5V17M18.5 10.5V17M3.5 19.5h17"/></svg>',
     repeat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11V9.5A3.5 3.5 0 0 1 7 6h13.5M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v1.5A3.5 3.5 0 0 1 17 18H3.5"/></svg>',
+    spotify:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M7.2 9.2c3.4-1 7.4-.7 10.2.8M7.8 12.3c2.9-.8 6.4-.5 8.9.8M8.5 15.2c2.3-.6 5-.4 7 .6"/></svg>',
     target:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.8"/><circle cx="12" cy="12" r="1.2"/></svg>',
     bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9Z"/><path d="M10 19.5a2.2 2.2 0 0 0 4 0"/></svg>',
     receipt:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5h12V21l-2.4-1.6L13.2 21l-2.4-1.6L8.4 21 6 19.4V2.5Z"/><path d="M9.5 7h5M9.5 10.5h5M9.5 14h3"/></svg>',
@@ -867,9 +868,13 @@
   function catTile(c, size){
     return '<span class="'+(size==="big"?"exp-thumb":"ic-tile")+'" style="color:var('+c.v+'); background:color-mix(in srgb, var('+c.v+') 15%, var(--card2))">'+catIcon(c.id)+'</span>';
   }
-  function kindTile(kind){
-    var v = kind==="loan" ? "--bad" : "--c-drinks";
-    return '<span class="ic-tile" style="color:var('+v+'); background:color-mix(in srgb, var('+v+') 14%, var(--card2))">'+(kind==="loan"? IC.bank : IC.repeat)+'</span>';
+  function kindTile(commitment){
+    var kind = typeof commitment === "string" ? commitment : commitment.kind;
+    var name = typeof commitment === "string" ? "" : String(commitment.name || "").toLowerCase();
+    var spotify = kind !== "loan" && name.indexOf("spotify") !== -1;
+    var v = kind === "loan" ? "--bad" : spotify ? "--spotify" : "--c-drinks";
+    var icon = kind === "loan" ? IC.bank : spotify ? IC.spotify : IC.repeat;
+    return '<span class="ic-tile" style="color:var('+v+'); background:color-mix(in srgb, var('+v+') 14%, var(--card2))">'+icon+'</span>';
   }
   function emptyBox(icon, html){
     return '<div class="empty">'+icon+html+'</div>';
@@ -1125,7 +1130,7 @@
       h += '<div class="sec"><span class="micro">Coming up</span></div><div class="row-list">';
       up.forEach(function(u){
         var soon = u.days <= 1;
-        h += '<button class="row-item" data-cm="'+esc(u.c.id)+'">' + kindTile(u.c.kind) +
+        h += '<button class="row-item" data-cm="'+esc(u.c.id)+'">' + kindTile(u.c) +
           '<span class="name"><span class="ttl">'+esc(u.c.name)+'</span>' +
           '<span class="subline" style="'+(soon?"color:var(--bad); font-weight:700":"")+'">' +
           (u.days===0? "due today" : u.days===1? "due tomorrow" : "due in "+u.days+" days")+'</span></span>' +
@@ -2162,7 +2167,7 @@
           ? '<span class="subline hl money" style="color:'+(diff>0?"var(--bad)":"var(--good)")+'">'+IC.check+
             ' paid '+fmt(p.amt)+' this month'+(diff? ' · '+fmt(Math.abs(diff))+(diff>0? ' more' : ' less')+' than usual' : "")+'</span>'
           : "";
-        h += '<button class="row-item commitment-card '+(c.kind==="loan"?"loan-row":"subscription-row")+'" data-cm="'+esc(c.id)+'">' + kindTile(c.kind) +
+        h += '<button class="row-item commitment-card '+(c.kind==="loan"?"loan-row":"subscription-row")+'" data-cm="'+esc(c.id)+'">' + kindTile(c) +
           '<span class="name"><span class="ttl">'+esc(c.name)+'</span>' +
           '<span class="subline">'+sub1+'</span>' + paidLine +
           (c.coverShortfall ? '<span class="subline hl" style="color:var(--warn)">uncovered spending → this loan</span>' : "") +
