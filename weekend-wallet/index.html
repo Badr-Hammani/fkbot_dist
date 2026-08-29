@@ -567,13 +567,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=6.2"></script>
+<script src="scan.js?v=6.3"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "6.2";
+  var APP_VERSION = "6.3";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -624,7 +624,9 @@
         var s = JSON.parse(raw);
         if(typeof s.apiKey !== "string") s.apiKey = "";
         if(typeof s.geminiApiKey !== "string") s.geminiApiKey = "";
-        if(typeof s.scanProvider !== "string") s.scanProvider = s.apiKey ? "claude" : (s.geminiApiKey ? "gemini" : "free");
+        if(typeof s.agentRouterApiKey !== "string") s.agentRouterApiKey = "";
+        if(typeof s.agentRouterModel !== "string" || !s.agentRouterModel.trim()) s.agentRouterModel = "gpt-5.5";
+        if(typeof s.scanProvider !== "string") s.scanProvider = s.agentRouterApiKey ? "agentrouter" : (s.apiKey ? "claude" : (s.geminiApiKey ? "gemini" : "free"));
         if(typeof s.salary !== "number") s.salary = 0;
         if(!Array.isArray(s.commitments)) s.commitments = [];
         s.commitments.forEach(function(c){ if(!c.paid || typeof c.paid !== "object") c.paid = {}; });
@@ -658,7 +660,7 @@
         return s;
       }
     }catch(e){}
-    return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", geminiApiKey:"", scanProvider:"free", scanModel:"claude-opus-4-8",
+    return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", geminiApiKey:"", agentRouterApiKey:"", agentRouterModel:"gpt-5.5", scanProvider:"free", scanModel:"claude-opus-4-8",
              salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
   }
   function isPaydayDay(n){
@@ -2981,10 +2983,18 @@
       '<div class="field"><label class="micro" for="s-provider">Scan Provider</label>' +
       '<select id="s-provider">' +
       '<option value="free"'+(state.scanProvider==="free"?" selected":"")+'>Free (Local OCR)</option>' +
+      '<option value="agentrouter"'+(state.scanProvider==="agentrouter"?" selected":"")+'>AgentRouter AI (OpenAI compatible)</option>' +
       '<option value="gemini"'+(state.scanProvider==="gemini"?" selected":"")+'>Gemini (Google AI Studio)</option>' +
       '<option value="claude"'+(state.scanProvider==="claude"?" selected":"")+'>Claude (Anthropic)</option>' +
       '</select></div>' +
       
+      '<div class="field" id="s-agentrouter-container" style="'+(state.scanProvider==="agentrouter"?"":"display:none")+'">' +
+      '<label class="micro" for="s-agentrouter-key">AgentRouter API key</label>' +
+      '<input id="s-agentrouter-key" type="password" placeholder="Paste your rotated token" autocomplete="off" value="'+esc(state.agentRouterApiKey)+'">' +
+      '<div style="height:10px"></div>' +
+      '<label class="micro" for="s-agentrouter-model">AgentRouter model</label>' +
+      '<input id="s-agentrouter-model" type="text" placeholder="gpt-5.5" autocomplete="off" value="'+esc(state.agentRouterModel || "gpt-5.5")+'">' +
+      '<div class="hint">Uses https://co.agentrouter.org/v1. The key stays on this device and is never committed to the app.</div></div>' +
       '<div class="field" id="s-gemini-key-container" style="'+(state.scanProvider==="gemini"?"":"display:none")+'">' +
       '<label class="micro" for="s-gemini-key">Gemini API Key</label>' +
       '<input id="s-gemini-key" type="password" placeholder="AIzaSy…" autocomplete="off" value="'+esc(state.geminiApiKey)+'"></div>' +
@@ -2997,7 +3007,7 @@
       '<label class="micro" for="s-model">Claude Model</label><select id="s-model">'+modelOpts+'</select></div>' +
       
       '<button class="btn" id="s-scan-save">Save scanning settings</button>' +
-      '<div class="hint">Keys are stored only on this phone and never uploaded to any backend. Get a Gemini key for free at aistudio.google.com.</div></div>' +
+      '<div class="hint">Keys are stored only on this phone and sent directly to the selected AI provider when you scan a receipt. Never put a key in GitHub.</div></div>' +
 
       '<div class="panel"><h3>'+IC.share+'Put it on your home screen</h3>' +
       '<p>In Safari tap the <b>Share</b> button, then <b>Add to Home Screen</b>. Weekend Wallet opens full-screen like a normal app — your data stays on this phone.</p></div>' +
@@ -3155,6 +3165,48 @@
     });
   }
 
+  function scanWithAgentRouter(dataUrl){
+    var b64 = dataUrl.split(",")[1];
+    var catIds = PICK_CATS.map(function(c){ return c.id; });
+    return fetch("https://co.agentrouter.org/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": "Bearer " + state.agentRouterApiKey
+      },
+      body: JSON.stringify({
+        model: state.agentRouterModel || "gpt-5.5",
+        max_tokens: 300,
+        temperature: 0,
+        messages: [
+          { role: "system", content: "You extract structured data from receipt photos. Return ONLY one valid JSON object with no markdown." },
+          { role: "user", content: [
+            { type: "text", text: "Extract the final total actually paid after tax/tip, merchant name, purchase date, and best category from this receipt. Category must be one of: "+catIds.join(", ")+". Use amount as a number or null, merchant as a string or null, date as YYYY-MM-DD or null. If this is not a receipt or the total is unreadable, set amount to null. Return exactly: {\"amount\":number|null,\"merchant\":string|null,\"category\":string|null,\"date\":string|null}." },
+            { type: "image_url", image_url: { url: "data:image/jpeg;base64," + b64 } }
+          ]}
+        ]
+      })
+    }).then(function(resp){
+      if(!resp.ok) return resp.json().catch(function(){ return {}; }).then(function(err){
+        var msg = err && err.error && err.error.message ? err.error.message : ("AgentRouter API error " + resp.status);
+        throw new Error(msg);
+      });
+      return resp.json();
+    }).then(function(data){
+      var content = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : "";
+      var text = Array.isArray(content) ? content.map(function(part){ return part && part.text ? part.text : ""; }).join("") : String(content || "");
+      text = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+      var parsed = JSON.parse(text);
+      return {
+        amount: (typeof parsed.amount === "number" && parsed.amount > 0) ? parsed.amount : null,
+        merchant: parsed.merchant || null,
+        date: /^\\d{4}-\\d{2}-\\d{2}$/.test(parsed.date || "") ? parsed.date : null,
+        category: CATS.some(function(c){ return c.id === parsed.category; }) ? parsed.category : null,
+        source: "agentrouter"
+      };
+    });
+  }
+
   function scanWithGemini(dataUrl){
     var b64 = dataUrl.split(",")[1];
     var catIds = PICK_CATS.map(function(c){ return c.id; });
@@ -3208,6 +3260,12 @@
   }
 
   function scanReceipt(dataUrl){
+    if(state.scanProvider === "agentrouter" && state.agentRouterApiKey){
+      return scanWithAgentRouter(dataUrl).catch(function(err){
+        toast("AgentRouter scan failed — trying free scan");
+        return scanWithTesseract(dataUrl);
+      });
+    }
     if(state.scanProvider === "gemini" && state.geminiApiKey){
       return scanWithGemini(dataUrl).catch(function(err){
         toast("Gemini scan failed — trying free scan");
@@ -3274,7 +3332,8 @@
       s.textContent = "Tap to retake";
     }else{
       t.textContent = "Snap the receipt";
-      s.textContent = state.apiKey ? "Claude reads it — even handwriting"
+      s.textContent = state.agentRouterApiKey ? "AgentRouter reads it — AI receipt scan"
+                                   : state.apiKey ? "Claude reads it — even handwriting"
                                    : "Best on printed receipts — Claude scan reads handwriting";
     }
   }
@@ -4014,6 +4073,7 @@
       if(sProvider){
         sProvider.addEventListener("change", function(){
           var prov = this.value;
+          $("#s-agentrouter-container").style.display = prov === "agentrouter" ? "" : "none";
           $("#s-gemini-key-container").style.display = prov === "gemini" ? "" : "none";
           $("#s-claude-key-container").style.display = prov === "claude" ? "" : "none";
           $("#s-claude-model-container").style.display = prov === "claude" ? "" : "none";
@@ -4021,11 +4081,14 @@
       }
       $("#s-scan-save").addEventListener("click", function(){
         state.scanProvider = $("#s-provider").value;
+        state.agentRouterApiKey = $("#s-agentrouter-key").value.trim();
+        state.agentRouterModel = $("#s-agentrouter-model").value.trim() || "gpt-5.5";
         state.geminiApiKey = $("#s-gemini-key").value.trim();
         state.apiKey = $("#s-claude-key").value.trim();
         state.scanModel = $("#s-model").value;
         save();
         var msg = state.scanProvider === "free" ? "Using free on-phone scanning"
+                : state.scanProvider === "agentrouter" ? "AgentRouter AI scanning is on"
                 : state.scanProvider === "gemini" ? "Gemini scanning is on"
                 : "Claude scanning is on";
         toast(msg);
@@ -4066,6 +4129,7 @@
             if(importPaydayEnd < importPayday) importPaydayEnd = importPayday;
             state = { setup:true, budget:+d.budget||0, currency:d.currency||"USD",
                       expenses:cleanExpenses(d.expenses), apiKey:state.apiKey, geminiApiKey:state.geminiApiKey,
+                      agentRouterApiKey:state.agentRouterApiKey, agentRouterModel:state.agentRouterModel,
                       scanProvider:d.scanProvider||state.scanProvider,
                       scanModel:d.scanModel||state.scanModel,
                       salary:+d.salary||0,
@@ -4100,7 +4164,7 @@
         if(!window.confirm("Erase every expense, receipt photo, loan, goal, and setting from this device?")){
           wipeArmed = false; this.textContent = "Erase all data"; return;
         }
-        state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", scanProvider:"free", scanModel:"claude-opus-4-8",
+        state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", agentRouterApiKey:"", agentRouterModel:"gpt-5.5", scanProvider:"free", scanModel:"claude-opus-4-8",
                   salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
