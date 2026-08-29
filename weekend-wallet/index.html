@@ -21,7 +21,7 @@
     --accent:#e89e24; --accent-deep:#8a5a00; --on-accent:#241b08;
     --good:#006300; --warn:#b97900; --bad:#d03b3b;
     --c-food:#eda100; --c-drinks:#2a78d6; --c-out:#4a3aa7;
-    --c-transport:#1baf7a; --c-shop:#e34948; --c-other:#008300; --c-missing:#7a7391;
+    --c-transport:#1baf7a; --c-shop:#e34948; --c-other:#008300; --c-missing:#7a7391; --spotify:#138a43;
     --shadow:0 10px 30px rgba(35,32,48,.12);
     --sheet-shadow:0 -18px 50px rgba(35,32,48,.22);
   }
@@ -33,7 +33,7 @@
       --accent:#f2a93b; --accent-deep:#f2a93b; --on-accent:#241b08;
       --good:#0ca30c; --warn:#fab219; --bad:#e66767;
       --c-food:#c98500; --c-drinks:#3987e5; --c-out:#9085e9;
-      --c-transport:#199e70; --c-shop:#e66767; --c-other:#008300; --c-missing:#9a92b4;
+      --c-transport:#199e70; --c-shop:#e66767; --c-other:#008300; --c-missing:#9a92b4; --spotify:#1ed760;
       --shadow:0 10px 30px rgba(0,0,0,.4);
       --sheet-shadow:0 -18px 50px rgba(0,0,0,.55);
     }
@@ -42,7 +42,10 @@
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
   html,body{margin:0; padding:0}
   body{
-    background:var(--bg); color:var(--ink);
+    background:
+      radial-gradient(circle at 92% -8%, color-mix(in srgb, var(--accent) 10%, transparent) 0, transparent 29rem),
+      var(--bg);
+    background-attachment:fixed; color:var(--ink);
     font-family:-apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
     font-size:16px; line-height:1.45;
     min-height:100dvh;
@@ -58,7 +61,7 @@
   }
   ::placeholder{color:var(--ink3)}
 
-  #shell{max-width:480px; margin:0 auto; padding:0 16px 120px; min-height:100dvh}
+  #shell{max-width:480px; margin:0 auto; padding:0 16px calc(136px + env(safe-area-inset-bottom)); min-height:100dvh}
 
   .topbar{display:flex; align-items:center; justify-content:space-between; padding:20px 2px 6px}
   .brand{display:flex; align-items:center; gap:10px}
@@ -289,31 +292,107 @@
   .btn.danger{color:var(--bad)}
   .hint{font-size:12.5px; color:var(--ink3); margin-top:8px; line-height:1.5}
 
+  /* Plan — a calmer, card-led hierarchy based on the generated redesign. */
+  .plan-budget-panel{
+    position:relative; overflow:hidden; padding:20px; border-radius:24px;
+    background:linear-gradient(145deg, color-mix(in srgb, var(--card2) 82%, var(--card)), var(--card));
+    box-shadow:0 16px 38px rgba(10,8,26,.18);
+  }
+  .plan-budget-panel::after{
+    content:""; position:absolute; width:170px; height:170px; right:-92px; top:-92px;
+    border-radius:50%; pointer-events:none;
+    background:radial-gradient(circle, color-mix(in srgb, var(--accent) 18%, transparent), transparent 69%);
+  }
+  .plan-budget-panel > *{position:relative; z-index:1}
+  .plan-budget-head{display:flex; align-items:flex-start; gap:13px; margin-bottom:18px}
+  .plan-budget-icon{
+    display:grid; place-items:center; flex:none; width:48px; height:48px; border-radius:16px;
+    color:var(--accent-deep); background:color-mix(in srgb, var(--accent) 14%, var(--card2));
+    border:1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  }
+  .plan-budget-icon svg{width:22px; height:22px}
+  .plan-budget-panel h3{font-size:19px; letter-spacing:-.01em; margin:1px 0 5px}
+  .plan-budget-panel .plan-budget-copy{font-size:14px; line-height:1.55; margin:0; max-width:38ch}
+  .plan-budget-field{margin-bottom:12px}
+  .plan-budget-field input{
+    min-height:58px; border-radius:16px; padding:14px 16px; font-size:21px; font-weight:650;
+    background:color-mix(in srgb, var(--card2) 88%, var(--card));
+  }
+  .plan-budget-panel .btn{min-height:54px; border-radius:16px}
+  .plan-budget-panel .btn.primary{font-size:16px; box-shadow:0 9px 24px rgba(232,158,36,.22)}
+  .plan-budget-actions{display:grid; gap:9px}
+  .plan-budget-panel .hint{margin:12px 2px 0}
+
+  .commitment-list{display:grid; gap:10px}
+  .commitment-card{
+    border:1px solid var(--line); border-radius:20px; padding:16px; gap:13px;
+    background:linear-gradient(145deg, color-mix(in srgb, var(--card2) 35%, var(--card)), var(--card));
+    box-shadow:0 10px 24px rgba(10,8,26,.10);
+  }
+  .commitment-card:last-child{border-bottom:1px solid var(--line)}
+  .commitment-card:active{background:var(--card2); transform:scale(.99)}
+  .commitment-card.loan-row{border-color:color-mix(in srgb, var(--bad) 25%, var(--line))}
+  .commitment-card .ic-tile{width:48px; height:48px; border-radius:16px}
+  .commitment-card .ttl{font-size:17px; letter-spacing:-.01em}
+  .commitment-card .subline{font-size:12.5px; line-height:1.45; margin-top:2px}
+  .commitment-card .amt{font-size:17px; text-align:right}
+  .commitment-card .amt small{font-size:11px}
+  .sec-total{white-space:nowrap; padding-left:12px; text-align:right}
+
+  .loan-progress{
+    margin:14px 0; padding:15px; border-radius:18px;
+    background:color-mix(in srgb, var(--card2) 72%, var(--card)); border:1px solid var(--line);
+  }
+  .loan-progress-top{display:flex; align-items:flex-start; justify-content:space-between; gap:12px}
+  .loan-progress-title{font-size:14px; font-weight:800}
+  .loan-progress-state{font-size:13px; font-weight:800; text-align:right}
+  .loan-progress-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px}
+  .loan-progress-stat{padding:11px 12px; border-radius:14px; background:var(--card); border:1px solid var(--line)}
+  .loan-progress-stat span{display:block; color:var(--ink3); font-size:10px; font-weight:700; letter-spacing:.09em; text-transform:uppercase}
+  .loan-progress-stat b{display:block; margin-top:3px; font-size:16px}
+  .loan-months{display:grid; gap:8px; margin-top:12px}
+  .loan-month{padding:11px 12px; border-radius:14px; background:var(--card); border:1px solid var(--line)}
+  .loan-month-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px; font-size:13px; font-weight:800}
+  .loan-month-net{font-size:12px}
+  .loan-month-math{margin-top:3px; color:var(--ink3); font-size:11.5px}
+  .loan-draw-item{display:flex; justify-content:space-between; gap:10px; margin-top:7px; padding-top:7px; border-top:1px solid var(--line); font-size:11.5px}
+  .loan-draw-item span:first-child{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink2)}
+  .loan-draw-item b{flex:none}
+
   .tabbar{
     position:fixed; left:0; right:0; bottom:0; z-index:40;
     display:flex; justify-content:center;
-    padding:0 16px calc(12px + env(safe-area-inset-bottom));
+    padding:0 14px calc(10px + env(safe-area-inset-bottom));
     pointer-events:none;
   }
   .tabbar-inner{
     pointer-events:auto; display:flex; align-items:center; gap:4px;
-    background:var(--card); border:1px solid var(--line); border-radius:22px;
-    padding:6px; box-shadow:var(--shadow); width:100%; max-width:448px;
+    background:color-mix(in srgb, var(--card) 90%, transparent); border:1px solid color-mix(in srgb, var(--line) 82%, transparent); border-radius:26px;
+    padding:7px; box-shadow:0 18px 46px rgba(8,6,23,.38); width:100%; max-width:448px;
+    -webkit-backdrop-filter:blur(18px); backdrop-filter:blur(18px);
   }
   .tab{
     flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
-    padding:8px 4px; border-radius:16px; color:var(--ink2); font-size:11px; font-weight:700;
+    min-height:54px; justify-content:center; padding:7px 4px; border-radius:18px; color:var(--ink2); font-size:11px; font-weight:700;
     letter-spacing:.04em;
   }
   .tab svg{width:22px; height:22px}
-  .tab.active{color:var(--accent-deep); background:var(--card2)}
+  .tab.active{color:var(--accent-deep); background:color-mix(in srgb, var(--accent) 10%, var(--card2))}
   .addbtn{
-    flex:none; width:56px; height:56px; border-radius:19px; background:var(--accent);
+    flex:none; width:58px; height:58px; border-radius:20px; background:var(--accent);
     color:var(--on-accent); display:grid; place-items:center; margin:0 4px;
     box-shadow:0 6px 18px rgba(232,158,36,.45);
   }
   .addbtn svg{width:26px; height:26px}
   .addbtn:active{transform:scale(.94)}
+
+  @media (max-width:370px){
+    #shell{padding-left:12px; padding-right:12px}
+    .plan-budget-panel{padding:17px}
+    .commitment-card{padding:14px 12px; gap:10px}
+    .commitment-card .amt{font-size:15px}
+    .tabbar{padding-left:10px; padding-right:10px}
+  }
 
   .cat-breakdown{min-width:0}
   @media (max-width:380px){
@@ -321,6 +400,53 @@
     .cat-breakdown .donut-container{align-self:center}
     .cat-breakdown .cat-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:8px}
   }
+
+  /* v6 money-confidence cards: the home screen answers “what can I spend?”
+     and “is the debt actually falling?” before showing the activity feed. */
+  .safe-card,.debt-card{
+    margin-top:12px; border-radius:24px; padding:18px; overflow:hidden; position:relative;
+    box-shadow:0 16px 34px rgba(10,8,26,.16);
+  }
+  .safe-card{background:linear-gradient(145deg, color-mix(in srgb, var(--accent) 17%, var(--card)), var(--card)); border:1px solid color-mix(in srgb, var(--accent) 34%, var(--line))}
+  .safe-card::after{content:""; position:absolute; width:190px; height:190px; right:-105px; top:-105px; border-radius:50%; background:radial-gradient(circle, color-mix(in srgb, var(--accent) 34%, transparent), transparent 70%); pointer-events:none}
+  .safe-card > *,.debt-card > *{position:relative; z-index:1}
+  .safe-card-top,.debt-card-head{display:flex; align-items:flex-start; justify-content:space-between; gap:14px}
+  .safe-card-top > svg{width:30px; height:30px; color:var(--accent-deep); flex:none}
+  .safe-amount{font-size:43px; line-height:1; letter-spacing:-.045em; margin-top:7px}
+  .safe-card p,.debt-card p{margin:5px 0 0; color:var(--ink2); font-size:13px}
+  .safe-stats,.debt-card-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:16px}
+  .safe-stats > div,.debt-card-grid > div{background:color-mix(in srgb, var(--card) 72%, transparent); border:1px solid color-mix(in srgb, var(--line) 82%, transparent); border-radius:14px; padding:10px 12px}
+  .safe-stats span,.debt-card-grid span{display:block; color:var(--ink3); font-size:10px; text-transform:uppercase; letter-spacing:.08em; font-weight:700}
+  .safe-stats b,.debt-card-grid b{display:block; margin-top:3px; font-size:15px}
+  .safe-insight,.debt-streak{display:flex; align-items:flex-start; gap:9px; margin-top:10px; padding:11px 12px; border-radius:14px; background:color-mix(in srgb, var(--card2) 75%, transparent); color:var(--ink2); font-size:12px; line-height:1.45}
+  .safe-insight > svg,.debt-streak > svg{width:17px; height:17px; color:var(--good); flex:none; margin-top:1px}
+  .safe-insight b{color:var(--ink); font-size:12.5px}
+  .safe-card-foot{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:13px}
+  .safe-status{color:var(--good); font-size:11.5px; font-weight:800}
+  .safe-status.bad{color:var(--bad)}
+  .safe-card-foot button{background:var(--accent); color:var(--on-accent); border-radius:999px; padding:9px 13px; font-size:12px; font-weight:800; white-space:nowrap}
+  .debt-card{background:linear-gradient(145deg, color-mix(in srgb, var(--bad) 9%, var(--card)), var(--card)); border:1px solid color-mix(in srgb, var(--bad) 25%, var(--line))}
+  .debt-card h2{margin:6px 0 0; font-size:20px; letter-spacing:-.02em}
+  .debt-balance{font-size:24px; font-weight:850; letter-spacing:-.03em; text-align:right}
+  .debt-card-grid{grid-template-columns:1fr 1fr 1fr; margin-top:15px}
+  .debt-card-grid > div:last-child{grid-column:auto}
+  .debt-card-grid b{font-size:13px}
+  .debt-bad{color:var(--bad); font-weight:800}.debt-good{color:var(--good); font-weight:800}.debt-neutral{color:var(--warn); font-weight:800}
+  .debt-streak{margin-top:9px}
+  .debt-card .btn{margin-top:12px; background:color-mix(in srgb, var(--bad) 10%, var(--card2)); border-color:color-mix(in srgb, var(--bad) 25%, var(--line)); color:var(--ink)}
+  .funding-expense,.funding-math,.funding-preview{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 14px; border-radius:16px; background:var(--card2); border:1px solid var(--line)}
+  .funding-expense b{display:block; margin-top:3px; font-size:16px}.funding-expense > strong{font-size:20px}
+  .funding-math{margin-top:8px; background:var(--card);}
+  .funding-math > div{min-width:0}.funding-math span,.funding-preview span{display:block; color:var(--ink3); font-size:11px; text-transform:uppercase; letter-spacing:.07em; font-weight:700}.funding-math b,.funding-preview b{display:block; margin-top:2px; font-size:16px}.funding-shortfall{color:var(--bad)}
+  .funding-preview{margin:0 0 8px; border-color:color-mix(in srgb, var(--bad) 24%, var(--line))}
+  .funding-note{display:flex; align-items:flex-start; gap:8px; margin:10px 0 14px; padding:10px 12px; border-radius:13px; background:color-mix(in srgb, var(--good) 9%, var(--card2)); color:var(--ink2); font-size:12.5px; line-height:1.45}
+  .funding-note svg{width:16px; height:16px; color:var(--good); flex:none; margin-top:1px}.funding-note-warn{background:color-mix(in srgb, var(--bad) 9%, var(--card2)); color:var(--ink)}
+  .funding-people{margin:-4px 0 8px}
+  .debt-hero{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:15px; background:var(--card2); border:1px solid var(--line); border-radius:17px}.debt-hero strong{font-size:30px; letter-spacing:-.04em}.debt-hero > span:last-child{color:var(--ink2); font-size:13px; font-weight:700}
+  .debt-chart-legend{display:flex; gap:16px; color:var(--ink2); font-size:11px; margin:16px 2px 7px}.debt-chart-legend i{display:inline-block; width:8px; height:8px; border-radius:3px; margin-right:4px}.borrow-key{background:var(--bad)}.paid-key{background:var(--good)}
+  .debt-chart{height:126px; display:flex; align-items:stretch; justify-content:space-between; gap:6px; padding:12px 8px 0; border-bottom:1px solid var(--line); background:linear-gradient(to top, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px); background-size:100% 33.33%}
+  .debt-chart-col{display:flex; flex:1; min-width:0; flex-direction:column; justify-content:flex-end; align-items:center; gap:6px}.debt-chart-col > span{font-size:9px; color:var(--ink3); white-space:nowrap}.debt-bars{height:92px; display:flex; align-items:flex-end; gap:3px}.debt-bars i,.debt-bars b{display:block; width:9px; min-height:0; border-radius:4px 4px 2px 2px}.debt-bars i{background:var(--bad)}.debt-bars b{background:var(--good)}
+  .debt-plan{margin-top:16px; padding:13px 14px; border-radius:16px; background:var(--card2); border:1px solid var(--line)}.debt-plan p{margin:5px 0 10px}.debt-plan-row{display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-top:1px solid var(--line); font-size:12.5px}.debt-plan-row b{color:var(--accent-deep); white-space:nowrap}
 
   .backdrop{
     position:fixed; inset:0; background:rgba(12,10,24,.55); z-index:60;
@@ -439,13 +565,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=5.5"></script>
+<script src="scan.js?v=6.0"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "5.5";
+  var APP_VERSION = "6.0";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -485,6 +611,7 @@
     {id:"claude-haiku-4-5", label:"Cheaper & faster — Claude Haiku 4.5"}
   ];
 
+  var ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
   var state = load();
   state.expenses = cleanExpenses(state.expenses);
   cleanRows();
@@ -533,7 +660,6 @@
      One row without a date used to be saved and then throw on the next render,
      leaving a white screen that survived every reload. Coerce what we can and
      drop what we can't. */
-  var ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
   function cleanExpenses(list){
     if(!Array.isArray(list)) return [];
     return list.filter(function(e){
@@ -545,20 +671,32 @@
                note: typeof e.note === "string" ? e.note : "",
                date: e.date, photo: safePhoto(e.photo) || null,
                loanId: typeof e.loanId === "string" ? e.loanId : "",
-               loanAdded: +e.loanAdded > 0 ? Math.round((+e.loanAdded)*100)/100 : 0 };
+               loanAdded: +e.loanAdded > 0 ? Math.round((+e.loanAdded)*100)/100 : 0,
+               fundingType: e.fundingType === "person" ? "person" : "",
+               fundingPersonId: typeof e.fundingPersonId === "string" ? e.fundingPersonId : "",
+               fundingPersonName: typeof e.fundingPersonName === "string" ? e.fundingPersonName : "",
+               fundingAmount: +e.fundingAmount > 0 ? Math.round((+e.fundingAmount)*100)/100 : 0,
+               fundingLogId: typeof e.fundingLogId === "string" ? e.fundingLogId : "" };
     });
   }
   /* the rest of the shapes, coerced in place */
   function cleanRows(){
     state.commitments = (state.commitments||[]).filter(function(c){ return c && typeof c === "object"; })
       .map(function(c){
+      var draws = Array.isArray(c.draws) ? c.draws.filter(function(d){
+        return d && typeof d === "object" && +d.amount > 0 && ISO_RE.test(String(d.date || ""));
+      }).map(function(d){
+        return { id:d.id || uid(), ts:+d.ts || 0, date:String(d.date),
+                 amount:Math.round((+d.amount)*100)/100, note:String(d.note || "Borrowing"),
+                 balanceApplied:d.balanceApplied === true };
+      }) : [];
       return { id: c.id || uid(), name: String(c.name || "Bill"),
                  amount: +c.amount || 0, kind: c.kind === "loan" ? "loan" : "sub",
                  due: (+c.due >= 1 && +c.due <= 31) ? +c.due : 0,
                  remaining: +c.remaining || 0,
                  coverShortfall: c.kind === "loan" && (c.coverShortfall === true ||
                    (c.coverShortfall == null && String(c.name || "").trim().toLowerCase() === "dad")),
-                 paid: (c.paid && typeof c.paid === "object") ? c.paid : {} };
+                 paid: (c.paid && typeof c.paid === "object") ? c.paid : {}, draws:draws };
       });
     state.goals = (state.goals||[]).filter(function(g){ return g && typeof g === "object"; })
       .map(function(g){
@@ -570,7 +708,7 @@
         var log = Array.isArray(d.log) ? d.log.filter(function(l){
           return l && isFinite(+l.amt) && (l.dir === "b" || l.dir === "r");
         }).map(function(l){
-          return { ts: +l.ts || 0, amt: +l.amt, dir: l.dir, note: String(l.note || ""),
+          return { id: l.id || uid(), ts: +l.ts || 0, amt: +l.amt, dir: l.dir, note: String(l.note || ""),
                    bumped: +l.bumped || 0 };
         }) : [];
         return { id: d.id || uid(), name: String(d.name || "Someone"),
@@ -642,6 +780,7 @@
     return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
   }
   function fromIso(s){ var p = s.split("-"); return new Date(+p[0], +p[1]-1, +p[2]); }
+  function expenseDateTs(d){ return fromIso(d).getTime() + 12*60*60*1000; }
 
   /* the Friday that anchors the weekend a given date belongs to.
      Fri/Sat/Sun -> that weekend; Mon–Thu -> the weekend just finished */
@@ -715,9 +854,11 @@
     return d;
   }
   /* dir 'b' = they gave me money (my debt grows), 'r' = I gave them money */
-  function ledgerAdd(d, dir, amt, note){
+  function ledgerAdd(d, dir, amt, note, atTs){
     d.balance = Math.round((d.balance + (dir==="b" ? amt : -amt))*100)/100;
-    d.log.push({ ts: Date.now(), amt: amt, dir: dir, note: note || "" });
+    var log = { id:uid(), ts: atTs || Date.now(), amt: amt, dir: dir, note: note || "" };
+    d.log.push(log);
+    return log;
   }
   function balanceLabel(d){
     if(d.balance > 0) return 'you owe <b class="money" style="color:var(--bad)">'+fmt(d.balance)+'</b>';
@@ -725,12 +866,7 @@
     return '<b style="color:var(--good)">all settled</b>';
   }
   function borrowedThisMonth(){
-    var start = new Date(); start.setDate(1); start.setHours(0,0,0,0);
-    var t = start.getTime(), sum = 0;
-    state.debts.forEach(function(d){
-      (d.log||[]).forEach(function(l){ if(l.dir==="b" && l.ts >= t) sum += l.amt; });
-    });
-    return sum;
+    return ledgerFlowSince(monthStartIso()).borrowed;
   }
   /* only offer to sweep money you really still have — the old version could
      "save" the unspent part of a fixed weekend budget while the actual pool
@@ -782,6 +918,7 @@
     banknote:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5h.01M18 14.5h.01"/></svg>',
     bank:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9 12 4l8.5 5v1.5h-17V9Z"/><path d="M5.5 10.5V17M9.8 10.5V17M14.2 10.5V17M18.5 10.5V17M3.5 19.5h17"/></svg>',
     repeat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11V9.5A3.5 3.5 0 0 1 7 6h13.5M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v1.5A3.5 3.5 0 0 1 17 18H3.5"/></svg>',
+    spotify:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M7.2 9.2c3.4-1 7.4-.7 10.2.8M7.8 12.3c2.9-.8 6.4-.5 8.9.8M8.5 15.2c2.3-.6 5-.4 7 .6"/></svg>',
     target:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.8"/><circle cx="12" cy="12" r="1.2"/></svg>',
     bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9Z"/><path d="M10 19.5a2.2 2.2 0 0 0 4 0"/></svg>',
     receipt:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5h12V21l-2.4-1.6L13.2 21l-2.4-1.6L8.4 21 6 19.4V2.5Z"/><path d="M9.5 7h5M9.5 10.5h5M9.5 14h3"/></svg>',
@@ -808,9 +945,13 @@
   function catTile(c, size){
     return '<span class="'+(size==="big"?"exp-thumb":"ic-tile")+'" style="color:var('+c.v+'); background:color-mix(in srgb, var('+c.v+') 15%, var(--card2))">'+catIcon(c.id)+'</span>';
   }
-  function kindTile(kind){
-    var v = kind==="loan" ? "--bad" : "--c-drinks";
-    return '<span class="ic-tile" style="color:var('+v+'); background:color-mix(in srgb, var('+v+') 14%, var(--card2))">'+(kind==="loan"? IC.bank : IC.repeat)+'</span>';
+  function kindTile(commitment){
+    var kind = typeof commitment === "string" ? commitment : commitment.kind;
+    var name = typeof commitment === "string" ? "" : String(commitment.name || "").toLowerCase();
+    var spotify = kind !== "loan" && name.indexOf("spotify") !== -1;
+    var v = kind === "loan" ? "--bad" : spotify ? "--spotify" : "--c-drinks";
+    var icon = kind === "loan" ? IC.bank : spotify ? IC.spotify : IC.repeat;
+    return '<span class="ic-tile" style="color:var('+v+'); background:color-mix(in srgb, var('+v+') 14%, var(--card2))">'+icon+'</span>';
   }
   function emptyBox(icon, html){
     return '<div class="empty">'+icon+html+'</div>';
@@ -914,6 +1055,97 @@
     return h;
   }
 
+  function monthOffsetKey(mk, offset){
+    var d = fromIso(mk+"-01"); d.setMonth(d.getMonth()+offset); return iso(d).slice(0,7);
+  }
+  function debtSnapshot(){
+    var loans = state.commitments.filter(function(c){ return c.kind === "loan"; });
+    if(!loans.length) return null;
+    var c = shortfallLoan() || loans[0], now = loanMonthStat(c, monthKey());
+    var recentAdded = 0;
+    for(var i=0;i<3;i++) recentAdded += loanMonthStat(c, monthOffsetKey(monthKey(), -i)).added;
+    var monthlyNet = Math.round((+c.amount - recentAdded/3)*100)/100;
+    var latest = null;
+    loanAdditionItems(c).forEach(function(it){ if(!latest || it.date > latest) latest = it.date; });
+    var noBorrowDays = null;
+    if(latest){ noBorrowDays = Math.max(0, Math.floor((fromIso(todayIso()).getTime()-fromIso(latest).getTime())/86400000)); }
+    var chart = [];
+    for(var j=-5;j<=0;j++){
+      var mk = monthOffsetKey(monthKey(), j), row = loanMonthStat(c, mk);
+      chart.push({ mk:mk, added:row.added, paid:row.paid, net:row.net });
+    }
+    return { loan:c, now:now, chart:chart, monthlyNet:monthlyNet, noBorrowDays:noBorrowDays,
+             remaining:Math.max(+c.remaining||0,0) };
+  }
+  function debtFreeLabel(s){
+    if(!s || s.remaining <= 0) return "Debt cleared";
+    if(s.monthlyNet <= 0) return "Not shrinking yet";
+    return "≈ "+Math.max(Math.ceil(s.remaining/s.monthlyNet),1)+" months";
+  }
+  function safeSpendSnapshot(){
+    var split = rateSplit();
+    if(!split) return null;
+    var daily = autoDailyBudget(), spent = spentOn(todayIso());
+    var week = 0, n = Math.min(7, split.days);
+    for(var i=0;i<n;i++){
+      var d = new Date(); d.setDate(d.getDate()+i);
+      week += isWeekendDay(iso(d)) ? split.weekend : split.weekday;
+    }
+    return { daily:Math.max(daily,0), spent:spent, left:Math.max(Math.round((daily-spent)*100)/100,0),
+             over:Math.max(Math.round((spent-daily)*100)/100,0), week:Math.max(Math.round(week*100)/100,0) };
+  }
+  function safeSpendCard(){
+    var s = safeSpendSnapshot();
+    if(!s) return "";
+    var status = s.over > 0 ? '<span class="safe-status bad">'+fmt(s.over)+' over today’s guardrail</span>'
+      : '<span class="safe-status">'+fmt(s.daily)+' daily guardrail</span>';
+    return '<section class="safe-card">'+
+      '<div class="safe-card-top"><div><span class="micro">Safe to spend</span><h2 class="safe-amount money">'+fmt(s.left)+'</h2><p>left for today · after what you already spent</p></div>'+IC.wallet+'</div>'+
+      '<div class="safe-stats"><div><span>Today’s limit</span><b class="money">'+fmt(s.daily)+'</b></div>'+
+      '<div><span>Weekend room</span><b class="money">'+fmt(s.week)+'</b></div></div>'+
+      '<div class="safe-insight"><span>'+IC.check+'</span><div><b>What if I borrow nothing this week?</b><br><span>Stay inside about <strong class="money">'+fmt(s.week)+'</strong> of planned spending and no new shortfall needs to be recorded.</span></div></div>'+
+      '<div class="safe-card-foot">'+status+'<button id="h-protect">Protect today’s limit</button></div></section>';
+  }
+  function debtEscapeCard(){
+    var s = debtSnapshot();
+    if(!s) return "";
+    var movement = s.now.net > 0 ? '<span class="debt-bad">Debt grew '+fmt(s.now.net)+' this month</span>'
+      : s.now.net < 0 ? '<span class="debt-good">Debt fell '+fmt(-s.now.net)+' this month</span>'
+      : '<span class="debt-neutral">No debt change this month</span>';
+    var streak = s.noBorrowDays === null ? "No new borrowing recorded yet" : s.noBorrowDays+" day"+(s.noBorrowDays===1?"":"s")+" without a new draw";
+    return '<section class="debt-card"><div class="debt-card-head"><div><span class="micro">Debt escape</span><h2>'+esc(s.loan.name)+'</h2><p>'+movement+'</p></div><div class="debt-balance money">'+fmt(s.remaining)+'</div></div>'+
+      '<div class="debt-card-grid"><div><span>This month borrowed</span><b class="money">'+fmt(s.now.added)+'</b></div><div><span>Paid back</span><b class="money">'+fmt(s.now.paid)+'</b></div><div><span>Debt-free estimate</span><b>'+debtFreeLabel(s)+'</b></div></div>'+
+      '<div class="debt-streak">'+IC.check+' <span>'+streak+'</span></div><button class="btn" id="h-debt-open">Build an escape plan</button></section>';
+  }
+  function openSafeLimitSheet(){
+    var s = safeSpendSnapshot();
+    if(!s) return;
+    openSheet('<h2>Protect today’s limit</h2><p class="hint" style="margin-top:0">Your safe number is the amount left after today’s spending, using the same remaining-money pool as the Plan screen.</p>'+
+      '<div class="funding-math"><div><span>Safe to spend now</span><b class="money">'+fmt(s.left)+'</b></div><div><span>Do not cross today</span><b class="money">'+fmt(s.daily)+'</b></div></div>'+
+      '<div class="funding-note">Borrowing is never added automatically. If an expense crosses this limit, Weekend Wallet will ask whether to record the missing amount as Dad debt, another person’s debt, or leave it unfunded.</div>'+
+      '<button class="btn primary" id="safe-close">I understand</button>');
+    $("#safe-close").addEventListener("click", closeSheet);
+  }
+  function openDebtEscapeSheet(){
+    var s = debtSnapshot();
+    if(!s) return;
+    var max = Math.max.apply(null, s.chart.map(function(r){ return Math.max(r.added,r.paid); }).concat([s.loan.amount,1]));
+    var bars = s.chart.map(function(r){
+      var label = r.mk === monthKey() ? "Now" : fromIso(r.mk+"-01").toLocaleDateString(undefined,{month:"short"});
+      return '<div class="debt-chart-col"><div class="debt-bars"><i style="height:'+Math.max(r.added/max*100, r.added>0?5:0)+'%" title="Borrowed '+fmt(r.added)+'"></i><b style="height:'+Math.max(r.paid/max*100, r.paid>0?5:0)+'%" title="Paid '+fmt(r.paid)+'"></b></div><span>'+label+'</span></div>';
+    }).join("");
+    var usual = s.monthlyNet > 0 ? 'At the recent pace, your usual payment shrinks debt by about '+fmt(s.monthlyNet)+' per month.' : 'Recent extra borrowing is cancelling out the usual payment — stop new shortfalls first.';
+    var fast = s.monthlyNet > 0 ? Math.max(Math.ceil(s.remaining/(s.monthlyNet+100)),1) : null;
+    openSheet('<h2>Debt escape plan · '+esc(s.loan.name)+'</h2>'+
+      '<div class="debt-hero"><span class="micro">Balance left</span><strong class="money">'+fmt(s.remaining)+'</strong><span>'+debtFreeLabel(s)+'</span></div>'+
+      '<div class="debt-chart-legend"><span><i class="borrow-key"></i> Borrowed</span><span><i class="paid-key"></i> Paid back</span></div><div class="debt-chart">'+bars+'</div>'+
+      '<div class="debt-plan"><div class="micro">The honest plan</div><p>'+usual+'</p><div class="debt-plan-row"><span>Protect the current budget</span><b>'+debtFreeLabel(s)+'</b></div>'+
+      (fast ? '<div class="debt-plan-row"><span>Pay '+fmt(100)+' extra / month</span><b>≈ '+fast+' months</b></div>' : '')+'</div>'+
+      '<div class="funding-note">Every confirmed '+esc(s.loan.name)+'-funded shortfall now appears in this chart. That lets you see whether the balance is actually falling, month by month.</div>'+
+      '<button class="btn primary" id="debt-close">Keep going</button>');
+    $("#debt-close").addEventListener("click", closeSheet);
+  }
+
   function viewHome(){
     var monthName = new Date().toLocaleDateString(undefined,{month:"long"});
     var pm = planMath();
@@ -922,6 +1154,8 @@
     var h = "";
 
     h += setupChecklist();
+    h += safeSpendCard();
+    h += debtEscapeCard();
 
     /* month hero */
     if(state.salary > 0){
@@ -946,11 +1180,18 @@
         (pm.extra ? (pm.extra > 0 ? ' · '+fmt(pm.extra)+' more than usual' : ' · '+fmt(-pm.extra)+' less than usual') : "") +
         '</span>'+paydayChip()+'</div></div>' +
         '</section>';
-      var uncovered = Math.abs(Math.min(mLeft, 0)) - borrowedThisMonth();
-      if(mLeft < 0 && uncovered >= 1){
-        h += '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(Math.abs(mLeft))+'</b> over' +
-          (borrowedThisMonth() > 0 ? ' — <b class="money">'+fmt(uncovered)+'</b> of it not logged yet.' : '. If your dad or a friend covered you, keep track of it.') +
-          '</span><button id="h-borrow" data-amt="'+Math.round(uncovered)+'">Log it</button></div>';
+      var over = Math.abs(Math.min(mLeft, 0));
+      var peopleFunding = borrowedThisMonth();
+      var loanFunding = trackedLoanFunding(monthKey());
+      var uncovered = Math.max(Math.round((over - peopleFunding - loanFunding)*100)/100, 0);
+      if(mLeft < 0){
+        var fundingBits = [];
+        if(loanFunding > 0) fundingBits.push('<b class="money">'+fmt(loanFunding)+'</b> added to loans');
+        if(peopleFunding > 0) fundingBits.push('<b class="money">'+fmt(peopleFunding)+'</b> borrowed from people');
+        h += '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(over)+'</b> over budget' +
+          (fundingBits.length ? ' · '+fundingBits.join(' · ') : '') +
+          (uncovered >= 1 ? ' · <b class="money">'+fmt(uncovered)+'</b> has no funding source recorded.' : ' · funding fully tracked.') +
+          '</span>'+(uncovered >= 1 ? '<button id="h-funding" data-amt="'+Math.round(uncovered)+'">Track it</button>' : '')+'</div>';
       }else if(iOweTotal() > 0 || owedToMeTotal() > 0){
         var bits = [];
         if(iOweTotal() > 0) bits.push('you owe <b class="money">'+fmt(iOweTotal())+'</b> ('+
@@ -1066,7 +1307,7 @@
       h += '<div class="sec"><span class="micro">Coming up</span></div><div class="row-list">';
       up.forEach(function(u){
         var soon = u.days <= 1;
-        h += '<button class="row-item" data-cm="'+esc(u.c.id)+'">' + kindTile(u.c.kind) +
+        h += '<button class="row-item" data-cm="'+esc(u.c.id)+'">' + kindTile(u.c) +
           '<span class="name"><span class="ttl">'+esc(u.c.name)+'</span>' +
           '<span class="subline" style="'+(soon?"color:var(--bad); font-weight:700":"")+'">' +
           (u.days===0? "due today" : u.days===1? "due tomorrow" : "due in "+u.days+" days")+'</span></span>' +
@@ -1498,16 +1739,17 @@
   function expRow(e){
     var c = cat(e.cat);
     var photo = safePhoto(e.photo);
-    var loan = null;
-    if(e.loanAdded > 0) state.commitments.forEach(function(x){ if(x.id === e.loanId) loan = x; });
+    var loan = e.loanAdded > 0 ? loanById(e.loanId) : null;
     var loanLine = e.loanAdded > 0 ? ' · '+esc(loan ? loan.name : "loan")+' covered '+fmt(e.loanAdded) : "";
+    var personLine = e.fundingType === "person" && e.fundingAmount > 0
+      ? ' · '+esc(e.fundingPersonName || "family")+' covered '+fmt(e.fundingAmount) : "";
     var thumb = photo
       ? '<span class="exp-thumb"><img src="'+esc(photo)+'" alt="Receipt"></span>'
       : catTile(c, "big");
     return '<button class="exp" data-exp="'+esc(e.id)+'">' + thumb +
       '<span class="exp-main"><span class="exp-title">'+esc(e.note || c.name)+'</span>' +
       '<span class="exp-sub"><span class="cat-dot" style="background:var('+c.v+')"></span>'+c.name+
-      (photo? " · receipt":"")+loanLine+'</span></span>' +
+      (photo? " · receipt":"")+loanLine+personLine+'</span></span>' +
       '<span class="exp-amt money">'+fmt(e.amount)+'</span></button>';
   }
 
@@ -1853,6 +2095,61 @@
              extra: Math.round((bills - planned)*100)/100,
              savings: savings, left: Math.round((state.salary - bills - savings)*100)/100 };
   }
+  /* Every automatic shortfall lives on its expense. Manual history rows cover
+     older borrowing that was already included in the loan balance. Keeping
+     both sources dated lets us answer the useful question: did the debt shrink
+     this month after new borrowing and the payment are both counted? */
+  function loanAdditionItems(c){
+    var items = [];
+    state.expenses.forEach(function(e){
+      if(e.loanId === c.id && e.loanAdded > 0){
+        items.push({ id:e.id, source:"expense", date:e.date, ts:e.ts||0,
+                     amount:e.loanAdded, note:e.note || cat(e.cat).name });
+      }
+    });
+    (c.draws||[]).forEach(function(d){
+      items.push({ id:d.id, source:"manual", date:d.date, ts:d.ts||0,
+                   amount:d.amount, note:d.note || "Borrowing",
+                   balanceApplied:d.balanceApplied === true });
+    });
+    return items.sort(function(a,b){
+      return a.date === b.date ? (b.ts||0)-(a.ts||0) : (a.date < b.date ? 1 : -1);
+    });
+  }
+  function loanMonthStats(c){
+    var by = {};
+    function row(mk){
+      if(!by[mk]) by[mk] = { mk:mk, added:0, paid:0, net:0, items:[] };
+      return by[mk];
+    }
+    loanAdditionItems(c).forEach(function(it){
+      var r = row(it.date.slice(0,7));
+      r.added += it.amount; r.items.push(it);
+    });
+    Object.keys(c.paid||{}).forEach(function(mk){
+      var p = c.paid[mk];
+      if(p && +p.amt > 0) row(mk).paid = +p.amt;
+    });
+    return Object.keys(by).sort().reverse().map(function(mk){
+      var r = by[mk];
+      r.added = Math.round(r.added*100)/100;
+      r.paid = Math.round(r.paid*100)/100;
+      r.net = Math.round((r.added-r.paid)*100)/100;
+      return r;
+    });
+  }
+  function loanMonthStat(c, mk){
+    var found = null;
+    loanMonthStats(c).some(function(r){ if(r.mk === mk){ found = r; return true; } return false; });
+    return found || { mk:mk, added:0, paid:0, net:0, items:[] };
+  }
+  function trackedLoanFunding(mk){
+    var sum = 0;
+    state.commitments.forEach(function(c){
+      if(c.kind === "loan") sum += loanMonthStat(c, mk).added;
+    });
+    return Math.round(sum*100)/100;
+  }
   function shortfallLoan(){
     var found = null;
     state.commitments.some(function(c){
@@ -1861,11 +2158,45 @@
     });
     return found;
   }
+  function loanById(id){
+    var found = null;
+    state.commitments.forEach(function(c){ if(c.id === id && c.kind === "loan") found = c; });
+    return found;
+  }
   function moneyAvailableBeforeExpense(){
     var available = null;
     if(state.restAmount > 0 && state.restFrom) available = restRemaining();
     else if(state.salary > 0) available = planMath().left - monthSpent() - ledgerFlowSince(monthStartIso()).net;
     return available === null || !isFinite(available) ? null : Math.round(available*100)/100;
+  }
+  function expenseCountsAgainstBudget(e){
+    if(!e || !ISO_RE.test(String(e.date || ""))) return false;
+    if(state.restAmount > 0 && state.restFrom){
+      if(e.date > state.restFrom) return true;
+      return e.date === state.restFrom && (e.ts || 0) >= poolStartTs();
+    }
+    return state.salary > 0 && e.date.slice(0,7) === monthKey();
+  }
+  function candidateCountsAgainstBudget(date){
+    if(!ISO_RE.test(String(date || ""))) return false;
+    if(state.restAmount > 0 && state.restFrom){
+      return date > state.restFrom || date === state.restFrom;
+    }
+    return state.salary > 0 && date.slice(0,7) === monthKey();
+  }
+  function moneyAvailableForCandidate(existing, date){
+    if(!candidateCountsAgainstBudget(date)) return null;
+    var available = moneyAvailableBeforeExpense();
+    if(available === null) return null;
+    if(existing && expenseCountsAgainstBudget(existing)) available += existing.amount;
+    return Math.round(available*100)/100;
+  }
+  function expenseFundingProposal(amount, existing, date){
+    var available = moneyAvailableForCandidate(existing, date);
+    if(available === null) return { available:null, shortfall:0, loan:shortfallLoan() };
+    var shortfall = available > 0 ? Math.max(amount - available, 0) : amount;
+    return { available:Math.round(available*100)/100,
+             shortfall:Math.round(shortfall*100)/100, loan:shortfallLoan() };
   }
   function adjustLoanRemaining(id, delta){
     if(!id || !delta) return null;
@@ -1875,18 +2206,88 @@
     loan.remaining = Math.max(Math.round((+loan.remaining + delta)*100)/100, 0);
     return loan;
   }
-  function applyExpenseShortfall(e){
-    var loan = shortfallLoan();
-    if(!loan) return { loan:null, amount:0 };
-    var available = moneyAvailableBeforeExpense();
-    if(available === null) return { loan:null, amount:0 };
-    var amount = available > 0 ? Math.max(e.amount - available, 0) : e.amount;
-    amount = Math.round(amount*100)/100;
-    if(!(amount > 0)) return { loan:null, amount:0 };
-    loan.remaining = Math.round((+loan.remaining + amount)*100)/100;
-    e.loanId = loan.id;
-    e.loanAdded = amount;
-    return { loan:loan, amount:amount };
+  function findPersonById(id){
+    var found = null;
+    state.debts.forEach(function(d){ if(d.id === id) found = d; });
+    return found;
+  }
+  function removeExpenseFunding(e){
+    if(!e) return;
+    if(e.loanAdded > 0) adjustLoanRemaining(e.loanId, -e.loanAdded);
+    if(e.fundingType === "person" && e.fundingPersonId && e.fundingAmount > 0){
+      var d = findPersonById(e.fundingPersonId), logIndex = -1;
+      if(d){
+        (d.log||[]).forEach(function(l, i){ if(l.id === e.fundingLogId) logIndex = i; });
+        if(logIndex > -1){
+          d.balance = Math.round((d.balance - d.log[logIndex].amt)*100)/100;
+          d.log.splice(logIndex, 1);
+        }
+      }
+    }
+    e.loanId = ""; e.loanAdded = 0;
+    e.fundingType = ""; e.fundingPersonId = ""; e.fundingPersonName = "";
+    e.fundingAmount = 0; e.fundingLogId = "";
+  }
+  function restoreExpenseFunding(e){
+    if(!e) return;
+    if(e.loanAdded > 0) adjustLoanRemaining(e.loanId, e.loanAdded);
+    if(e.fundingType === "person" && e.fundingAmount > 0){
+      var d = findPersonById(e.fundingPersonId) || findOrCreatePerson(e.fundingPersonName || "Family");
+      var log = ledgerAdd(d, "b", e.fundingAmount,
+        "Funding: "+(e.note || cat(e.cat).name), expenseDateTs(e.date));
+      e.fundingPersonId = d.id; e.fundingPersonName = d.name; e.fundingLogId = log.id;
+    }
+  }
+  function applyExpenseFunding(e, funding){
+    if(!funding || funding.type === "none") return { type:"none", amount:0 };
+    var amount = Math.round((+funding.amount || 0)*100)/100;
+    if(!(amount > 0)) return { type:"none", amount:0 };
+    if(funding.type === "loan"){
+      var loan = null;
+      state.commitments.forEach(function(c){ if(c.id === funding.loanId && c.kind === "loan") loan = c; });
+      if(!loan) return null;
+      loan.remaining = Math.round((+loan.remaining + amount)*100)/100;
+      e.loanId = loan.id; e.loanAdded = amount;
+      return { type:"loan", amount:amount, loan:loan };
+    }
+    if(funding.type === "person"){
+      var d = findPersonById(funding.personId) || findOrCreatePerson(funding.personName);
+      var log = ledgerAdd(d, "b", amount, "Funding: "+(e.note || cat(e.cat).name), expenseDateTs(e.date));
+      e.fundingType = "person"; e.fundingPersonId = d.id; e.fundingPersonName = d.name;
+      e.fundingAmount = amount; e.fundingLogId = log.id;
+      return { type:"person", amount:amount, person:d };
+    }
+    return { type:"none", amount:0 };
+  }
+  function commitExpense(candidate, existing, funding){
+    var beforeExpenses = state.expenses.map(function(e){ return Object.assign({}, e); });
+    var beforeBalances = state.commitments.map(function(c){ return { ref:c, remaining:c.remaining }; });
+    var beforeDebts = state.debts.map(function(d){ return { ref:d, balance:d.balance, log:(d.log||[]).slice() }; });
+    var beforeLastCat = state.lastCat;
+    var pos = existing ? state.expenses.indexOf(existing) : -1;
+    try{
+      if(existing) removeExpenseFunding(existing);
+      var e = existing || candidate;
+      e.amount = candidate.amount; e.cat = candidate.cat; e.note = candidate.note;
+      e.date = candidate.date; e.photo = candidate.photo;
+      e.loanId = ""; e.loanAdded = 0; e.fundingType = ""; e.fundingPersonId = "";
+      e.fundingPersonName = ""; e.fundingAmount = 0; e.fundingLogId = "";
+      if(existing){
+        if(pos > -1) state.expenses.splice(pos, 1, e);
+      }else state.expenses.push(e);
+      state.lastCat = e.cat;
+      var applied = applyExpenseFunding(e, funding);
+      if(!applied) throw new Error("funding source disappeared");
+      if(!save({retryWithoutPhoto:e})) throw new Error("storage unavailable");
+      return { ok:true, expense:e, funding:applied };
+    }catch(err){
+      state.expenses = beforeExpenses;
+      beforeBalances.forEach(function(x){ x.ref.remaining = x.remaining; });
+      beforeDebts.forEach(function(x){ x.ref.balance = x.balance; x.ref.log = x.log; });
+      state.debts = beforeDebts.map(function(x){ return x.ref; });
+      state.lastCat = beforeLastCat;
+      return { ok:false, error:err };
+    }
   }
   function daysLeftInMonth(){
     var now = new Date();
@@ -2074,12 +2475,13 @@
     var autoD = autoDailyBudget();
     var rr = restRemaining();
     var freshFrom = state.restFrom && state.restFrom !== todayIso();
-    h += '<div class="panel"><h3>'+IC.home+'Daily budget</h3>' +
-      '<p>Forget the past. Tell me how much money you have from <b>today</b> until the end of the month — including whatever you plan to borrow — and I split it into a daily amount that shrinks itself as you spend.</p>' +
-      '<div class="field"><label class="micro" for="p-rest" style="display:block; margin-bottom:6px">Money for the rest of the month</label>' +
+    h += '<div class="panel plan-budget-panel">' +
+      '<div class="plan-budget-head"><span class="plan-budget-icon">'+IC.wallet+'</span><div><h3>Daily budget</h3>' +
+      '<p class="plan-budget-copy">Tell me how much money you have from <b>today</b> until month-end, including anything you plan to borrow. I will turn it into a daily amount that adjusts as you spend.</p></div></div>' +
+      '<div class="field plan-budget-field"><label class="micro" for="p-rest" style="display:block; margin-bottom:6px">Money for the rest of the month</label>' +
       '<input id="p-rest" type="text" inputmode="decimal" min="0" placeholder="e.g. 1000" value="'+(state.restAmount||"")+'"></div>' +
-      '<button class="btn primary" id="p-rest-save">Set daily budget</button>' +
-      '<div style="height:9px"></div><button class="btn" id="p-cash">'+IC.wallet+'Check my cash</button>' +
+      '<div class="plan-budget-actions"><button class="btn primary" id="p-rest-save">Set daily budget</button>' +
+      '<button class="btn" id="p-cash">'+IC.wallet+'Check my cash</button></div>' +
       (rr !== null
         ? '<div class="hint">You can spend about <b class="money" style="color:var(--ink)">'+fmt(autoD)+'</b> a day — '+
           (rr<0? '<span style="color:var(--bad)">'+fmt(-rr)+' past your '+fmt(state.restAmount)+'</span>' : fmt(rr)+' left of '+fmt(state.restAmount))+
@@ -2089,10 +2491,10 @@
       '</div>';
 
     h += '<div class="sec"><span class="micro">Loan & subscriptions</span>' +
-      '<span class="micro money">'+(state.commitments.length
+      '<span class="micro money sec-total">'+(state.commitments.length
         ? "− "+fmt(m.bills)+(m.extra? " this month" : " / mo") : "")+'</span></div>';
     if(state.commitments.length){
-      h += '<div class="row-list">';
+      h += '<div class="commitment-list">';
       state.commitments.forEach(function(c){
         var ord = c.due===1||c.due===21||c.due===31 ? "st" : c.due===2||c.due===22 ? "nd" : c.due===3||c.due===23 ? "rd" : "th";
         var sub1 = (c.kind==="loan"?"Loan":"Subscription") + (c.due? " · due the "+c.due+ord : "");
@@ -2102,9 +2504,20 @@
           ? '<span class="subline hl money" style="color:'+(diff>0?"var(--bad)":"var(--good)")+'">'+IC.check+
             ' paid '+fmt(p.amt)+' this month'+(diff? ' · '+fmt(Math.abs(diff))+(diff>0? ' more' : ' less')+' than usual' : "")+'</span>'
           : "";
-        h += '<button class="row-item" data-cm="'+esc(c.id)+'">' + kindTile(c.kind) +
+        var progressLine = "";
+        if(c.kind === "loan"){
+          var activity = loanMonthStat(c, monthKey());
+          if(activity.added > 0 || activity.paid > 0){
+            var movement = activity.net > 0 ? 'debt grew '+fmt(activity.net)
+              : activity.net < 0 ? 'debt down '+fmt(-activity.net) : 'no debt change';
+            progressLine = '<span class="subline hl money" style="color:'+
+              (activity.net>0?'var(--bad)':activity.net<0?'var(--good)':'var(--warn)')+'">'+
+              (activity.added>0? '+'+fmt(activity.added)+' borrowed extra · ' : '')+movement+' this month</span>';
+          }
+        }
+        h += '<button class="row-item commitment-card '+(c.kind==="loan"?"loan-row":"subscription-row")+'" data-cm="'+esc(c.id)+'">' + kindTile(c) +
           '<span class="name"><span class="ttl">'+esc(c.name)+'</span>' +
-          '<span class="subline">'+sub1+'</span>' + paidLine +
+          '<span class="subline">'+sub1+'</span>' + paidLine + progressLine +
           (c.coverShortfall ? '<span class="subline hl" style="color:var(--warn)">uncovered spending → this loan</span>' : "") +
           (months? '<span class="subline hl money">'+fmt(c.remaining)+' left · ≈ '+months+' month'+(months>1?"s":"")+' to go</span>' : "")+'</span>' +
           '<span class="amt money">'+fmt(c.amount)+' <small>/mo</small></span></button>';
@@ -2188,6 +2601,106 @@
       '<div class="hint">Some months you give more — put the real amount here and the difference comes off your spending money.</div></div>';
   }
 
+  function previousMonthKey(mk){
+    var d = fromIso(mk+"-01");
+    d.setMonth(d.getMonth()-1);
+    return iso(d).slice(0,7);
+  }
+  function loanProgressHtml(c){
+    if(!c || c.kind !== "loan") return "";
+    var now = loanMonthStat(c, monthKey());
+    var prev = loanMonthStat(c, previousMonthKey(monthKey()));
+    var stateText = now.net > 0 ? 'Debt grew '+fmt(now.net)
+      : now.net < 0 ? 'Debt fell '+fmt(-now.net) : 'No debt change';
+    var stateColor = now.net > 0 ? 'var(--bad)' : now.net < 0 ? 'var(--good)' : 'var(--warn)';
+    var compare = "";
+    if(now.added === 0) compare = 'No extra borrowing this month';
+    else if(prev.added > 0){
+      var delta = Math.round((now.added-prev.added)*100)/100;
+      compare = delta < 0 ? fmt(-delta)+' less borrowing than last month'
+        : delta > 0 ? fmt(delta)+' more borrowing than last month' : 'Borrowing matches last month';
+    }else compare = 'New borrowing this month';
+
+    var rows = loanMonthStats(c).slice(0,12).map(function(r){
+      var label = r.mk === monthKey() ? "This month"
+        : fromIso(r.mk+"-01").toLocaleDateString(undefined,{month:"short",year:"numeric"});
+      var netText = r.net > 0 ? 'Debt +'+fmt(r.net) : r.net < 0 ? 'Debt −'+fmt(-r.net) : 'No change';
+      var netColor = r.net > 0 ? 'var(--bad)' : r.net < 0 ? 'var(--good)' : 'var(--ink3)';
+      var items = r.items.map(function(it){
+        return '<div class="loan-draw-item"><span>'+esc(it.note)+' · '+
+          fromIso(it.date).toLocaleDateString(undefined,{month:"short",day:"numeric"})+
+          (it.source==="manual"?' · history':'')+'</span><b class="money">+'+fmt(it.amount)+'</b></div>';
+      }).join("");
+      return '<div class="loan-month"><div class="loan-month-head"><span>'+label+'</span>'+
+        '<span class="loan-month-net money" style="color:'+netColor+'">'+netText+'</span></div>'+
+        '<div class="loan-month-math money">Borrowed '+fmt(r.added)+' · Paid '+fmt(r.paid)+'</div>'+items+'</div>';
+    }).join("");
+
+    return '<div class="loan-progress"><div class="loan-progress-top"><div><div class="loan-progress-title">Debt progress</div>'+
+      '<div class="hint" style="margin-top:2px">'+compare+'</div></div>'+
+      '<div class="loan-progress-state money" style="color:'+stateColor+'">'+stateText+'</div></div>'+
+      '<div class="loan-progress-grid"><div class="loan-progress-stat"><span>Borrowed extra</span><b class="money" style="color:'+(now.added>0?'var(--bad)':'var(--ink)')+'">'+fmt(now.added)+'</b></div>'+
+      '<div class="loan-progress-stat"><span>Paid back</span><b class="money" style="color:'+(now.paid>0?'var(--good)':'var(--ink)')+'">'+fmt(now.paid)+'</b></div></div>'+
+      (rows ? '<div class="loan-months">'+rows+'</div>' : '<div class="hint">No monthly activity recorded yet.</div>')+
+      '<button class="btn" id="c-add-draw" style="margin-top:12px">+ Record earlier borrowing</button>'+
+      '<div class="hint">Automatic shortfalls appear here by expense. Use “earlier borrowing” only for money already included in this balance.</div></div>';
+  }
+
+  function openLoanDrawSheet(c, prefillAmt){
+    if(!c || c.kind !== "loan") return;
+    var manual = (c.draws||[]).slice().sort(function(a,b){
+      return a.date === b.date ? (b.ts||0)-(a.ts||0) : (a.date < b.date ? 1 : -1);
+    });
+    var rows = manual.map(function(d){
+      return '<button class="row-item" data-draw-remove="'+esc(d.id)+'"><span class="name"><span class="ttl">'+esc(d.note)+'</span>'+
+        '<span class="subline">'+fromIso(d.date).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})+
+        ' · '+(d.balanceApplied?'added to balance':'history only')+'</span></span>'+
+        '<span class="amt money">+'+fmt(d.amount)+'<br><small>remove</small></span></button>';
+    }).join("");
+    openSheet(
+      '<h2>Track borrowing — '+esc(c.name)+'</h2>'+
+      '<p class="hint" style="margin-top:0">Record money borrowed before tracking existed, or a manual loan increase that was not tied to an expense.</p>'+
+      '<div class="field"><label class="micro" for="draw-amount">Amount borrowed</label>'+
+      '<input id="draw-amount" type="text" inputmode="decimal" min="0" value="'+(prefillAmt>0?prefillAmt:"")+'" placeholder="0"></div>'+
+      '<div class="row2"><div><label class="micro" for="draw-date" style="display:block; margin-bottom:6px">Date</label>'+
+      '<input id="draw-date" type="date" value="'+todayIso()+'"></div>'+
+      '<div><label class="micro" for="draw-note" style="display:block; margin-bottom:6px">What was it for?</label>'+
+      '<input id="draw-note" type="text" maxlength="50" placeholder="e.g. PC" value=""></div></div>'+
+      '<label class="checkrow" for="draw-included"><input type="checkbox" id="draw-included" checked>'+
+      '<span><b>Already included in the current loan balance</b><br><span class="hint" style="display:block; margin-top:3px">Keep this checked for older borrowing so Dad’s balance is not increased twice.</span></span></label>'+
+      '<button class="btn primary" id="draw-save" style="margin-top:12px">Save borrowing record</button>'+
+      (rows? '<div class="sec" style="margin-top:22px"><span class="micro">Manual history</span></div><div class="row-list">'+rows+'</div>' : '')+
+      '<button class="btn ghost" id="draw-back" style="margin-top:12px">Back to '+esc(c.name)+'</button>'
+    );
+    $("#draw-save").addEventListener("click", function(){
+      var amount = num($("#draw-amount").value);
+      var date = $("#draw-date").value;
+      var note = $("#draw-note").value.trim() || "Borrowing";
+      var alreadyIncluded = $("#draw-included").checked;
+      if(!(amount > 0)){ toast("Enter the borrowed amount"); return; }
+      if(!ISO_RE.test(date)){ toast("Choose a date"); return; }
+      if(!Array.isArray(c.draws)) c.draws = [];
+      c.draws.push({ id:uid(), ts:Date.now(), date:date, amount:Math.round(amount*100)/100,
+                     note:note, balanceApplied:!alreadyIncluded });
+      if(!alreadyIncluded) c.remaining = Math.round((+c.remaining+amount)*100)/100;
+      save(); render(); openCommitmentSheet(c.id);
+      toast(fmt(amount)+" added to "+c.name+" borrowing history");
+    });
+    $("#draw-back").addEventListener("click", function(){ openCommitmentSheet(c.id); });
+    sheet.querySelectorAll("[data-draw-remove]").forEach(function(b){
+      var armed = false;
+      b.addEventListener("click", function(){
+        if(!armed){ armed = true; b.querySelector("small").textContent = "tap again"; return; }
+        var id = b.getAttribute("data-draw-remove"), draw = null;
+        (c.draws||[]).forEach(function(d){ if(d.id === id) draw = d; });
+        if(!draw) return;
+        if(draw.balanceApplied) c.remaining = Math.max(Math.round((+c.remaining-draw.amount)*100)/100, 0);
+        c.draws = (c.draws||[]).filter(function(d){ return d.id !== id; });
+        save(); render(); openLoanDrawSheet(c, 0); toast("Borrowing record removed");
+      });
+    });
+  }
+
   function openCommitmentSheet(id){
     var c = null;
     if(id){ state.commitments.forEach(function(x){ if(x.id===id) c = x; }); }
@@ -2211,6 +2724,7 @@
       '<div class="hint">Each saved edit updates this — the app shows roughly how many months are left.</div>' +
       '<label class="checkrow" for="c-cover" style="margin-top:10px"><input type="checkbox" id="c-cover"'+(c && c.coverShortfall?" checked":"")+'>' +
       '<span><b>Cover spending shortfalls with this loan</b><br><span class="hint" style="display:block; margin-top:3px">When an expense is more than your available money, add only the missing amount to this loan.</span></span></label></div>' +
+      (c && c.kind==="loan" ? loanProgressHtml(c) : "") +
       (c? payBlock(c) : "") +
       '<button class="btn primary" id="c-save">Save</button>' +
       (c? '<div style="height:10px"></div><button class="btn danger" id="c-del">Remove</button>' : "")
@@ -2233,7 +2747,7 @@
       if(!name){ toast("Give it a name"); return; }
       if(!(amt > 0)){ toast("Enter the monthly amount"); return; }
       if(c){ c.name = name; c.amount = Math.round(amt*100)/100; c.kind = selKind; c.due = due; c.remaining = remaining; c.coverShortfall = coverShortfall; }
-      else state.commitments.push({ id: uid(), name: name, amount: Math.round(amt*100)/100, kind: selKind, due: due, remaining: remaining, coverShortfall: coverShortfall, paid: {} });
+      else state.commitments.push({ id: uid(), name: name, amount: Math.round(amt*100)/100, kind: selKind, due: due, remaining: remaining, coverShortfall: coverShortfall, paid: {}, draws:[] });
       save(); closeSheet(); render();
     });
     if(c && $("#c-pay")){
@@ -2252,6 +2766,9 @@
         save(); closeSheet(); render();
         toast(c.name+" payment removed");
       });
+    }
+    if(c && $("#c-add-draw")){
+      $("#c-add-draw").addEventListener("click", function(){ openLoanDrawSheet(c, 0); });
     }
     if(c){
       var armed = false;
@@ -2979,13 +3496,17 @@
     return Object.keys(freq).sort(function(a,b){ return freq[b]-freq[a]; }).slice(0,8);
   }
 
-  function openAdd(editId){
+  function openAdd(editId, seed){
     var editing = null;
     if(editId){ state.expenses.forEach(function(x){ if(x.id===editId) editing = x; }); }
-    draft = { cat: editing? editing.cat : (state.lastCat || "food"),
-              photo: editing? editing.photo : null,
-              editId: editing? editing.id : null,
-              catManual: !!editing };
+    var source = seed || editing || {};
+    draft = { cat: source.cat || (state.lastCat || "food"),
+              photo: source.photo !== undefined ? source.photo : (editing? editing.photo : null),
+              editId: editing? editing.id : (seed && seed.editId ? seed.editId : null),
+              catManual: seed ? seed.catManual !== false : !!editing,
+              amount: source.amount != null ? source.amount : "",
+              note: source.note || "",
+              date: source.date || todayIso() };
     var chips = PICK_CATS.map(function(c){
       return '<button class="chip'+(c.id===draft.cat?" sel":"")+'" data-cat="'+c.id+'">' +
         '<span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+c.name+'</button>';
@@ -3005,18 +3526,18 @@
       '<span class="s" id="f-photo-s"></span></span></button>' +
       '<div class="amount-wrap"><span class="cur">'+esc(sym)+'</span>' +
       '<input id="f-amount" class="money" type="text" inputmode="decimal" min="0" step="0.01" placeholder="0" autocomplete="off"' +
-      (editing? ' value="'+editing.amount+'"' : "")+'></div>' +
+      (draft.amount !== "" ? ' value="'+esc(draft.amount)+'"' : "")+'></div>' +
       '<div class="qamts" id="f-quicks">'+quicks+'</div>' +
       '<div class="micro" style="margin-bottom:8px">Category</div>' +
       '<div class="chips" id="f-cats">'+chips+'</div>' +
       '<div class="row2">' +
       '<div><label class="micro" for="f-note" style="display:block; margin-bottom:6px">Note</label>' +
       '<input id="f-note" type="text" placeholder="Dinner, taxi…" maxlength="60" list="note-suggestions"' +
-      (editing && editing.note? ' value="'+esc(editing.note)+'"' : "")+'>' +
+      (draft.note? ' value="'+esc(draft.note)+'"' : "")+'>' +
       '<datalist id="note-suggestions">' +
       noteSuggestions().map(function(n){ return '<option value="'+esc(n)+'">'; }).join("")+'</datalist></div>' +
       '<div><label class="micro" for="f-date" style="display:block; margin-bottom:6px">Date</label>' +
-      '<input id="f-date" type="date" value="'+(editing? editing.date : todayIso())+'"></div></div>' +
+      '<input id="f-date" type="date" value="'+esc(draft.date)+'"></div></div>' +
       '<button class="btn primary" id="f-save">'+(editing? "Save changes" : "Save expense")+'</button>'
     );
     setPhotoUi(draft.photo? "done" : "idle");
@@ -3040,67 +3561,115 @@
     $("#f-save").addEventListener("click", saveDraft);
   }
 
+  function signedMoney(n){ return n < 0 ? "−"+fmt(-n) : fmt(n); }
+  function fundingSeed(candidate, existing){
+    return { editId: existing ? existing.id : null, amount:candidate.amount, cat:candidate.cat,
+             note:candidate.note, date:candidate.date, photo:candidate.photo, catManual:true };
+  }
+  function openFundingSheet(candidate, existing, proposal){
+    var loan = proposal.loan;
+    if(!loan && existing && existing.loanId){
+      state.commitments.forEach(function(c){ if(c.id === existing.loanId && c.kind === "loan") loan = c; });
+    }
+    var oldPerson = existing && existing.fundingType === "person" ? existing.fundingPersonName : "";
+    var mode = oldPerson ? "person" : (loan ? "loan" : "person");
+    var people = state.debts.map(function(d){
+      return '<button class="chip'+(d.name===oldPerson?" sel":"")+'" data-fperson="'+esc(d.id)+'">'+IC.person+esc(d.name)+'</button>';
+    }).join("");
+    var options = (loan ? '<button class="chip'+(mode==="loan"?" sel":"")+'" data-funding="loan">'+IC.bank+' '+esc(loan.name)+' loan</button>' : "") +
+      '<button class="chip'+(mode==="person"?" sel":"")+'" data-funding="person">'+IC.person+' Friend / family</button>' +
+      '<button class="chip'+(mode==="none"?" sel":"")+'" data-funding="none">Not funded yet</button>';
+    var verb = existing ? "Save changes" : "Add expense";
+    openSheet(
+      '<h2>Choose how to fund it</h2>' +
+      '<p class="hint" style="margin-top:0">This expense is larger than the money currently available. Nothing is added to any debt until you confirm below.</p>' +
+      '<div class="funding-expense"><div><span class="micro">Expense</span><b>'+esc(candidate.note || cat(candidate.cat).name)+'</b></div><strong class="money">'+fmt(candidate.amount)+'</strong></div>' +
+      '<div class="funding-math"><div><span>Available</span><b class="money">'+signedMoney(proposal.available)+'</b></div>' +
+      '<div><span>Shortfall to fund</span><b class="money funding-shortfall">'+fmt(proposal.shortfall)+'</b></div></div>' +
+      '<div class="micro" style="margin:18px 0 8px">Where should the shortfall go?</div>' +
+      '<div class="chips" id="funding-options">'+options+'</div>' +
+      '<div id="funding-detail"></div>' +
+      '<button class="btn primary" id="funding-confirm">'+verb+' + loan</button>' +
+      '<button class="btn ghost" id="funding-cancel" style="margin-top:10px">Back to expense</button>'
+    );
+    function update(){
+      sheet.querySelectorAll("[data-funding]").forEach(function(b){ b.classList.toggle("sel", b.getAttribute("data-funding")===mode); });
+      var personValue = $("#fund-person") ? $("#fund-person").value : oldPerson;
+      var detail = "";
+      if(mode === "loan"){
+        /* The old credit belongs to this expense. Remove it from the preview
+           before showing the replacement, otherwise editing the same expense
+           appears to borrow it twice. */
+        var balanceBeforeEdit = loan.remaining - (existing && existing.loanAdded > 0 ? existing.loanAdded : 0);
+        detail = '<div class="funding-preview"><span>'+esc(loan.name)+' balance</span><b class="money">'+fmt(balanceBeforeEdit)+' → '+fmt(balanceBeforeEdit + proposal.shortfall)+'</b></div>' +
+          '<div class="funding-note">'+IC.check+' This '+fmt(proposal.shortfall)+' will appear in this month’s Debt progress as extra borrowing.</div>';
+      }else if(mode === "person"){
+        detail = '<div class="field"><label class="micro" for="fund-person">Who is covering it?</label>' +
+          '<input id="fund-person" type="text" maxlength="30" placeholder="Dad, Ahmed…" value="'+esc(personValue)+'"></div>' +
+          (people ? '<div class="chips funding-people">'+people+'</div>' : "") +
+          '<div class="funding-note">The shortfall becomes a dated borrowing entry with this person, attached to the expense.</div>';
+      }else{
+        detail = '<div class="funding-note funding-note-warn">The expense will be saved, but no debt entry will be created. You can fund it later by editing this expense.</div>';
+      }
+      $("#funding-detail").innerHTML = detail;
+      $("#funding-confirm").textContent = mode === "loan" ? verb+" + loan" : mode === "person" ? verb+" + borrowing" : verb+" · leave unfunded";
+      if(mode === "person"){
+        sheet.querySelectorAll("[data-fperson]").forEach(function(b){
+          b.addEventListener("click", function(){
+            var d = findPersonById(b.getAttribute("data-fperson"));
+            if(d && $("#fund-person")){ $("#fund-person").value = d.name; }
+          });
+        });
+      }
+    }
+    sheet.querySelectorAll("[data-funding]").forEach(function(b){
+      b.addEventListener("click", function(){ mode = b.getAttribute("data-funding"); update(); });
+    });
+    update();
+    $("#funding-cancel").addEventListener("click", function(){
+      openAdd(existing ? existing.id : null, fundingSeed(candidate, existing));
+    });
+    $("#funding-confirm").addEventListener("click", function(){
+      var funding = { type:mode, amount:proposal.shortfall };
+      if(mode === "loan") funding.loanId = loan.id;
+      if(mode === "person"){
+        var name = $("#fund-person") && $("#fund-person").value.trim();
+        if(!name){ toast("Choose who covered the shortfall"); return; }
+        var person = null;
+        state.debts.forEach(function(d){ if(d.name.toLowerCase()===name.toLowerCase()) person=d; });
+        funding.personId = person ? person.id : ""; funding.personName = name;
+      }
+      this.disabled = true;
+      var result = commitExpense(candidate, existing, funding);
+      if(!result.ok){ this.disabled = false; toast("Could not save — your money data was not changed"); return; }
+      closeSheet(); render();
+      if(result.funding.type === "loan") toast(verb+" · "+fmt(result.funding.amount)+" added to "+result.funding.loan.name+" debt progress");
+      else if(result.funding.type === "person") toast(verb+" · "+fmt(result.funding.amount)+" borrowed from "+result.funding.person.name);
+      else toast(verb+" · saved without funding");
+    });
+  }
+
   function saveDraft(){
     var amt = num($("#f-amount").value);
     if(!(amt > 0)){ toast("Enter the amount first"); $("#f-amount").focus(); return; }
-    if(draft.editId){
-      var ex = null;
-      state.expenses.forEach(function(x){ if(x.id===draft.editId) ex = x; });
-      if(ex){
-        var old = { amount:ex.amount, cat:ex.cat, note:ex.note, date:ex.date,
-                    photo:ex.photo, loanId:ex.loanId, loanAdded:ex.loanAdded };
-        var pos = state.expenses.indexOf(ex);
-        if(pos > -1) state.expenses.splice(pos, 1);
-        if(old.loanAdded > 0) adjustLoanRemaining(old.loanId, -old.loanAdded);
-        ex.amount = Math.round(amt*100)/100;
-        ex.cat = draft.cat;
-        ex.note = $("#f-note").value.trim();
-        ex.date = $("#f-date").value || ex.date;
-        ex.photo = draft.photo;
-        ex.loanId = "";
-        ex.loanAdded = 0;
-        var coverage = applyExpenseShortfall(ex);
-        if(pos > -1) state.expenses.splice(pos, 0, ex);
-        if(save({retryWithoutPhoto:ex})){
-          toast(coverage.amount > 0
-            ? "Updated · "+fmt(coverage.amount)+" added to "+coverage.loan.name+" loan"
-            : "Updated");
-        }else{
-          if(coverage.amount > 0) adjustLoanRemaining(coverage.loan.id, -coverage.amount);
-          ex.amount = old.amount; ex.cat = old.cat; ex.note = old.note; ex.date = old.date;
-          ex.photo = old.photo; ex.loanId = old.loanId; ex.loanAdded = old.loanAdded;
-          if(old.loanAdded > 0) adjustLoanRemaining(old.loanId, old.loanAdded);
-        }
-      }
-      closeSheet(); render();
-      return;
-    }
+    var existing = null;
+    if(draft.editId) state.expenses.forEach(function(x){ if(x.id===draft.editId) existing = x; });
     var e = {
-      id: uid(), ts: Date.now(),
-      amount: Math.round(amt*100)/100,
-      cat: draft.cat,
-      note: $("#f-note").value.trim(),
-      date: $("#f-date").value || todayIso(),
-      photo: draft.photo,
-      loanId: "",
-      loanAdded: 0
+      id: existing ? existing.id : uid(), ts: existing ? existing.ts : Date.now(),
+      amount: Math.round(amt*100)/100, cat: draft.cat,
+      note: $("#f-note").value.trim(), date: $("#f-date").value || todayIso(), photo: draft.photo,
+      loanId:"", loanAdded:0, fundingType:"", fundingPersonId:"", fundingPersonName:"", fundingAmount:0, fundingLogId:""
     };
-    state.lastCat = e.cat;
-    var coverage = applyExpenseShortfall(e);
-    state.expenses.push(e);
-    if(save({retryWithoutPhoto:e})){
-      var wk = weekendKeyOf(e.date);
-      var added = wk ? (isLiveWeekend(wk) ? "Added to this weekend — "+fmt(e.amount)
-                                         : "Added to the "+weekendLabel(wk)+" weekend")
-                     : "Added — "+fmt(e.amount);
-      toast(coverage.amount > 0
-        ? added+" · "+fmt(coverage.amount)+" added to "+coverage.loan.name+" loan"
-        : added);
-    } else {
-      if(coverage.amount > 0) adjustLoanRemaining(coverage.loan.id, -coverage.amount);
-      state.expenses.pop();
-    }
+    var proposal = expenseFundingProposal(e.amount, existing, e.date);
+    if(proposal.shortfall > 0){ openFundingSheet(e, existing, proposal); return; }
+    var result = commitExpense(e, existing, {type:"none", amount:0});
     closeSheet(); render();
+    if(!result.ok){ toast("Could not save — your money data was not changed"); return; }
+    var wk = weekendKeyOf(e.date);
+    var added = existing ? "Updated" : (wk ? (isLiveWeekend(wk) ? "Added to this weekend — "+fmt(e.amount)
+                                                            : "Added to the "+weekendLabel(wk)+" weekend")
+                                       : "Added — "+fmt(e.amount));
+    toast(added);
   }
 
   camera.addEventListener("change", function(){
@@ -3146,7 +3715,8 @@
       '<dt>Category</dt><dd><span style="color:var('+c.v+'); display:inline-flex; width:15px; height:15px; vertical-align:-2px; margin-right:5px">'+catIcon(c.id)+'</span>'+c.name+'</dd>' +
       '<dt>Date</dt><dd>'+fromIso(e.date).toLocaleDateString(undefined,{weekday:"short", day:"numeric", month:"short", year:"numeric"})+'</dd>' +
       '<dt>Weekend</dt><dd>'+weekendLabel(weekendOf(e.date), true)+'</dd>' +
-      (e.loanAdded > 0 ? '<dt>Loan added</dt><dd>'+fmt(e.loanAdded)+' to Dad\'s loan</dd>' : '') +
+      (e.loanAdded > 0 ? '<dt>Loan added</dt><dd>'+fmt(e.loanAdded)+' to '+esc((function(){ var x=loanById(e.loanId); return x?x.name:"the loan"; })())+'</dd>' : '') +
+      (e.fundingType === "person" && e.fundingAmount > 0 ? '<dt>Funded by</dt><dd>'+fmt(e.fundingAmount)+' borrowed from '+esc(e.fundingPersonName)+'</dd>' : '') +
       '</dl>' +
       '<button class="btn primary" id="d-again">Log this again today</button>' +
       '<div style="height:10px"></div>' +
@@ -3155,22 +3725,7 @@
       '<button class="btn danger ghost" id="d-del">Delete expense</button>'
     );
     $("#d-again").addEventListener("click", function(){
-      this.disabled = true;
-      var copy = { id: uid(), ts: Date.now(), amount: e.amount, cat: e.cat,
-                   note: e.note, date: todayIso(), photo: null, loanId: "", loanAdded: 0 };
-      state.lastCat = e.cat;
-      var coverage = applyExpenseShortfall(copy);
-      state.expenses.push(copy);
-      if(save()){
-        closeSheet(); render();
-        toast(coverage.amount > 0
-          ? "Logged again — "+fmt(e.amount)+" · "+fmt(coverage.amount)+" added to "+coverage.loan.name+" loan"
-          : "Logged again — "+fmt(e.amount));
-      }else{
-        if(coverage.amount > 0) adjustLoanRemaining(coverage.loan.id, -coverage.amount);
-        state.expenses.pop();
-        closeSheet(); render();
-      }
+      openAdd(null, { amount:e.amount, cat:e.cat, note:e.note, date:todayIso(), photo:null, catManual:true });
     });
     $("#d-edit").addEventListener("click", function(){ openAdd(e.id); });
     if(safePhoto(e.photo)){
@@ -3182,14 +3737,23 @@
     }
     $("#d-del").addEventListener("click", function(){
       this.disabled = true;
-      if(e.loanAdded > 0) adjustLoanRemaining(e.loanId, -e.loanAdded);
+      var deleted = Object.assign({}, e);
+      var beforeExpenses = state.expenses.slice();
+      removeExpenseFunding(e);
       state.expenses = state.expenses.filter(function(x){ return x.id!==e.id; });
-      save(); closeSheet(); render();
+      if(!save()){
+        state.expenses = beforeExpenses;
+        restoreExpenseFunding(deleted);
+        this.disabled = false;
+        toast("Could not delete — your money data was not changed");
+        return;
+      }
+      closeSheet(); render();
       toastAction("Deleted "+fmt(e.amount), "Undo", function(){
-        if(e.loanAdded > 0) adjustLoanRemaining(e.loanId, e.loanAdded);
-        state.expenses.push(e);
-        save(); render();
-        toast("Restored");
+        restoreExpenseFunding(deleted);
+        state.expenses.push(deleted);
+        if(save()){ render(); toast("Restored"); }
+        else { removeExpenseFunding(deleted); state.expenses = state.expenses.filter(function(x){ return x.id!==deleted.id; }); toast("Could not restore — try again"); }
       });
     });
   }
@@ -3253,12 +3817,19 @@
     });
     var sweepBtn = $("#h-sweep");
     if(sweepBtn) sweepBtn.addEventListener("click", openSweepSheet);
-    var borrowBtn = $("#h-borrow");
-    if(borrowBtn) borrowBtn.addEventListener("click", function(){
-      openBorrowSheet(parseFloat(this.getAttribute("data-amt")) || 0);
+    var fundingBtn = $("#h-funding");
+    if(fundingBtn) fundingBtn.addEventListener("click", function(){
+      var amt = parseFloat(this.getAttribute("data-amt")) || 0;
+      var loan = shortfallLoan();
+      if(loan) openLoanDrawSheet(loan, amt);
+      else openBorrowSheet(amt);
     });
     var oweBtn = $("#h-owe");
     if(oweBtn) oweBtn.addEventListener("click", function(){ tab = "plan"; render(); window.scrollTo(0,0); });
+    var protectBtn = $("#h-protect");
+    if(protectBtn) protectBtn.addEventListener("click", openSafeLimitSheet);
+    var debtOpen = $("#h-debt-open");
+    if(debtOpen) debtOpen.addEventListener("click", openDebtEscapeSheet);
     shell.querySelectorAll("[data-debt]").forEach(function(b){
       b.addEventListener("click", function(){ openDebtSheet(b.getAttribute("data-debt")); });
     });
