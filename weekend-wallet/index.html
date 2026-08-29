@@ -567,13 +567,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=6.1"></script>
+<script src="scan.js?v=6.2"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "6.1";
+  var APP_VERSION = "6.2";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -633,6 +633,7 @@
         if(typeof s.payday !== "number") s.payday = 0;
         if(typeof s.paydayEnd !== "number") s.paydayEnd = s.payday;
         normalizePaydayState(s);
+        s.salaryReceived = cleanSalaryReceived(s.salaryReceived);
         if(!Array.isArray(s.debts)) s.debts = [];
         if(typeof s.backupTs !== "number") s.backupTs = 0;
         if(typeof s.nudgedAt !== "number") s.nudgedAt = 0;
@@ -658,7 +659,7 @@
       }
     }catch(e){}
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", geminiApiKey:"", scanProvider:"free", scanModel:"claude-opus-4-8",
-             salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
+             salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
   }
   function isPaydayDay(n){
     return typeof n === "number" && isFinite(n) && Math.floor(n) === n && n >= 1 && n <= 31;
@@ -669,6 +670,24 @@
     }
     if(!isPaydayDay(s.paydayEnd)) s.paydayEnd = s.payday;
     if(s.paydayEnd < s.payday) s.paydayEnd = s.payday;
+  }
+  function cleanSalaryReceived(value){
+    if(!value || typeof value !== "object" || Array.isArray(value)) return {};
+    var out = {};
+    Object.keys(value).forEach(function(k){
+      var item = value[k], date = item && typeof item === "object" ? String(item.date || "") : "";
+      var amount = item && typeof item === "object" ? +item.amount : 0;
+      if(!ISO_RE.test(date) || !(amount > 0)) return;
+      out[date.slice(0,7)] = {amount:Math.round(amount*100)/100, date:date, ts:+item.ts||0};
+    });
+    return out;
+  }
+  function salaryReceiptForMonth(mk){
+    var item = state.salaryReceived && state.salaryReceived[mk];
+    return item && ISO_RE.test(String(item.date || "")) && +item.amount > 0 ? item : null;
+  }
+  function salaryReceiptDateLabel(item){
+    return fromIso(item.date).toLocaleDateString(undefined,{month:"short",day:"numeric"});
   }
   /* A backup is just a file — it can be edited, truncated or half-written.
      One row without a date used to be saved and then throw on the next render,
@@ -1029,6 +1048,13 @@
     return {start:start, end:end, dim:dim};
   }
   function paydayChip(){
+    var salaryReceipt = salaryReceiptForMonth(todayIso().slice(0,7));
+    if(salaryReceipt){
+      var receiptText = salaryReceipt.date === todayIso()
+        ? "salary received today · "+fmt(salaryReceipt.amount)
+        : "salary received "+salaryReceiptDateLabel(salaryReceipt)+" · "+fmt(salaryReceipt.amount);
+      return '<span style="color:var(--accent-deep); font-weight:700">'+receiptText+'</span>';
+    }
     var range = paydayRange();
     if(!range) return "";
     var now = new Date(), year = now.getFullYear(), month = now.getMonth(), today = now.getDate();
@@ -2486,9 +2512,33 @@
 
   function todayBudget(){ return autoDailyBudget(); }
 
+  function markSalaryReceived(){
+    var amount = Math.round((+state.salary || 0)*100)/100;
+    if(!(amount > 0)){ toast("Save your monthly salary first"); return; }
+    var mk = monthKey(), date = todayIso();
+    var previous = state.salaryReceived[mk] || null;
+    if(previous && previous.date === date && Math.abs(+previous.amount - amount) < 0.01){
+      toast("Salary already logged today"); return;
+    }
+    if(previous && !window.confirm("Update this month’s salary receipt?")) return;
+    state.salaryReceived[mk] = {amount:amount, date:date, ts:Date.now()};
+    if(!save()){
+      if(previous) state.salaryReceived[mk] = previous;
+      else delete state.salaryReceived[mk];
+      toast("Could not save — your money data was not changed");
+      return;
+    }
+    render();
+    toast("Salary received logged · "+fmt(amount));
+  }
+
   function viewPlan(){
     var m = planMath();
     var monthName = new Date().toLocaleDateString(undefined, {month:"long", year:"numeric"});
+    var salaryReceipt = salaryReceiptForMonth(monthKey());
+    var salaryReceiptCopy = salaryReceipt
+      ? IC.check+"Salary received · "+fmt(salaryReceipt.amount)+" · "+(salaryReceipt.date===todayIso()?"today":salaryReceiptDateLabel(salaryReceipt))
+      : IC.banknote+"Log salary received today";
     var h = '<div class="sec"><span class="micro">'+monthName+'</span></div>';
 
     if(!state.salary){
@@ -2519,7 +2569,9 @@
       '<input id="p-payday-start" type="number" inputmode="numeric" min="1" max="31" placeholder="Start, e.g. 28" aria-label="First possible payday" value="'+(state.payday||"")+'">' +
       '<input id="p-payday-end" type="number" inputmode="numeric" min="1" max="31" placeholder="End, e.g. 31" aria-label="Last possible payday" value="'+(state.paydayEnd||state.payday||"")+'">' +
       '</div><div class="hint" style="margin-top:6px">Use the same day twice for a fixed payday.</div></div></div>' +
-      '<button class="btn primary" id="p-salary-save">Save salary</button></div>';
+      '<button class="btn primary" id="p-salary-save">Save salary</button>' +
+      '<button class="btn" id="p-salary-received">'+salaryReceiptCopy+'</button>' +
+      '<div class="hint">This records when your salary arrived without adding it twice to your monthly budget.</div></div>';
 
     var autoD = autoDailyBudget();
     var rr = restRemaining();
@@ -3916,6 +3968,8 @@
         state.salary = v;
         save(); render(); toast("Salary saved");
       });
+      var pSalaryReceived = $("#p-salary-received");
+      if(pSalaryReceived) pSalaryReceived.addEventListener("click", markSalaryReceived);
 
       var pRest = $("#p-rest-save");
       if(pRest) pRest.addEventListener("click", function(){
@@ -3980,7 +4034,7 @@
         var copy = { setup:state.setup, currency:state.currency,
                      scanProvider:state.scanProvider, scanModel:state.scanModel, expenses:state.expenses,
                      salary:state.salary, commitments:state.commitments, goals:state.goals,
-                     swept:state.swept, payday:state.payday, paydayEnd:state.paydayEnd, debts:state.debts,
+                     swept:state.swept, payday:state.payday, paydayEnd:state.paydayEnd, salaryReceived:state.salaryReceived, debts:state.debts,
                      restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs, wkPlan:state.wkPlan, wkWeight:state.wkWeight };  // keys deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
@@ -4019,6 +4073,7 @@
                       goals:Array.isArray(d.goals)? d.goals : [],
                       swept:(d.swept && typeof d.swept==="object")? d.swept : {},
                       payday:importPayday, paydayEnd:importPaydayEnd,
+                      salaryReceived:cleanSalaryReceived(d.salaryReceived),
                       debts:Array.isArray(d.debts)? d.debts : [],
                       restAmount:+d.restAmount||0,
                       restFrom:(typeof d.restFrom==="string")? d.restFrom : "", restTs:+d.restTs||0, cashTs:+d.cashTs||0,
@@ -4046,7 +4101,7 @@
           wipeArmed = false; this.textContent = "Erase all data"; return;
         }
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", scanProvider:"free", scanModel:"claude-opus-4-8",
-                  salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
+                  salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
       });
