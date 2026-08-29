@@ -339,6 +339,26 @@
   .commitment-card .amt small{font-size:11px}
   .sec-total{white-space:nowrap; padding-left:12px; text-align:right}
 
+  .loan-progress{
+    margin:14px 0; padding:15px; border-radius:18px;
+    background:color-mix(in srgb, var(--card2) 72%, var(--card)); border:1px solid var(--line);
+  }
+  .loan-progress-top{display:flex; align-items:flex-start; justify-content:space-between; gap:12px}
+  .loan-progress-title{font-size:14px; font-weight:800}
+  .loan-progress-state{font-size:13px; font-weight:800; text-align:right}
+  .loan-progress-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px}
+  .loan-progress-stat{padding:11px 12px; border-radius:14px; background:var(--card); border:1px solid var(--line)}
+  .loan-progress-stat span{display:block; color:var(--ink3); font-size:10px; font-weight:700; letter-spacing:.09em; text-transform:uppercase}
+  .loan-progress-stat b{display:block; margin-top:3px; font-size:16px}
+  .loan-months{display:grid; gap:8px; margin-top:12px}
+  .loan-month{padding:11px 12px; border-radius:14px; background:var(--card); border:1px solid var(--line)}
+  .loan-month-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px; font-size:13px; font-weight:800}
+  .loan-month-net{font-size:12px}
+  .loan-month-math{margin-top:3px; color:var(--ink3); font-size:11.5px}
+  .loan-draw-item{display:flex; justify-content:space-between; gap:10px; margin-top:7px; padding-top:7px; border-top:1px solid var(--line); font-size:11.5px}
+  .loan-draw-item span:first-child{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink2)}
+  .loan-draw-item b{flex:none}
+
   .tabbar{
     position:fixed; left:0; right:0; bottom:0; z-index:40;
     display:flex; justify-content:center;
@@ -498,13 +518,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=5.8"></script>
+<script src="scan.js?v=5.9"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "5.8";
+  var APP_VERSION = "5.9";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -611,13 +631,20 @@
   function cleanRows(){
     state.commitments = (state.commitments||[]).filter(function(c){ return c && typeof c === "object"; })
       .map(function(c){
+      var draws = Array.isArray(c.draws) ? c.draws.filter(function(d){
+        return d && typeof d === "object" && +d.amount > 0 && ISO_RE.test(String(d.date || ""));
+      }).map(function(d){
+        return { id:d.id || uid(), ts:+d.ts || 0, date:String(d.date),
+                 amount:Math.round((+d.amount)*100)/100, note:String(d.note || "Borrowing"),
+                 balanceApplied:d.balanceApplied === true };
+      }) : [];
       return { id: c.id || uid(), name: String(c.name || "Bill"),
                  amount: +c.amount || 0, kind: c.kind === "loan" ? "loan" : "sub",
                  due: (+c.due >= 1 && +c.due <= 31) ? +c.due : 0,
                  remaining: +c.remaining || 0,
                  coverShortfall: c.kind === "loan" && (c.coverShortfall === true ||
                    (c.coverShortfall == null && String(c.name || "").trim().toLowerCase() === "dad")),
-                 paid: (c.paid && typeof c.paid === "object") ? c.paid : {} };
+                 paid: (c.paid && typeof c.paid === "object") ? c.paid : {}, draws:draws };
       });
     state.goals = (state.goals||[]).filter(function(g){ return g && typeof g === "object"; })
       .map(function(g){
@@ -784,12 +811,7 @@
     return '<b style="color:var(--good)">all settled</b>';
   }
   function borrowedThisMonth(){
-    var start = new Date(); start.setDate(1); start.setHours(0,0,0,0);
-    var t = start.getTime(), sum = 0;
-    state.debts.forEach(function(d){
-      (d.log||[]).forEach(function(l){ if(l.dir==="b" && l.ts >= t) sum += l.amt; });
-    });
-    return sum;
+    return ledgerFlowSince(monthStartIso()).borrowed;
   }
   /* only offer to sweep money you really still have — the old version could
      "save" the unspent part of a fixed weekend budget while the actual pool
@@ -1010,11 +1032,18 @@
         (pm.extra ? (pm.extra > 0 ? ' · '+fmt(pm.extra)+' more than usual' : ' · '+fmt(-pm.extra)+' less than usual') : "") +
         '</span>'+paydayChip()+'</div></div>' +
         '</section>';
-      var uncovered = Math.abs(Math.min(mLeft, 0)) - borrowedThisMonth();
-      if(mLeft < 0 && uncovered >= 1){
-        h += '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(Math.abs(mLeft))+'</b> over' +
-          (borrowedThisMonth() > 0 ? ' — <b class="money">'+fmt(uncovered)+'</b> of it not logged yet.' : '. If your dad or a friend covered you, keep track of it.') +
-          '</span><button id="h-borrow" data-amt="'+Math.round(uncovered)+'">Log it</button></div>';
+      var over = Math.abs(Math.min(mLeft, 0));
+      var peopleFunding = borrowedThisMonth();
+      var loanFunding = trackedLoanFunding(monthKey());
+      var uncovered = Math.max(Math.round((over - peopleFunding - loanFunding)*100)/100, 0);
+      if(mLeft < 0){
+        var fundingBits = [];
+        if(loanFunding > 0) fundingBits.push('<b class="money">'+fmt(loanFunding)+'</b> added to loans');
+        if(peopleFunding > 0) fundingBits.push('<b class="money">'+fmt(peopleFunding)+'</b> borrowed from people');
+        h += '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(over)+'</b> over budget' +
+          (fundingBits.length ? ' · '+fundingBits.join(' · ') : '') +
+          (uncovered >= 1 ? ' · <b class="money">'+fmt(uncovered)+'</b> has no funding source recorded.' : ' · funding fully tracked.') +
+          '</span>'+(uncovered >= 1 ? '<button id="h-funding" data-amt="'+Math.round(uncovered)+'">Track it</button>' : '')+'</div>';
       }else if(iOweTotal() > 0 || owedToMeTotal() > 0){
         var bits = [];
         if(iOweTotal() > 0) bits.push('you owe <b class="money">'+fmt(iOweTotal())+'</b> ('+
@@ -1917,6 +1946,61 @@
              extra: Math.round((bills - planned)*100)/100,
              savings: savings, left: Math.round((state.salary - bills - savings)*100)/100 };
   }
+  /* Every automatic shortfall lives on its expense. Manual history rows cover
+     older borrowing that was already included in the loan balance. Keeping
+     both sources dated lets us answer the useful question: did the debt shrink
+     this month after new borrowing and the payment are both counted? */
+  function loanAdditionItems(c){
+    var items = [];
+    state.expenses.forEach(function(e){
+      if(e.loanId === c.id && e.loanAdded > 0){
+        items.push({ id:e.id, source:"expense", date:e.date, ts:e.ts||0,
+                     amount:e.loanAdded, note:e.note || cat(e.cat).name });
+      }
+    });
+    (c.draws||[]).forEach(function(d){
+      items.push({ id:d.id, source:"manual", date:d.date, ts:d.ts||0,
+                   amount:d.amount, note:d.note || "Borrowing",
+                   balanceApplied:d.balanceApplied === true });
+    });
+    return items.sort(function(a,b){
+      return a.date === b.date ? (b.ts||0)-(a.ts||0) : (a.date < b.date ? 1 : -1);
+    });
+  }
+  function loanMonthStats(c){
+    var by = {};
+    function row(mk){
+      if(!by[mk]) by[mk] = { mk:mk, added:0, paid:0, net:0, items:[] };
+      return by[mk];
+    }
+    loanAdditionItems(c).forEach(function(it){
+      var r = row(it.date.slice(0,7));
+      r.added += it.amount; r.items.push(it);
+    });
+    Object.keys(c.paid||{}).forEach(function(mk){
+      var p = c.paid[mk];
+      if(p && +p.amt > 0) row(mk).paid = +p.amt;
+    });
+    return Object.keys(by).sort().reverse().map(function(mk){
+      var r = by[mk];
+      r.added = Math.round(r.added*100)/100;
+      r.paid = Math.round(r.paid*100)/100;
+      r.net = Math.round((r.added-r.paid)*100)/100;
+      return r;
+    });
+  }
+  function loanMonthStat(c, mk){
+    var found = null;
+    loanMonthStats(c).some(function(r){ if(r.mk === mk){ found = r; return true; } return false; });
+    return found || { mk:mk, added:0, paid:0, net:0, items:[] };
+  }
+  function trackedLoanFunding(mk){
+    var sum = 0;
+    state.commitments.forEach(function(c){
+      if(c.kind === "loan") sum += loanMonthStat(c, mk).added;
+    });
+    return Math.round(sum*100)/100;
+  }
   function shortfallLoan(){
     var found = null;
     state.commitments.some(function(c){
@@ -2167,9 +2251,20 @@
           ? '<span class="subline hl money" style="color:'+(diff>0?"var(--bad)":"var(--good)")+'">'+IC.check+
             ' paid '+fmt(p.amt)+' this month'+(diff? ' · '+fmt(Math.abs(diff))+(diff>0? ' more' : ' less')+' than usual' : "")+'</span>'
           : "";
+        var progressLine = "";
+        if(c.kind === "loan"){
+          var activity = loanMonthStat(c, monthKey());
+          if(activity.added > 0 || activity.paid > 0){
+            var movement = activity.net > 0 ? 'debt grew '+fmt(activity.net)
+              : activity.net < 0 ? 'debt down '+fmt(-activity.net) : 'no debt change';
+            progressLine = '<span class="subline hl money" style="color:'+
+              (activity.net>0?'var(--bad)':activity.net<0?'var(--good)':'var(--warn)')+'">'+
+              (activity.added>0? '+'+fmt(activity.added)+' borrowed extra · ' : '')+movement+' this month</span>';
+          }
+        }
         h += '<button class="row-item commitment-card '+(c.kind==="loan"?"loan-row":"subscription-row")+'" data-cm="'+esc(c.id)+'">' + kindTile(c) +
           '<span class="name"><span class="ttl">'+esc(c.name)+'</span>' +
-          '<span class="subline">'+sub1+'</span>' + paidLine +
+          '<span class="subline">'+sub1+'</span>' + paidLine + progressLine +
           (c.coverShortfall ? '<span class="subline hl" style="color:var(--warn)">uncovered spending → this loan</span>' : "") +
           (months? '<span class="subline hl money">'+fmt(c.remaining)+' left · ≈ '+months+' month'+(months>1?"s":"")+' to go</span>' : "")+'</span>' +
           '<span class="amt money">'+fmt(c.amount)+' <small>/mo</small></span></button>';
@@ -2253,6 +2348,106 @@
       '<div class="hint">Some months you give more — put the real amount here and the difference comes off your spending money.</div></div>';
   }
 
+  function previousMonthKey(mk){
+    var d = fromIso(mk+"-01");
+    d.setMonth(d.getMonth()-1);
+    return iso(d).slice(0,7);
+  }
+  function loanProgressHtml(c){
+    if(!c || c.kind !== "loan") return "";
+    var now = loanMonthStat(c, monthKey());
+    var prev = loanMonthStat(c, previousMonthKey(monthKey()));
+    var stateText = now.net > 0 ? 'Debt grew '+fmt(now.net)
+      : now.net < 0 ? 'Debt fell '+fmt(-now.net) : 'No debt change';
+    var stateColor = now.net > 0 ? 'var(--bad)' : now.net < 0 ? 'var(--good)' : 'var(--warn)';
+    var compare = "";
+    if(now.added === 0) compare = 'No extra borrowing this month';
+    else if(prev.added > 0){
+      var delta = Math.round((now.added-prev.added)*100)/100;
+      compare = delta < 0 ? fmt(-delta)+' less borrowing than last month'
+        : delta > 0 ? fmt(delta)+' more borrowing than last month' : 'Borrowing matches last month';
+    }else compare = 'New borrowing this month';
+
+    var rows = loanMonthStats(c).slice(0,12).map(function(r){
+      var label = r.mk === monthKey() ? "This month"
+        : fromIso(r.mk+"-01").toLocaleDateString(undefined,{month:"short",year:"numeric"});
+      var netText = r.net > 0 ? 'Debt +'+fmt(r.net) : r.net < 0 ? 'Debt −'+fmt(-r.net) : 'No change';
+      var netColor = r.net > 0 ? 'var(--bad)' : r.net < 0 ? 'var(--good)' : 'var(--ink3)';
+      var items = r.items.map(function(it){
+        return '<div class="loan-draw-item"><span>'+esc(it.note)+' · '+
+          fromIso(it.date).toLocaleDateString(undefined,{month:"short",day:"numeric"})+
+          (it.source==="manual"?' · history':'')+'</span><b class="money">+'+fmt(it.amount)+'</b></div>';
+      }).join("");
+      return '<div class="loan-month"><div class="loan-month-head"><span>'+label+'</span>'+
+        '<span class="loan-month-net money" style="color:'+netColor+'">'+netText+'</span></div>'+
+        '<div class="loan-month-math money">Borrowed '+fmt(r.added)+' · Paid '+fmt(r.paid)+'</div>'+items+'</div>';
+    }).join("");
+
+    return '<div class="loan-progress"><div class="loan-progress-top"><div><div class="loan-progress-title">Debt progress</div>'+
+      '<div class="hint" style="margin-top:2px">'+compare+'</div></div>'+
+      '<div class="loan-progress-state money" style="color:'+stateColor+'">'+stateText+'</div></div>'+
+      '<div class="loan-progress-grid"><div class="loan-progress-stat"><span>Borrowed extra</span><b class="money" style="color:'+(now.added>0?'var(--bad)':'var(--ink)')+'">'+fmt(now.added)+'</b></div>'+
+      '<div class="loan-progress-stat"><span>Paid back</span><b class="money" style="color:'+(now.paid>0?'var(--good)':'var(--ink)')+'">'+fmt(now.paid)+'</b></div></div>'+
+      (rows ? '<div class="loan-months">'+rows+'</div>' : '<div class="hint">No monthly activity recorded yet.</div>')+
+      '<button class="btn" id="c-add-draw" style="margin-top:12px">+ Record earlier borrowing</button>'+
+      '<div class="hint">Automatic shortfalls appear here by expense. Use “earlier borrowing” only for money already included in this balance.</div></div>';
+  }
+
+  function openLoanDrawSheet(c, prefillAmt){
+    if(!c || c.kind !== "loan") return;
+    var manual = (c.draws||[]).slice().sort(function(a,b){
+      return a.date === b.date ? (b.ts||0)-(a.ts||0) : (a.date < b.date ? 1 : -1);
+    });
+    var rows = manual.map(function(d){
+      return '<button class="row-item" data-draw-remove="'+esc(d.id)+'"><span class="name"><span class="ttl">'+esc(d.note)+'</span>'+
+        '<span class="subline">'+fromIso(d.date).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})+
+        ' · '+(d.balanceApplied?'added to balance':'history only')+'</span></span>'+
+        '<span class="amt money">+'+fmt(d.amount)+'<br><small>remove</small></span></button>';
+    }).join("");
+    openSheet(
+      '<h2>Track borrowing — '+esc(c.name)+'</h2>'+
+      '<p class="hint" style="margin-top:0">Record money borrowed before tracking existed, or a manual loan increase that was not tied to an expense.</p>'+
+      '<div class="field"><label class="micro" for="draw-amount">Amount borrowed</label>'+
+      '<input id="draw-amount" type="text" inputmode="decimal" min="0" value="'+(prefillAmt>0?prefillAmt:"")+'" placeholder="0"></div>'+
+      '<div class="row2"><div><label class="micro" for="draw-date" style="display:block; margin-bottom:6px">Date</label>'+
+      '<input id="draw-date" type="date" value="'+todayIso()+'"></div>'+
+      '<div><label class="micro" for="draw-note" style="display:block; margin-bottom:6px">What was it for?</label>'+
+      '<input id="draw-note" type="text" maxlength="50" placeholder="e.g. PC" value=""></div></div>'+
+      '<label class="checkrow" for="draw-included"><input type="checkbox" id="draw-included" checked>'+
+      '<span><b>Already included in the current loan balance</b><br><span class="hint" style="display:block; margin-top:3px">Keep this checked for older borrowing so Dad’s balance is not increased twice.</span></span></label>'+
+      '<button class="btn primary" id="draw-save" style="margin-top:12px">Save borrowing record</button>'+
+      (rows? '<div class="sec" style="margin-top:22px"><span class="micro">Manual history</span></div><div class="row-list">'+rows+'</div>' : '')+
+      '<button class="btn ghost" id="draw-back" style="margin-top:12px">Back to '+esc(c.name)+'</button>'
+    );
+    $("#draw-save").addEventListener("click", function(){
+      var amount = num($("#draw-amount").value);
+      var date = $("#draw-date").value;
+      var note = $("#draw-note").value.trim() || "Borrowing";
+      var alreadyIncluded = $("#draw-included").checked;
+      if(!(amount > 0)){ toast("Enter the borrowed amount"); return; }
+      if(!ISO_RE.test(date)){ toast("Choose a date"); return; }
+      if(!Array.isArray(c.draws)) c.draws = [];
+      c.draws.push({ id:uid(), ts:Date.now(), date:date, amount:Math.round(amount*100)/100,
+                     note:note, balanceApplied:!alreadyIncluded });
+      if(!alreadyIncluded) c.remaining = Math.round((+c.remaining+amount)*100)/100;
+      save(); render(); openCommitmentSheet(c.id);
+      toast(fmt(amount)+" added to "+c.name+" borrowing history");
+    });
+    $("#draw-back").addEventListener("click", function(){ openCommitmentSheet(c.id); });
+    sheet.querySelectorAll("[data-draw-remove]").forEach(function(b){
+      var armed = false;
+      b.addEventListener("click", function(){
+        if(!armed){ armed = true; b.querySelector("small").textContent = "tap again"; return; }
+        var id = b.getAttribute("data-draw-remove"), draw = null;
+        (c.draws||[]).forEach(function(d){ if(d.id === id) draw = d; });
+        if(!draw) return;
+        if(draw.balanceApplied) c.remaining = Math.max(Math.round((+c.remaining-draw.amount)*100)/100, 0);
+        c.draws = (c.draws||[]).filter(function(d){ return d.id !== id; });
+        save(); render(); openLoanDrawSheet(c, 0); toast("Borrowing record removed");
+      });
+    });
+  }
+
   function openCommitmentSheet(id){
     var c = null;
     if(id){ state.commitments.forEach(function(x){ if(x.id===id) c = x; }); }
@@ -2276,6 +2471,7 @@
       '<div class="hint">Each saved edit updates this — the app shows roughly how many months are left.</div>' +
       '<label class="checkrow" for="c-cover" style="margin-top:10px"><input type="checkbox" id="c-cover"'+(c && c.coverShortfall?" checked":"")+'>' +
       '<span><b>Cover spending shortfalls with this loan</b><br><span class="hint" style="display:block; margin-top:3px">When an expense is more than your available money, add only the missing amount to this loan.</span></span></label></div>' +
+      (c && c.kind==="loan" ? loanProgressHtml(c) : "") +
       (c? payBlock(c) : "") +
       '<button class="btn primary" id="c-save">Save</button>' +
       (c? '<div style="height:10px"></div><button class="btn danger" id="c-del">Remove</button>' : "")
@@ -2298,7 +2494,7 @@
       if(!name){ toast("Give it a name"); return; }
       if(!(amt > 0)){ toast("Enter the monthly amount"); return; }
       if(c){ c.name = name; c.amount = Math.round(amt*100)/100; c.kind = selKind; c.due = due; c.remaining = remaining; c.coverShortfall = coverShortfall; }
-      else state.commitments.push({ id: uid(), name: name, amount: Math.round(amt*100)/100, kind: selKind, due: due, remaining: remaining, coverShortfall: coverShortfall, paid: {} });
+      else state.commitments.push({ id: uid(), name: name, amount: Math.round(amt*100)/100, kind: selKind, due: due, remaining: remaining, coverShortfall: coverShortfall, paid: {}, draws:[] });
       save(); closeSheet(); render();
     });
     if(c && $("#c-pay")){
@@ -2317,6 +2513,9 @@
         save(); closeSheet(); render();
         toast(c.name+" payment removed");
       });
+    }
+    if(c && $("#c-add-draw")){
+      $("#c-add-draw").addEventListener("click", function(){ openLoanDrawSheet(c, 0); });
     }
     if(c){
       var armed = false;
@@ -3318,9 +3517,12 @@
     });
     var sweepBtn = $("#h-sweep");
     if(sweepBtn) sweepBtn.addEventListener("click", openSweepSheet);
-    var borrowBtn = $("#h-borrow");
-    if(borrowBtn) borrowBtn.addEventListener("click", function(){
-      openBorrowSheet(parseFloat(this.getAttribute("data-amt")) || 0);
+    var fundingBtn = $("#h-funding");
+    if(fundingBtn) fundingBtn.addEventListener("click", function(){
+      var amt = parseFloat(this.getAttribute("data-amt")) || 0;
+      var loan = shortfallLoan();
+      if(loan) openLoanDrawSheet(loan, amt);
+      else openBorrowSheet(amt);
     });
     var oweBtn = $("#h-owe");
     if(oweBtn) oweBtn.addEventListener("click", function(){ tab = "plan"; render(); window.scrollTo(0,0); });
