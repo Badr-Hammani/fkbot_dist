@@ -490,6 +490,8 @@
   .chip .cat-dot{width:9px; height:9px}
   .chip.sel{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 16%, var(--card))}
   .row2{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px}
+  .payday-range{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  .payday-range input{min-width:0}
 
   .photo-btn{
     display:flex; align-items:center; gap:12px; width:100%;
@@ -565,13 +567,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=6.0"></script>
+<script src="scan.js?v=6.1"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "6.0";
+  var APP_VERSION = "6.1";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -629,6 +631,8 @@
         if(!Array.isArray(s.goals)) s.goals = [];
         if(!s.swept || typeof s.swept !== "object") s.swept = {};
         if(typeof s.payday !== "number") s.payday = 0;
+        if(typeof s.paydayEnd !== "number") s.paydayEnd = s.payday;
+        normalizePaydayState(s);
         if(!Array.isArray(s.debts)) s.debts = [];
         if(typeof s.backupTs !== "number") s.backupTs = 0;
         if(typeof s.nudgedAt !== "number") s.nudgedAt = 0;
@@ -654,7 +658,17 @@
       }
     }catch(e){}
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", geminiApiKey:"", scanProvider:"free", scanModel:"claude-opus-4-8",
-             salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
+             salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
+  }
+  function isPaydayDay(n){
+    return typeof n === "number" && isFinite(n) && Math.floor(n) === n && n >= 1 && n <= 31;
+  }
+  function normalizePaydayState(s){
+    if(!isPaydayDay(s.payday)){
+      s.payday = 0; s.paydayEnd = 0; return;
+    }
+    if(!isPaydayDay(s.paydayEnd)) s.paydayEnd = s.payday;
+    if(s.paydayEnd < s.payday) s.paydayEnd = s.payday;
   }
   /* A backup is just a file — it can be edited, truncated or half-written.
      One row without a date used to be saved and then throw on the next render,
@@ -1000,13 +1014,45 @@
     return '<div class="meter-track"><div class="meter-fill'+cls+'" style="width:'+pct.toFixed(1)+'%"></div></div>';
   }
 
+  function paydayRange(){
+    var start = Number(state.payday), end = Number(state.paydayEnd);
+    if(!isPaydayDay(start)) return null;
+    if(!isPaydayDay(end)) end = start;
+    if(end < start) return null;
+    return {start:start, end:end};
+  }
+  function paydayWindow(year, month, range){
+    var dim = new Date(year, month+1, 0).getDate();
+    var start = Math.min(range.start, dim);
+    var end = Math.min(range.end, dim);
+    if(end < start) end = start;
+    return {start:start, end:end, dim:dim};
+  }
   function paydayChip(){
-    if(!state.payday) return "";
-    var now = new Date(), today = now.getDate();
-    var dim = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
-    var days = state.payday - today;
-    if(days < 0) days += dim;
-    var txt = days===0 ? "payday today!" : days===1 ? "payday tomorrow" : "payday in "+days+" days";
+    var range = paydayRange();
+    if(!range) return "";
+    var now = new Date(), year = now.getFullYear(), month = now.getMonth(), today = now.getDate();
+    var current = paydayWindow(year, month, range);
+    var startDays, endDays, displayStart = current.start, displayEnd = current.end;
+    if(today >= current.start && today <= current.end){
+      var active = displayStart === displayEnd ? "payday today!" : "payday window now ("+displayStart+"–"+displayEnd+")";
+      return '<span style="color:var(--accent-deep); font-weight:700">'+active+'</span>';
+    }
+    if(today < current.start){
+      startDays = current.start - today;
+      endDays = current.end - today;
+    }else{
+      var next = paydayWindow(month === 11 ? year + 1 : year, (month + 1) % 12, range);
+      startDays = current.dim - today + next.start;
+      endDays = current.dim - today + next.end;
+      displayStart = next.start; displayEnd = next.end;
+    }
+    var txt;
+    if(displayStart === displayEnd){
+      txt = startDays===1 ? "payday tomorrow" : "payday in "+startDays+" days";
+    }else{
+      txt = "payday in "+startDays+"–"+endDays+" days ("+displayStart+"–"+displayEnd+")";
+    }
     return '<span style="color:var(--accent-deep); font-weight:700">'+txt+'</span>';
   }
 
@@ -2468,8 +2514,11 @@
       '<div class="row2">' +
       '<div><label class="micro" for="p-salary" style="display:block; margin-bottom:6px">Monthly salary</label>' +
       '<input id="p-salary" type="text" inputmode="decimal" min="0" placeholder="e.g. 8000" value="'+(state.salary||"")+'"></div>' +
-      '<div><label class="micro" for="p-payday" style="display:block; margin-bottom:6px">Payday (optional)</label>' +
-      '<input id="p-payday" type="number" inputmode="numeric" min="1" max="31" placeholder="day, e.g. 28" value="'+(state.payday||"")+'"></div></div>' +
+      '<div><label class="micro" style="display:block; margin-bottom:6px">Payday window (optional)</label>' +
+      '<div class="payday-range">' +
+      '<input id="p-payday-start" type="number" inputmode="numeric" min="1" max="31" placeholder="Start, e.g. 28" aria-label="First possible payday" value="'+(state.payday||"")+'">' +
+      '<input id="p-payday-end" type="number" inputmode="numeric" min="1" max="31" placeholder="End, e.g. 31" aria-label="Last possible payday" value="'+(state.paydayEnd||state.payday||"")+'">' +
+      '</div><div class="hint" style="margin-top:6px">Use the same day twice for a fixed payday.</div></div></div>' +
       '<button class="btn primary" id="p-salary-save">Save salary</button></div>';
 
     var autoD = autoDailyBudget();
@@ -3849,9 +3898,22 @@
       pSalary.addEventListener("click", function(){
         var v = num($("#p-salary").value);
         if(!(v >= 0)){ toast("Enter your salary"); return; }
+        var paydayStartRaw = $("#p-payday-start").value.trim();
+        var paydayEndRaw = $("#p-payday-end").value.trim();
+        if(!paydayStartRaw && !paydayEndRaw){
+          state.payday = 0; state.paydayEnd = 0;
+        }else{
+          var paydayStart = paydayStartRaw ? Number(paydayStartRaw) : Number(paydayEndRaw);
+          var paydayEnd = paydayEndRaw ? Number(paydayEndRaw) : paydayStart;
+          if(!isPaydayDay(paydayStart) || !isPaydayDay(paydayEnd)){
+            toast("Enter payday days from 1 to 31"); return;
+          }
+          if(paydayStart > paydayEnd){
+            toast("Payday start must be before end"); return;
+          }
+          state.payday = paydayStart; state.paydayEnd = paydayEnd;
+        }
         state.salary = v;
-        var pd = parseInt($("#p-payday").value, 10);
-        state.payday = (pd >= 1 && pd <= 31) ? pd : 0;
         save(); render(); toast("Salary saved");
       });
 
@@ -3918,7 +3980,7 @@
         var copy = { setup:state.setup, currency:state.currency,
                      scanProvider:state.scanProvider, scanModel:state.scanModel, expenses:state.expenses,
                      salary:state.salary, commitments:state.commitments, goals:state.goals,
-                     swept:state.swept, payday:state.payday, debts:state.debts,
+                     swept:state.swept, payday:state.payday, paydayEnd:state.paydayEnd, debts:state.debts,
                      restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs, wkPlan:state.wkPlan, wkWeight:state.wkWeight };  // keys deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
@@ -3943,6 +4005,11 @@
             var hasData = state.expenses.length || state.commitments.length || state.goals.length || state.debts.length;
             if(hasData && !window.confirm("Restore this backup and replace the current money data on this device?")) return;
             prev = state;
+            var importPayday = +d.payday||0;
+            var importPaydayEnd = +d.paydayEnd||importPayday;
+            if(!isPaydayDay(importPayday)) importPayday = 0;
+            if(!isPaydayDay(importPaydayEnd)) importPaydayEnd = importPayday;
+            if(importPaydayEnd < importPayday) importPaydayEnd = importPayday;
             state = { setup:true, budget:+d.budget||0, currency:d.currency||"USD",
                       expenses:cleanExpenses(d.expenses), apiKey:state.apiKey, geminiApiKey:state.geminiApiKey,
                       scanProvider:d.scanProvider||state.scanProvider,
@@ -3951,7 +4018,7 @@
                       commitments:Array.isArray(d.commitments)? d.commitments : [],
                       goals:Array.isArray(d.goals)? d.goals : [],
                       swept:(d.swept && typeof d.swept==="object")? d.swept : {},
-                      payday:+d.payday||0,
+                      payday:importPayday, paydayEnd:importPaydayEnd,
                       debts:Array.isArray(d.debts)? d.debts : [],
                       restAmount:+d.restAmount||0,
                       restFrom:(typeof d.restFrom==="string")? d.restFrom : "", restTs:+d.restTs||0, cashTs:+d.cashTs||0,
@@ -3979,7 +4046,7 @@
           wipeArmed = false; this.textContent = "Erase all data"; return;
         }
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", scanProvider:"free", scanModel:"claude-opus-4-8",
-                  salary:0, commitments:[], goals:[], swept:{}, payday:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
+                  salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
       });
