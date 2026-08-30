@@ -434,14 +434,56 @@
   .debt-bad{color:var(--bad); font-weight:800}.debt-good{color:var(--good); font-weight:800}.debt-neutral{color:var(--warn); font-weight:800}
   .debt-streak{margin-top:9px}
   .debt-card .btn{margin-top:12px; background:color-mix(in srgb, var(--bad) 10%, var(--card2)); border-color:color-mix(in srgb, var(--bad) 25%, var(--line)); color:var(--ink)}
-  .funding-expense,.funding-math,.funding-preview{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 14px; border-radius:16px; background:var(--card2); border:1px solid var(--line)}
-  .funding-expense b{display:block; margin-top:3px; font-size:16px}.funding-expense > strong{font-size:20px}
-  .funding-math{margin-top:8px; background:var(--card);}
-  .funding-math > div{min-width:0}.funding-math span,.funding-preview span{display:block; color:var(--ink3); font-size:11px; text-transform:uppercase; letter-spacing:.07em; font-weight:700}.funding-math b,.funding-preview b{display:block; margin-top:2px; font-size:16px}.funding-shortfall{color:var(--bad)}
-  .funding-preview{margin:0 0 8px; border-color:color-mix(in srgb, var(--bad) 24%, var(--line))}
+  /* v6.4 shortfall funding sheet: a decision should feel clear before it feels clever. */
+  .funding-screen{padding:0 2px 2px}
+  .funding-screen h2{margin:8px 36px 18px 0; font-size:28px; line-height:1.08; letter-spacing:-.035em}
+  .funding-expense{display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:18px; background:linear-gradient(145deg, color-mix(in srgb, var(--card2) 86%, var(--card)), var(--card2)); border:1px solid color-mix(in srgb, var(--line) 88%, transparent)}
+  .funding-expense-icon{display:grid; place-items:center; width:48px; height:48px; border-radius:50%; flex:none; color:var(--c-out); background:color-mix(in srgb, var(--c-out) 18%, var(--card2))}
+  .funding-expense-icon svg{width:24px; height:24px}
+  .funding-expense-copy{flex:1; min-width:0}
+  .funding-expense-copy b{display:block; margin-top:2px; font-size:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .funding-expense > strong{font-size:19px; white-space:nowrap}
+  .funding-math{position:relative; display:grid; grid-template-columns:minmax(0,1fr) 26px minmax(0,1fr); align-items:center; gap:8px; margin:18px 8px 20px; padding:0; background:transparent; border:0}
+  .funding-math::before{content:""; position:absolute; left:12%; right:12%; top:50%; border-top:1px solid var(--line); z-index:0}
+  .funding-math > div{position:relative; z-index:1; min-width:0; background:var(--card)}
+  .funding-math > div:first-child{padding-left:2px}
+  .funding-math > div:last-child{text-align:right; padding-right:2px}
+  .funding-math .funding-minus{display:grid; place-items:center; width:26px; height:26px; padding:0; border-radius:50%; background:var(--card2); color:var(--ink2); font-size:19px; font-weight:700}
+  .funding-math span,.funding-preview-copy > span{display:block; color:var(--ink3); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:700}
+  .funding-math b,.funding-preview b{display:block; margin-top:3px; font-size:17px}
+  .funding-shortfall{color:var(--bad)}
+  .funding-question{margin:0 0 10px; color:var(--ink2); font-size:16px; font-weight:750}
+  .funding-options{display:grid; gap:10px; margin-bottom:12px}
+  .funding-option{display:flex; align-items:center; gap:12px; width:100%; min-height:72px; padding:11px 12px; text-align:left; border:1px solid var(--line); border-radius:18px; background:color-mix(in srgb, var(--card2) 78%, var(--card)); transition:border-color .2s ease, box-shadow .2s ease, background .2s ease}
+  .funding-option:active{transform:scale(.99)}
+  .funding-option.sel{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); background:linear-gradient(145deg, color-mix(in srgb, var(--accent) 8%, var(--card2)), var(--card2))}
+  .funding-option-icon{display:grid; place-items:center; width:46px; height:46px; border-radius:50%; flex:none}
+  .funding-option-icon svg{width:24px; height:24px}
+  .funding-option-icon.loan{color:var(--bad); background:color-mix(in srgb, var(--bad) 18%, var(--card2))}
+  .funding-option-icon.person{color:var(--c-drinks); background:color-mix(in srgb, var(--c-drinks) 18%, var(--card2))}
+  .funding-option-icon.none{color:var(--c-missing); background:color-mix(in srgb, var(--c-missing) 18%, var(--card2))}
+  .funding-option-copy{flex:1; min-width:0}
+  .funding-option-copy b{display:block; font-size:17px; line-height:1.2}
+  .funding-option-copy span{display:block; margin-top:3px; color:var(--ink2); font-size:13.5px; line-height:1.3}
+  .funding-radio{display:grid; place-items:center; width:34px; height:34px; border:2px solid var(--line); border-radius:50%; flex:none; color:transparent; font-size:19px; font-weight:900}
+  .funding-option.sel .funding-radio{border-color:var(--accent); background:var(--accent); color:var(--on-accent)}
+  .funding-detail{margin-top:12px}
+  .funding-preview{display:flex; align-items:center; gap:12px; margin:0 0 10px; padding:13px 14px; border-color:color-mix(in srgb, var(--bad) 24%, var(--line)); background:color-mix(in srgb, var(--bad) 8%, var(--card2))}
+  .funding-preview-icon{display:grid; place-items:center; width:44px; height:44px; border-radius:50%; flex:none; color:var(--bad); background:color-mix(in srgb, var(--bad) 18%, var(--card2))}
+  .funding-preview-icon svg{width:22px; height:22px}
+  .funding-preview-copy{min-width:0; flex:1}
+  .funding-preview-copy b{font-size:16px; white-space:nowrap}
+  .funding-preview-copy .arrow{color:var(--accent); padding:0 4px}
+  .funding-warning,.funding-track{display:flex; align-items:flex-start; gap:9px; margin:10px 0; padding:10px 12px; border-radius:13px; font-size:13px; line-height:1.4}
+  .funding-warning{color:var(--bad); background:color-mix(in srgb, var(--bad) 10%, var(--card2)); font-weight:750}
+  .funding-warning svg,.funding-track svg{width:18px; height:18px; flex:none; margin-top:1px}
+  .funding-track{align-items:center; margin:10px 0 14px; color:var(--ink2); background:color-mix(in srgb, var(--accent) 8%, var(--card2)); font-weight:650}
+  .funding-track svg{color:var(--accent-deep)}
   .funding-note{display:flex; align-items:flex-start; gap:8px; margin:10px 0 14px; padding:10px 12px; border-radius:13px; background:color-mix(in srgb, var(--good) 9%, var(--card2)); color:var(--ink2); font-size:12.5px; line-height:1.45}
   .funding-note svg{width:16px; height:16px; color:var(--good); flex:none; margin-top:1px}.funding-note-warn{background:color-mix(in srgb, var(--bad) 9%, var(--card2)); color:var(--ink)}
   .funding-people{margin:-4px 0 8px}
+  .funding-screen > #funding-confirm{min-height:56px; border-radius:17px; margin-top:2px; font-size:16px; box-shadow:0 9px 22px color-mix(in srgb, var(--accent) 23%, transparent)}
+  .funding-screen > #funding-cancel{min-height:52px; border-radius:17px; margin-top:10px !important; font-size:15px}
   .debt-hero{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:15px; background:var(--card2); border:1px solid var(--line); border-radius:17px}.debt-hero strong{font-size:30px; letter-spacing:-.04em}.debt-hero > span:last-child{color:var(--ink2); font-size:13px; font-weight:700}
   .debt-chart-legend{display:flex; gap:16px; color:var(--ink2); font-size:11px; margin:16px 2px 7px}.debt-chart-legend i{display:inline-block; width:8px; height:8px; border-radius:3px; margin-right:4px}.borrow-key{background:var(--bad)}.paid-key{background:var(--good)}
   .debt-chart{height:126px; display:flex; align-items:stretch; justify-content:space-between; gap:6px; padding:12px 8px 0; border-bottom:1px solid var(--line); background:linear-gradient(to top, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px); background-size:100% 33.33%}
@@ -567,13 +609,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=6.3"></script>
+<script src="scan.js?v=6.4"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "6.3";
+  var APP_VERSION = "6.4";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -951,6 +993,7 @@
     camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h2.5l1.5-2.5h8L17.5 8H20a1.5 1.5 0 0 1 1.5 1.5V18A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18V9.5A1.5 1.5 0 0 1 4 8Z"/><circle cx="12" cy="13.5" r="3.4"/></svg>',
     plan:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9h-9V3Z"/><path d="M15.5 3.7A9 9 0 0 1 20.3 8.5H15.5V3.7Z"/></svg>',
     banknote:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5h.01M18 14.5h.01"/></svg>',
+    computer:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M8 20h8M12 16.5V20M7 20h10"/></svg>',
     bank:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9 12 4l8.5 5v1.5h-17V9Z"/><path d="M5.5 10.5V17M9.8 10.5V17M14.2 10.5V17M18.5 10.5V17M3.5 19.5h17"/></svg>',
     repeat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11V9.5A3.5 3.5 0 0 1 7 6h13.5M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v1.5A3.5 3.5 0 0 1 17 18H3.5"/></svg>',
     spotify:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M7.2 9.2c3.4-1 7.4-.7 10.2.8M7.8 12.3c2.9-.8 6.4-.5 8.9.8M8.5 15.2c2.3-.6 5-.4 7 .6"/></svg>',
@@ -965,6 +1008,7 @@
     person:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M5 20.5c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg>',
     split:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-8L5.5 6.5M12 13l6.5-6.5"/><path d="M5 10V6.5H8.5M19 10V6.5H15.5"/></svg>',
     check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.7 2.7L16 9.5"/></svg>',
+    alert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 17H3L12 3Z"/><path d="M12 8v5M12 16.5h.01"/></svg>',
     chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg>'
   };
   var CAT_IC = {
@@ -3569,8 +3613,12 @@
   }
 
   function openSheet(html){
-    sheetReturnFocus = document.activeElement;
-    bodyOverflowBeforeSheet = document.body.style.overflow;
+    /* Replacing one sheet with another (for example “Cancel” back to the
+       expense form) must preserve the original page state for closeSheet. */
+    if(!sheet.classList.contains("show")){
+      sheetReturnFocus = document.activeElement;
+      bodyOverflowBeforeSheet = document.body.style.overflow;
+    }
     sheet.innerHTML = '<div class="grab"></div><button class="sheet-x" aria-label="Close">✕</button>' + html;
     var title = sheet.querySelector("h2");
     if(title){ title.id = "sheet-title"; sheet.setAttribute("aria-labelledby", "sheet-title"); }
@@ -3722,38 +3770,58 @@
   }
 
   function signedMoney(n){ return n < 0 ? "−"+fmt(-n) : fmt(n); }
+  function fundingExpenseIcon(candidate){
+    var note = String(candidate && candidate.note || "").toLowerCase();
+    return /\b(pc|computer|laptop|macbook)\b/.test(note) ? IC.computer : catIcon(candidate.cat);
+  }
   function fundingSeed(candidate, existing){
     return { editId: existing ? existing.id : null, amount:candidate.amount, cat:candidate.cat,
              note:candidate.note, date:candidate.date, photo:candidate.photo, catManual:true };
   }
   function openFundingSheet(candidate, existing, proposal){
+    /* Nothing is added to any debt until you confirm below. */
     var loan = proposal.loan;
     if(!loan && existing && existing.loanId){
       state.commitments.forEach(function(c){ if(c.id === existing.loanId && c.kind === "loan") loan = c; });
     }
     var oldPerson = existing && existing.fundingType === "person" ? existing.fundingPersonName : "";
     var mode = oldPerson ? "person" : (loan ? "loan" : "person");
+    var loanName = loan ? String(loan.name || "Dad").replace(/\s+loan$/i, "") : "";
+    var loanTitle = loan ? loanName + " loan" : "Dad loan";
     var people = state.debts.map(function(d){
       return '<button class="chip'+(d.name===oldPerson?" sel":"")+'" data-fperson="'+esc(d.id)+'">'+IC.person+esc(d.name)+'</button>';
     }).join("");
-    var options = (loan ? '<button class="chip'+(mode==="loan"?" sel":"")+'" data-funding="loan">'+IC.bank+' '+esc(loan.name)+' loan</button>' : "") +
-      '<button class="chip'+(mode==="person"?" sel":"")+'" data-funding="person">'+IC.person+' Friend / family</button>' +
-      '<button class="chip'+(mode==="none"?" sel":"")+'" data-funding="none">Not funded yet</button>';
+    var options = (loan ? '<button class="funding-option'+(mode==="loan"?" sel":"")+'" data-funding="loan" aria-pressed="'+(mode==="loan"?"true":"false")+'">' +
+      '<span class="funding-option-icon loan">'+IC.bank+'</span><span class="funding-option-copy"><b>'+esc(loanTitle)+'</b><span>Borrow from '+esc(loanName)+'</span></span>' +
+      '<span class="funding-radio">'+(mode==="loan"?"✓":"")+'</span></button>' : "") +
+      '<button class="funding-option'+(mode==="person"?" sel":"")+'" data-funding="person" aria-pressed="'+(mode==="person"?"true":"false")+'">' +
+      '<span class="funding-option-icon person">'+IC.person+'</span><span class="funding-option-copy"><b>Friend or family</b><span>Borrow from someone else</span></span>' +
+      '<span class="funding-radio">'+(mode==="person"?"✓":"")+'</span></button>' +
+      '<button class="funding-option'+(mode==="none"?" sel":"")+'" data-funding="none" aria-pressed="'+(mode==="none"?"true":"false")+'">' +
+      '<span class="funding-option-icon none">'+IC.history+'</span><span class="funding-option-copy"><b>Not funded yet</b><span>Add expense without funding now</span></span>' +
+      '<span class="funding-radio">'+(mode==="none"?"✓":"")+'</span></button>';
     var verb = existing ? "Save changes" : "Add expense";
     openSheet(
-      '<h2>Choose how to fund it</h2>' +
-      '<p class="hint" style="margin-top:0">This expense is larger than the money currently available. Nothing is added to any debt until you confirm below.</p>' +
-      '<div class="funding-expense"><div><span class="micro">Expense</span><b>'+esc(candidate.note || cat(candidate.cat).name)+'</b></div><strong class="money">'+fmt(candidate.amount)+'</strong></div>' +
-      '<div class="funding-math"><div><span>Available</span><b class="money">'+signedMoney(proposal.available)+'</b></div>' +
-      '<div><span>Shortfall to fund</span><b class="money funding-shortfall">'+fmt(proposal.shortfall)+'</b></div></div>' +
-      '<div class="micro" style="margin:18px 0 8px">Where should the shortfall go?</div>' +
-      '<div class="chips" id="funding-options">'+options+'</div>' +
+      '<div class="funding-screen">' +
+      '<h2>This expense needs funding</h2>' +
+      '<div class="funding-expense"><span class="funding-expense-icon">'+fundingExpenseIcon(candidate)+'</span><span class="funding-expense-copy"><span class="micro">Expense</span><b>'+esc(candidate.note || cat(candidate.cat).name)+'</b></span><strong class="money">'+fmt(candidate.amount)+'</strong></div>' +
+      '<div class="funding-math"><div><span>Available</span><b class="money">'+signedMoney(proposal.available)+'</b></div><div class="funding-minus" aria-hidden="true">−</div>' +
+      '<div><span>Shortfall</span><b class="money funding-shortfall">'+fmt(proposal.shortfall)+'</b></div></div>' +
+      '<div class="funding-question">How do you want to fund this?</div>' +
+      '<div class="funding-options" id="funding-options">'+options+'</div>' +
       '<div id="funding-detail"></div>' +
       '<button class="btn primary" id="funding-confirm">'+verb+' + loan</button>' +
-      '<button class="btn ghost" id="funding-cancel" style="margin-top:10px">Back to expense</button>'
+      '<button class="btn ghost" id="funding-cancel" aria-label="Cancel funding and return to the expense">Cancel</button>' +
+      '</div>'
     );
     function update(){
-      sheet.querySelectorAll("[data-funding]").forEach(function(b){ b.classList.toggle("sel", b.getAttribute("data-funding")===mode); });
+      sheet.querySelectorAll("[data-funding]").forEach(function(b){
+        var selected = b.getAttribute("data-funding")===mode;
+        b.classList.toggle("sel", selected);
+        b.setAttribute("aria-pressed", selected ? "true" : "false");
+        var radio = b.querySelector(".funding-radio");
+        if(radio) radio.textContent = selected ? "✓" : "";
+      });
       var personValue = $("#fund-person") ? $("#fund-person").value : oldPerson;
       var detail = "";
       if(mode === "loan"){
@@ -3761,13 +3829,14 @@
            before showing the replacement, otherwise editing the same expense
            appears to borrow it twice. */
         var balanceBeforeEdit = loan.remaining - (existing && existing.loanAdded > 0 ? existing.loanAdded : 0);
-        detail = '<div class="funding-preview"><span>'+esc(loan.name)+' balance</span><b class="money">'+fmt(balanceBeforeEdit)+' → '+fmt(balanceBeforeEdit + proposal.shortfall)+'</b></div>' +
-          '<div class="funding-note">'+IC.check+' This '+fmt(proposal.shortfall)+' will appear in this month’s Debt progress as extra borrowing.</div>';
+        detail = '<div class="funding-preview"><span class="funding-preview-icon">'+IC.bank+'</span><span class="funding-preview-copy"><span>'+esc(loanTitle)+' balance</span><b class="money">'+fmt(balanceBeforeEdit)+' <span class="arrow">→</span> '+fmt(balanceBeforeEdit + proposal.shortfall)+'</b></span></div>' +
+          '<div class="funding-warning">'+IC.alert+'<span>Debt grows <b class="money">'+fmt(proposal.shortfall)+'</b> this month</span></div>' +
+          '<div class="funding-track">'+IC.check+'<span>Track this in monthly debt progress</span></div>';
       }else if(mode === "person"){
         detail = '<div class="field"><label class="micro" for="fund-person">Who is covering it?</label>' +
           '<input id="fund-person" type="text" maxlength="30" placeholder="Dad, Ahmed…" value="'+esc(personValue)+'"></div>' +
           (people ? '<div class="chips funding-people">'+people+'</div>' : "") +
-          '<div class="funding-note">The shortfall becomes a dated borrowing entry with this person, attached to the expense.</div>';
+          '<div class="funding-note">'+IC.check+' The shortfall becomes a dated borrowing entry with this person, attached to the expense.</div>';
       }else{
         detail = '<div class="funding-note funding-note-warn">The expense will be saved, but no debt entry will be created. You can fund it later by editing this expense.</div>';
       }
