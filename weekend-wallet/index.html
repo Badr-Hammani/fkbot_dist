@@ -434,7 +434,7 @@
   .debt-bad{color:var(--bad); font-weight:800}.debt-good{color:var(--good); font-weight:800}.debt-neutral{color:var(--warn); font-weight:800}
   .debt-streak{margin-top:9px}
   .debt-card .btn{margin-top:12px; background:color-mix(in srgb, var(--bad) 10%, var(--card2)); border-color:color-mix(in srgb, var(--bad) 25%, var(--line)); color:var(--ink)}
-  /* v6.9 salary-cycle cash flow: a decision should feel clear before it feels clever. */
+  /* v7.0 salary-cycle cash flow: a decision should feel clear before it feels clever. */
   .funding-screen{padding:0 2px 2px}
   .funding-screen h2{margin:8px 36px 18px 0; font-size:28px; line-height:1.08; letter-spacing:-.035em}
   .funding-expense{display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:18px; background:linear-gradient(145deg, color-mix(in srgb, var(--card2) 86%, var(--card)), var(--card2)); border:1px solid color-mix(in srgb, var(--line) 88%, transparent)}
@@ -531,6 +531,14 @@
   }
   .chip .cat-dot{width:9px; height:9px}
   .chip.sel{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 16%, var(--card))}
+  /* Expense categories are primary actions on a phone: give each one a real
+     touch target and enough visual weight that "Other" is not the default. */
+  #f-cats{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:18px}
+  #f-cats .chip{width:100%; min-height:58px; justify-content:flex-start; padding:12px 13px; border-radius:16px; font-size:15px; font-weight:700; gap:10px;}
+  #f-cats .chip > span:first-child{width:30px; height:30px; border-radius:10px; display:grid !important; place-items:center; flex:none; background:color-mix(in srgb, currentColor 16%, var(--card2))}
+  #f-cats .chip > span:first-child svg{width:20px; height:20px}
+  #f-cats .chip.sel{box-shadow:0 0 0 1px var(--accent), 0 8px 22px color-mix(in srgb, var(--accent) 18%, transparent)}
+  #f-cats .chip:active{transform:scale(.98)}
   .row2{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px}
   .payday-range{display:grid; grid-template-columns:1fr 1fr; gap:8px}
   .payday-range input{min-width:0}
@@ -609,13 +617,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=6.9"></script>
+<script src="scan.js?v=7.0"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "6.9";
+  var APP_VERSION = "7.0";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
