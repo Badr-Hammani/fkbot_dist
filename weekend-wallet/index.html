@@ -434,7 +434,7 @@
   .debt-bad{color:var(--bad); font-weight:800}.debt-good{color:var(--good); font-weight:800}.debt-neutral{color:var(--warn); font-weight:800}
   .debt-streak{margin-top:9px}
   .debt-card .btn{margin-top:12px; background:color-mix(in srgb, var(--bad) 10%, var(--card2)); border-color:color-mix(in srgb, var(--bad) 25%, var(--line)); color:var(--ink)}
-  /* v6.5 salary-cycle budgeting: a decision should feel clear before it feels clever. */
+  /* v6.7 salary-cycle budgeting: a decision should feel clear before it feels clever. */
   .funding-screen{padding:0 2px 2px}
   .funding-screen h2{margin:8px 36px 18px 0; font-size:28px; line-height:1.08; letter-spacing:-.035em}
   .funding-expense{display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:18px; background:linear-gradient(145deg, color-mix(in srgb, var(--card2) 86%, var(--card)), var(--card2)); border:1px solid color-mix(in srgb, var(--line) 88%, transparent)}
@@ -609,13 +609,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=6.6"></script>
+<script src="scan.js?v=6.7"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "6.6";
+  var APP_VERSION = "6.7";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1370,7 +1370,7 @@
     if(state.salary > 0){
       var spendable = pm.left;
       var mFlow = ledgerFlowSince(monthStartIso());
-      var mLeft = spendable - mSpent - mFlow.net;
+      var mLeft = spendable - mSpent;
       var flowNote = "";
       if(mFlow.out > 0 || mFlow.inn > 0){
         var parts = [];
@@ -1385,7 +1385,7 @@
         '<div class="hero-caption">'+(mLeft<0? "over this "+periodWord : "left this "+periodWord) +
         ' · spent <strong class="money">'+fmt(mSpent)+'</strong> of <strong class="money">'+fmt(Math.max(spendable,0))+'</strong>'+flowNote+'</div>' +
         '<div class="meter">'+meterHtml(mSpent + Math.max(mFlow.net,0), Math.max(spendable,0))+
-        '<div class="meter-row"><span>after your loan, subscriptions & savings' +
+        '<div class="meter-row"><span>after your loan, subscriptions, savings & people paid' +
         (pm.extra ? (pm.extra > 0 ? ' · '+fmt(pm.extra)+' more than usual' : ' · '+fmt(-pm.extra)+' less than usual') : "") +
         '</span>'+paydayChip()+'</div></div>' +
         '</section>';
@@ -2317,10 +2317,12 @@
       if(p && +p.amt > 0){ paid += +p.amt; paidCount++; }
     });
     var savings = state.goals.reduce(function(s,g){ return s + (g.monthly||0); }, 0);
+    var peopleFlow = ledgerFlowSince(monthStartIso());
     return { bills: Math.round(bills*100)/100, planned: Math.round(planned*100)/100,
              extra: Math.round((bills - planned)*100)/100,
              paid: Math.round(paid*100)/100, paidCount: paidCount,
-             savings: savings, left: Math.round((state.salary - bills - savings)*100)/100 };
+             peopleOut: peopleFlow.out, peopleIn: peopleFlow.inn, peopleNet: peopleFlow.net,
+             savings: savings, left: Math.round((state.salary - bills - savings - peopleFlow.net)*100)/100 };
   }
   /* Every automatic shortfall lives on its expense. Manual history rows cover
      older borrowing that was already included in the loan balance. Keeping
@@ -2405,7 +2407,7 @@
   function moneyAvailableBeforeExpense(){
     var available = null;
     if(state.restAmount > 0 && state.restFrom) available = restRemaining();
-    else if(state.salary > 0) available = planMath().left - monthSpent() - ledgerFlowSince(monthStartIso()).net;
+    else if(state.salary > 0) available = planMath().left - monthSpent();
     return available === null || !isFinite(available) ? null : Math.round(available*100)/100;
   }
   function expenseCountsAgainstBudget(e){
@@ -2647,7 +2649,7 @@
       return state.restAmount - (spentFromPool() - spentOn(todayIso())) - poolFlow().net;
     }
     if(state.salary > 0){
-      return planMath().left - (monthSpent() - spentOn(todayIso())) - ledgerFlowSince(monthStartIso()).net;
+      return planMath().left - (monthSpent() - spentOn(todayIso()));
     }
     return null;
   }
@@ -2733,6 +2735,8 @@
         '<div class="flow-row"><span class="lbl">Salary</span><span class="val money">'+fmt(state.salary)+'</span></div>' +
         '<div class="flow-row minus"><span class="lbl">Loan & subscriptions</span><span class="val money">− '+fmt(m.bills)+'</span></div>' +
         '<div class="flow-row minus"><span class="lbl">Savings plan</span><span class="val money">− '+fmt(m.savings)+'</span></div>' +
+        (m.peopleOut > 0 ? '<div class="flow-row minus"><span class="lbl">People you paid</span><span class="val money">− '+fmt(m.peopleOut)+'</span></div>' : '') +
+        (m.peopleIn > 0 ? '<div class="flow-row"><span class="lbl">Money received from people</span><span class="val money" style="color:var(--good)">+ '+fmt(m.peopleIn)+'</span></div>' : '') +
         '<div class="flow-row flow-left"><span class="lbl">'+(m.left<0?"Over-committed":"Left to spend")+'</span>' +
         '<span class="val money'+(m.left<0?" neg":"")+'">'+fmt(Math.abs(m.left))+'</span></div>' +
         (m.left > 0 ?
@@ -3624,7 +3628,7 @@
     if(rr !== null) return rr;
     if(state.salary > 0){
       var pm = planMath();
-      return Math.round((pm.left - monthSpent() - ledgerFlowSince(monthStartIso()).net)*100)/100;
+      return Math.round((pm.left - monthSpent())*100)/100;
     }
     return null;
   }
