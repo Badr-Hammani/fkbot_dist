@@ -223,6 +223,9 @@
   .flow-row .lbl{color:var(--ink2)}
   .flow-row .val{font-weight:700}
   .flow-row.minus .val{color:var(--ink2)}
+  .ledger-history-item{width:100%; border:0; background:transparent; text-align:left; cursor:pointer; gap:10px}
+  .ledger-history-item .lbl{display:flex; flex-direction:column; min-width:0; line-height:1.35}
+  .ledger-history-item .edit-hint{color:var(--accent-deep); font-size:11px; font-weight:700; margin-top:2px}
   .flow-left{border-top:1px solid var(--line); margin-top:6px; padding-top:12px}
   .flow-left .lbl{color:var(--ink); font-weight:700}
   .flow-left .val{font-size:22px; font-weight:800; letter-spacing:-.02em}
@@ -256,6 +259,8 @@
   .row-item .subline.hl{color:var(--accent-deep); font-weight:700}
   .row-item .amt{font-weight:700; font-size:15px; flex:none}
   .row-item .amt small{font-weight:600; color:var(--ink3); font-size:11px}
+  .draw-actions{display:flex; flex-direction:column; align-items:stretch; gap:6px; flex:none}
+  .draw-actions .mini-btn{padding:6px 10px; font-size:11px}
   .addrow{
     width:100%; text-align:center; padding:13px; border-radius:16px; margin-top:10px;
     border:1.5px dashed var(--line); color:var(--accent-deep); font-weight:700; font-size:14px;
@@ -621,13 +626,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=7.1"></script>
+<script src="scan.js?v=7.2"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "7.1";
+  var APP_VERSION = "7.2";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -927,6 +932,27 @@
     return lbl;
   }
   function todayIso(){ return iso(new Date()); }
+  /* v7.2: borrowing records can be moved into the cycle when they happened. */
+  function datedTimestamp(date, referenceTs){
+    date = String(date || "");
+    if(!ISO_RE.test(date) || iso(fromIso(date)) !== date || date > todayIso()) return 0;
+    var reference = new Date(+referenceTs || Date.now()), next = fromIso(date);
+    next.setHours(reference.getHours(), reference.getMinutes(), reference.getSeconds(), reference.getMilliseconds());
+    return next.getTime();
+  }
+  function setLedgerLogDate(log, date){
+    var next = datedTimestamp(date, log && log.ts);
+    if(!log || !next) return false;
+    log.ts = next;
+    return true;
+  }
+  function setLoanDrawDate(draw, date){
+    var next = datedTimestamp(date, draw && draw.ts);
+    if(!draw || !next) return false;
+    draw.date = date;
+    draw.ts = next;
+    return true;
+  }
   function currentWeekend(){ return weekendOf(todayIso()); }
   function isLiveWeekend(friIso){
     var t = fromIso(todayIso()), f = fromIso(friIso), s = new Date(f); s.setDate(s.getDate()+2);
@@ -1647,6 +1673,38 @@
         : "All settled with "+d.name+"!");
   }
 
+  function openLedgerDateSheet(personId, logId){
+    var d = null, log = null;
+    state.debts.forEach(function(person){
+      if(person.id !== personId) return;
+      d = person;
+      (person.log||[]).forEach(function(entry){ if(entry.id === logId) log = entry; });
+    });
+    if(!d || !log) return;
+    var beforeTs = log.ts, oldDate = iso(new Date(log.ts));
+    openSheet(
+      '<h2>Change money log date</h2>'+
+      '<p class="hint" style="margin-top:0">'+esc(log.dir==="b"?"They gave you":"You gave them")+' '+fmt(log.amt)+' with '+esc(d.name)+'.</p>'+
+      '<div class="field"><label class="micro" for="ledger-date">Date</label>'+
+      '<input id="ledger-date" type="date" value="'+oldDate+'" max="'+todayIso()+'"></div>'+
+      '<div class="hint">Only the date changes. The amount, person and balance stay exactly the same. The salary cycle and History use the new date.</div>'+
+      '<button class="btn primary" id="ledger-date-save">Save date</button>'+
+      '<button class="btn ghost" id="ledger-date-cancel" style="margin-top:10px">Cancel</button>'
+    );
+    $("#ledger-date-save").addEventListener("click", function(){
+      var date = $("#ledger-date").value;
+      if(!setLedgerLogDate(log, date)){ toast("Choose today or an earlier valid date"); return; }
+      if(!save()){
+        log.ts = beforeTs;
+        toast("Could not save — the date was not changed");
+        return;
+      }
+      closeSheet(); render();
+      toast("Money log moved to "+fromIso(date).toLocaleDateString(undefined,{month:"short",day:"numeric"}));
+    });
+    $("#ledger-date-cancel").addEventListener("click", closeSheet);
+  }
+
   function openBorrowSheet(prefillAmt){
     var chips = state.debts.map(function(d){
       return '<button class="chip" data-bname="'+esc(d.name)+'">'+IC.person+esc(d.name)+'</button>';
@@ -1658,6 +1716,8 @@
       (chips? '<div class="chips">'+chips+'</div>' : "") +
       '<div class="field"><label class="micro" for="b-amt">How much?</label>' +
       '<input id="b-amt" type="text" inputmode="decimal" min="0" step="0.01"'+(prefillAmt>0? ' value="'+prefillAmt+'"':"")+'></div>' +
+      '<div class="field"><label class="micro" for="b-date">When did it happen?</label>' +
+      '<input id="b-date" type="date" value="'+todayIso()+'" max="'+todayIso()+'"></div>' +
       '<div class="row2">' +
       '<button class="btn" id="b-igave">I gave them</button>' +
       '<button class="btn primary" id="b-theygave">They gave me</button></div>' +
@@ -1669,13 +1729,16 @@
     function submit(dir, btn){
       var name = $("#b-name").value.trim();
       var amt = num($("#b-amt").value);
+      var date = $("#b-date").value;
       if(!name){ toast("Who was it with?"); return; }
       if(!(amt > 0)){ toast("Enter the amount"); return; }
+      var atTs = datedTimestamp(date);
+      if(!atTs){ toast("Choose today or an earlier valid date"); return; }
       btn.disabled = true;
       var d = findOrCreatePerson(name);
       amt = Math.round(amt*100)/100;
       var newBorrow = dir === "b" ? classifyIncoming(d.balance, amt).borrow : 0;
-      ledgerAdd(d, dir, amt, "");
+      ledgerAdd(d, dir, amt, "", atTs);
       save(); closeSheet(); render();
       offerBudgetBump(d, newBorrow);
     }
@@ -1688,15 +1751,18 @@
     state.debts.forEach(function(x){ if(x.id===id) d = x; });
     if(!d) return;
     var hist = (d.log||[]).slice(-6).reverse().map(function(l){
-      return '<div class="flow-row" style="padding:5px 0"><span class="lbl">'+(l.dir==="b"?"they gave":"you gave")+
+      return '<button type="button" class="flow-row ledger-history-item" data-ledger-edit="'+esc(l.id)+'" style="padding:5px 0"><span class="lbl"><span>'+(l.dir==="b"?"they gave":"you gave")+
         (l.note? " · "+esc(l.note) : "")+
-        ' · '+new Date(l.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+'</span>' +
-        '<span class="val money" style="color:'+(l.dir==="b"?"var(--good)":"var(--bad)")+'">'+(l.dir==="b"?"+":"−")+fmt(l.amt)+'</span></div>';
+        ' · '+new Date(l.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+'</span><span class="edit-hint">Edit date</span></span>' +
+        '<span class="val money" style="color:'+(l.dir==="b"?"var(--good)":"var(--bad)")+'">'+(l.dir==="b"?"+":"−")+fmt(l.amt)+'</span></button>';
     }).join("");
     openSheet(
       '<h2>'+esc(d.name)+'</h2>' +
       '<p style="color:var(--ink2); font-size:14px; margin:0 0 14px">'+balanceLabel(d)+'</p>' +
-      '<div class="field"><input id="d2-amt" type="text" inputmode="decimal" min="0" step="0.01" placeholder="Amount"></div>' +
+      '<div class="row2"><div><label class="micro" for="d2-amt" style="display:block; margin-bottom:6px">Amount</label>'+
+      '<input id="d2-amt" type="text" inputmode="decimal" min="0" step="0.01" placeholder="Amount"></div>'+
+      '<div><label class="micro" for="d2-date" style="display:block; margin-bottom:6px">Date</label>'+
+      '<input id="d2-date" type="date" value="'+todayIso()+'" max="'+todayIso()+'"></div></div>' +
       '<div class="row2">' +
       '<button class="btn" id="d2-igave">I gave them</button>' +
       '<button class="btn primary" id="d2-theygave">They gave me</button></div>' +
@@ -1705,6 +1771,9 @@
       ((d.log||[]).length? '<button class="btn ghost" id="d2-undo" style="color:var(--ink2)">Undo last entry</button><div style="height:10px"></div>' : "") +
       '<button class="btn danger ghost" id="d2-del">Remove '+esc(d.name)+'</button>'
     );
+    sheet.querySelectorAll("[data-ledger-edit]").forEach(function(b){
+      b.addEventListener("click", function(){ openLedgerDateSheet(d.id, b.getAttribute("data-ledger-edit")); });
+    });
     var undoBtn = $("#d2-undo");
     if(undoBtn) undoBtn.addEventListener("click", function(){
       var last = d.log.pop();
@@ -1719,11 +1788,14 @@
     });
     function submit(dir, btn){
       var a = num($("#d2-amt").value);
+      var date = $("#d2-date").value;
       if(!(a > 0)){ toast("Enter the amount first"); return; }
+      var atTs = datedTimestamp(date);
+      if(!atTs){ toast("Choose today or an earlier valid date"); return; }
       btn.disabled = true;
       a = Math.round(a*100)/100;
       var newBorrow = dir === "b" ? classifyIncoming(d.balance, a).borrow : 0;
-      ledgerAdd(d, dir, a, "");
+      ledgerAdd(d, dir, a, "", atTs);
       save(); closeSheet(); render();
       offerBudgetBump(d, newBorrow);
     }
@@ -3011,16 +3083,47 @@
       '<div class="hint">Automatic shortfalls appear here by expense. Use “earlier borrowing” only for money already included in this balance.</div></div>';
   }
 
+  function openLoanDrawDateSheet(c, drawId){
+    var draw = null;
+    (c && c.draws || []).forEach(function(item){ if(item.id === drawId) draw = item; });
+    if(!draw) return;
+    var beforeDate = draw.date, beforeTs = draw.ts;
+    openSheet(
+      '<h2>Change borrowing date</h2>'+
+      '<p class="hint" style="margin-top:0">'+esc(draw.note)+' · '+fmt(draw.amount)+' recorded for '+esc(c.name)+'.</p>'+
+      '<div class="field"><label class="micro" for="draw-edit-date">Date</label>'+
+      '<input id="draw-edit-date" type="date" value="'+esc(draw.date)+'" max="'+todayIso()+'"></div>'+
+      '<div class="hint">Only the date changes. The amount and loan balance stay exactly the same.</div>'+
+      '<button class="btn primary" id="draw-edit-save">Save date</button>'+
+      '<button class="btn ghost" id="draw-edit-cancel" style="margin-top:10px">Cancel</button>'
+    );
+    $("#draw-edit-save").addEventListener("click", function(){
+      var date = $("#draw-edit-date").value;
+      if(!setLoanDrawDate(draw, date)){ toast("Choose today or an earlier valid date"); return; }
+      if(!save()){
+        draw.date = beforeDate;
+        draw.ts = beforeTs;
+        toast("Could not save — the date was not changed");
+        return;
+      }
+      closeSheet(); render();
+      toast("Borrowing record moved to "+fromIso(date).toLocaleDateString(undefined,{month:"short",day:"numeric"}));
+    });
+    $("#draw-edit-cancel").addEventListener("click", closeSheet);
+  }
+
   function openLoanDrawSheet(c, prefillAmt){
     if(!c || c.kind !== "loan") return;
     var manual = (c.draws||[]).slice().sort(function(a,b){
       return a.date === b.date ? (b.ts||0)-(a.ts||0) : (a.date < b.date ? 1 : -1);
     });
     var rows = manual.map(function(d){
-      return '<button class="row-item" data-draw-remove="'+esc(d.id)+'"><span class="name"><span class="ttl">'+esc(d.note)+'</span>'+
+      return '<div class="row-item"><span class="name"><span class="ttl">'+esc(d.note)+'</span>'+
         '<span class="subline">'+fromIso(d.date).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})+
         ' · '+(d.balanceApplied?'added to balance':'history only')+'</span></span>'+
-        '<span class="amt money">+'+fmt(d.amount)+'<br><small>remove</small></span></button>';
+        '<span class="draw-actions"><span class="amt money">+'+fmt(d.amount)+'</span>'+
+        '<button class="mini-btn" type="button" data-draw-edit="'+esc(d.id)+'">Edit date</button>'+
+        '<button class="mini-btn" type="button" data-draw-remove="'+esc(d.id)+'">Remove</button></span></div>';
     }).join("");
     openSheet(
       '<h2>Track borrowing — '+esc(c.name)+'</h2>'+
@@ -3052,10 +3155,13 @@
       toast(fmt(amount)+" added to "+c.name+" borrowing history");
     });
     $("#draw-back").addEventListener("click", function(){ openCommitmentSheet(c.id); });
+    sheet.querySelectorAll("[data-draw-edit]").forEach(function(b){
+      b.addEventListener("click", function(){ openLoanDrawDateSheet(c, b.getAttribute("data-draw-edit")); });
+    });
     sheet.querySelectorAll("[data-draw-remove]").forEach(function(b){
       var armed = false;
       b.addEventListener("click", function(){
-        if(!armed){ armed = true; b.querySelector("small").textContent = "tap again"; return; }
+        if(!armed){ armed = true; b.textContent = "Tap again"; return; }
         var id = b.getAttribute("data-draw-remove"), draw = null;
         (c.draws||[]).forEach(function(d){ if(d.id === id) draw = d; });
         if(!draw) return;
