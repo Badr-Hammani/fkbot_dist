@@ -434,7 +434,7 @@
   .debt-bad{color:var(--bad); font-weight:800}.debt-good{color:var(--good); font-weight:800}.debt-neutral{color:var(--warn); font-weight:800}
   .debt-streak{margin-top:9px}
   .debt-card .btn{margin-top:12px; background:color-mix(in srgb, var(--bad) 10%, var(--card2)); border-color:color-mix(in srgb, var(--bad) 25%, var(--line)); color:var(--ink)}
-  /* v6.8 salary-cycle cash flow: a decision should feel clear before it feels clever. */
+  /* v6.9 salary-cycle cash flow: a decision should feel clear before it feels clever. */
   .funding-screen{padding:0 2px 2px}
   .funding-screen h2{margin:8px 36px 18px 0; font-size:28px; line-height:1.08; letter-spacing:-.035em}
   .funding-expense{display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:18px; background:linear-gradient(145deg, color-mix(in srgb, var(--card2) 86%, var(--card)), var(--card2)); border:1px solid color-mix(in srgb, var(--line) 88%, transparent)}
@@ -609,13 +609,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=6.8"></script>
+<script src="scan.js?v=6.9"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "6.8";
+  var APP_VERSION = "6.9";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1565,6 +1565,7 @@
   function dayGroups(limit){
     var rows = state.expenses.map(function(e){ return { date:e.date, ts:e.ts||0, exp:e }; })
       .concat(ledgerItems().map(function(it){ return { date:it.date, ts:it.ts||0, led:it }; }))
+      .concat(salaryItems().map(function(it){ return { date:it.date, ts:it.ts||0, salary:it }; }))
       .sort(function(a,b){ return a.date < b.date ? 1 : a.date > b.date ? -1 : b.ts-a.ts; });
     var days = {}, order = [];
     rows.forEach(function(r){
@@ -1577,7 +1578,9 @@
     return order.map(function(d){
       /* the day's real hit on your pocket: what you spent, plus money you
          handed over, minus money that came back to you */
-      var out = days[d].reduce(function(s,r){ return s + (r.exp ? r.exp.amount : -r.led.cash); }, 0);
+      var out = days[d].reduce(function(s,r){
+        return s + (r.exp ? r.exp.amount : r.led ? -r.led.cash : -r.salary.amount);
+      }, 0);
       return { date:d, items:days[d], out: Math.round(out*100)/100 };
     });
   }
@@ -1585,6 +1588,7 @@
     var seen = {}, n = 0;
     state.expenses.forEach(function(e){ if(!seen[e.date]){ seen[e.date]=1; n++; } });
     ledgerItems().forEach(function(it){ if(!seen[it.date]){ seen[it.date]=1; n++; } });
+    salaryItems().forEach(function(it){ if(!seen[it.date]){ seen[it.date]=1; n++; } });
     return n;
   }
   function dayName(d){
@@ -1594,7 +1598,7 @@
     return fromIso(d).toLocaleDateString(undefined,{weekday:"long", month:"short", day:"numeric"});
   }
   function dayTotalText(out){ return out < 0 ? "+"+fmt(-out) : fmt(out); }
-  function dayRow(r){ return r.exp ? expRow(r.exp) : ledgerRow(r.led); }
+  function dayRow(r){ return r.exp ? expRow(r.exp) : r.led ? ledgerRow(r.led) : salaryRow(r.salary); }
 
   /* borrowing doesn't silently change your budget — you decide */
   function offerBudgetBump(d, newBorrow){
@@ -1965,6 +1969,20 @@
   }
 
   var LEDGER_LABEL = { gave:"you gave", repaid:"paid you back", borrowed:"you borrowed", mixed:"paid you back" };
+  function salaryItems(){
+    return salaryReceiptEntries().map(function(item){
+      return { name:"Salary", amount:item.amount, date:item.date,
+               ts:item.ts || fromIso(item.date).getTime() };
+    });
+  }
+  function salaryRow(it){
+    return '<div class="exp salary-entry">' +
+      '<span class="exp-thumb" style="color:var(--good); background:color-mix(in srgb, var(--good) 15%, var(--card2))">'+IC.banknote+'</span>' +
+      '<span class="exp-main"><span class="exp-title">Salary received</span>' +
+      '<span class="exp-sub"><span class="cat-dot" style="background:var(--good)"></span>income · '+
+      fromIso(it.date).toLocaleDateString(undefined,{month:"short",day:"numeric"})+'</span></span>' +
+      '<span class="exp-amt money" style="color:var(--good)">+'+fmt(it.amount)+'</span></div>';
+  }
   function ledgerRow(it){
     var v = it.cash < 0 ? "--bad" : it.cash > 0 ? "--good" : "--ink2";
     var sign = it.cash < 0 ? "−" : it.cash > 0 ? "+" : "";
@@ -2065,7 +2083,7 @@
       '<div class="stat"><span class="micro">Days</span><div class="v money">'+groups.length+'</div></div>' +
       '<div class="stat"><span class="micro">Avg a day</span><div class="v money">'+fmt(spent/groups.length)+'</div></div>' +
       '<div class="stat"><span class="micro">Biggest</span><div class="v money">'+
-        fmt(Math.max.apply(null, groups.map(function(g){ return g.out; })))+'</div></div></div>';
+        fmt(Math.max.apply(null, groups.map(function(g){ return Math.max(g.out, 0); })))+'</div></div></div>';
     var mk = "";
     groups.forEach(function(g){
       var m = g.date.slice(0,7);
@@ -2110,6 +2128,7 @@
     var seen = {};
     state.expenses.forEach(function(e){ seen[keyFor(e.date)] = 1; });
     ledgerItems().forEach(function(it){ seen[keyFor(it.date)] = 1; });
+    salaryItems().forEach(function(it){ seen[keyFor(it.date)] = 1; });
     /* Show a newly opened salary cycle even before its first expense, so the
        user can see that the previous calendar records are historical. */
     if(cycleHistory) seen[monthKey()] = 1;
@@ -2128,8 +2147,11 @@
       var label = cycleHistory ? periodLabel(k) : fromIso(k+"-01").toLocaleDateString(undefined,{month:"long", year:"numeric"});
       var bits = [n+' expense'+(n===1?"":"s")];
       var given = monthGivenOut(k), miss = monthMissing(k);
+      var received = salaryItems().filter(function(it){ return keyFor(it.date)===k; })
+        .reduce(function(s,it){ return s + it.amount; }, 0);
       if(given > 0) bits.push('<span style="color:var(--bad)">'+fmt(given)+' given out</span>');
       if(miss > 0) bits.push('<span style="color:var(--c-missing)">'+fmt(miss)+' not logged</span>');
+      if(received > 0) bits.push('<span style="color:var(--good)">salary received '+fmt(received)+'</span>');
 
       h += '<div class="wk"><div class="wk-top">' +
         '<span class="wk-label">'+label+(now?' · now':'')+'</span>' +
@@ -2612,7 +2634,7 @@
           var c = classifyIncoming(bal, l.amt);
           bal += l.amt;
           kind = c.repay <= 0 ? "borrowed" : c.repay >= l.amt ? "repaid" : "mixed";
-          cash = c.repay;                       // borrowed money isn't yours to spend twice
+          cash = l.amt;                         // every incoming transfer is green cash in the log
         }else{
           bal -= l.amt;
           kind = "gave";
