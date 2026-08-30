@@ -21,7 +21,9 @@
     --accent:#e89e24; --accent-deep:#8a5a00; --on-accent:#241b08;
     --good:#006300; --warn:#b97900; --bad:#d03b3b;
     --c-food:#eda100; --c-drinks:#2a78d6; --c-out:#4a3aa7;
-    --c-transport:#1baf7a; --c-shop:#e34948; --c-other:#008300; --c-missing:#7a7391; --spotify:#138a43;
+    --c-transport:#1baf7a; --c-shop:#e34948; --c-bills:#6e5dd3; --c-health:#e55375;
+    --c-home:#b76b26; --c-personal:#b04ac7; --c-education:#3d7ac5; --c-gifts:#db6b2e;
+    --c-travel:#1c9994; --c-other:#008300; --c-missing:#7a7391; --spotify:#138a43;
     --shadow:0 10px 30px rgba(35,32,48,.12);
     --sheet-shadow:0 -18px 50px rgba(35,32,48,.22);
   }
@@ -33,7 +35,9 @@
       --accent:#f2a93b; --accent-deep:#f2a93b; --on-accent:#241b08;
       --good:#0ca30c; --warn:#fab219; --bad:#e66767;
       --c-food:#c98500; --c-drinks:#3987e5; --c-out:#9085e9;
-      --c-transport:#199e70; --c-shop:#e66767; --c-other:#008300; --c-missing:#9a92b4; --spotify:#1ed760;
+      --c-transport:#199e70; --c-shop:#e66767; --c-bills:#a193f1; --c-health:#ed718d;
+      --c-home:#dc9348; --c-personal:#d179ed; --c-education:#62a1e8; --c-gifts:#ee8a4e;
+      --c-travel:#50c3bd; --c-other:#008300; --c-missing:#9a92b4; --spotify:#1ed760;
       --shadow:0 10px 30px rgba(0,0,0,.4);
       --sheet-shadow:0 -18px 50px rgba(0,0,0,.55);
     }
@@ -434,7 +438,7 @@
   .debt-bad{color:var(--bad); font-weight:800}.debt-good{color:var(--good); font-weight:800}.debt-neutral{color:var(--warn); font-weight:800}
   .debt-streak{margin-top:9px}
   .debt-card .btn{margin-top:12px; background:color-mix(in srgb, var(--bad) 10%, var(--card2)); border-color:color-mix(in srgb, var(--bad) 25%, var(--line)); color:var(--ink)}
-  /* v7.0 salary-cycle cash flow: a decision should feel clear before it feels clever. */
+  /* v7.1 broader categories: a decision should feel clear before it feels clever. */
   .funding-screen{padding:0 2px 2px}
   .funding-screen h2{margin:8px 36px 18px 0; font-size:28px; line-height:1.08; letter-spacing:-.035em}
   .funding-expense{display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:18px; background:linear-gradient(145deg, color-mix(in srgb, var(--card2) 86%, var(--card)), var(--card2)); border:1px solid color-mix(in srgb, var(--line) 88%, transparent)}
@@ -617,13 +621,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=7.0"></script>
+<script src="scan.js?v=7.1"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "7.0";
+  var APP_VERSION = "7.1";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -631,6 +635,13 @@
     {id:"out",       name:"Going out", v:"--c-out"},
     {id:"transport", name:"Transport", v:"--c-transport"},
     {id:"shop",      name:"Shopping",  v:"--c-shop"},
+    {id:"bills",     name:"Bills",     v:"--c-bills"},
+    {id:"health",    name:"Health",    v:"--c-health"},
+    {id:"home",      name:"Home",      v:"--c-home"},
+    {id:"personal",  name:"Personal care", v:"--c-personal"},
+    {id:"education", name:"Education", v:"--c-education"},
+    {id:"gifts",     name:"Gifts",     v:"--c-gifts"},
+    {id:"travel",    name:"Travel",    v:"--c-travel"},
     {id:"other",     name:"Other",     v:"--c-other"},
     {id:"missing",   name:"Not logged", v:"--c-missing"}
   ];
@@ -1107,6 +1118,13 @@
     out:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9V6.5A1.5 1.5 0 0 1 5 5h14a1.5 1.5 0 0 1 1.5 1.5V9a3 3 0 0 0 0 6v2.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5V15a3 3 0 0 0 0-6Z"/><path d="M14 5v2.5M14 11v2M14 16.5V19"/></svg>',
     transport:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15.5 6.5 9a2 2 0 0 1 2-1.5h7A2 2 0 0 1 17.5 9L19 15.5M5 15.5h14M5 15.5V19a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h8v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-3.5"/><path d="M7.5 12.5h.01M16.5 12.5h.01"/></svg>',
     shop:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8h12l1 12.5H5L6 8Z"/><path d="M9 10.5V6a3 3 0 0 1 6 0v4.5"/></svg>',
+    bills:IC.bank,
+    health:IC.check,
+    home:IC.home,
+    personal:IC.person,
+    education:IC.target,
+    gifts:IC.sparkle,
+    travel:IC.share,
     other:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5.6L12 14 3 8.6 12 3Z" opacity="0"/><path d="M3.5 12.5 11.5 4.5a1.7 1.7 0 0 1 1.2-.5h6.3a1.5 1.5 0 0 1 1.5 1.5v6.3c0 .45-.18.88-.5 1.2l-8 8a1.5 1.5 0 0 1-2.12 0l-6.38-6.38a1.5 1.5 0 0 1 0-2.12Z"/><circle cx="16" cy="8" r="1.1"/></svg>',
     missing:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12v17l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4v-17Z"/><path d="M10 9.2a2 2 0 1 1 2.6 1.9c-.4.15-.6.5-.6.95v.6"/><path d="M12 15.6h.01"/></svg>'
   };

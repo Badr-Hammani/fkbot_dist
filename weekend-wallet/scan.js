@@ -121,7 +121,14 @@
     { cat: "drinks", re: /\bbar\b|\bpub\b|lounge|brasserie|bi[eè]re|beer|\bwine\b|cocktail|chicha|shisha|juice|jus\b|soda|coca|red\s*bull|monster/i },
     { cat: "out", re: /cin[eé]|movie|megarama|bowling|karting|\bclub\b|billetterie|concert|festival|spa\b|hammam|\bgame\b|gaming|playstation|ps5|match\b|foot\b|five\b|billard|pool\b|snooker|padel/i },
     { cat: "transport", re: /taxi|uber|careem|indrive|bolt\b|oncf|\bctm\b|tram|train\b|\bbus\b|parking|autoroute|p[eé]age|afriquia|winxo|petromin|station|essence|gasoil|fuel|carburant|car\s*wash|moto\b/i },
-    { cat: "shop", re: /zara|bershka|pull\s*&?\s*bear|kiabi|decathlon|electro|pharmacie|pharmacy|parfumerie|boutique|\bstore\b|\bshop\b|v[eê]tement|chaussure|shoes|sneaker|clothes|t-?shirt|jean\b|amazon|aliexpress|jumia|cadeau|gift\b|montre|watch\b/i },
+    { cat: "bills", re: /rent|loyer|electric|electricit[eé]|water|eau\b|internet|wifi|mobile|phone|t[eé]l[eé]phone|facture|utility|utilities/i },
+    { cat: "health", re: /doctor|docteur|dentist|dentiste|clinic|clinique|hospital|h[oô]pital|pharmacie|pharmacy|medicine|m[eé]dicament|prescription|optician|lunettes/i },
+    { cat: "home", re: /furniture|meuble|household|maison|cleaning|nettoyage|kitchen|cuisine|hardware|decoration|d[eé]coration/i },
+    { cat: "personal", re: /barber|coiffeur|haircut|salon|beauty|beaut[eé]|cosmetic|parfumerie|parfum|skincare|makeup/i },
+    { cat: "education", re: /school|[eé]cole|university|universit[eé]|course|cours|training|formation|tuition|livre|\bbook\b/i },
+    { cat: "gifts", re: /cadeau|gift\b|present\b|donation|don\b/i },
+    { cat: "travel", re: /hotel|airbnb|flight|vol\b|voyage|travel|tourism|tourisme|hostel/i },
+    { cat: "shop", re: /zara|bershka|pull\s*&?\s*bear|kiabi|decathlon|electro|boutique|\bstore\b|\bshop\b|v[eê]tement|chaussure|shoes|sneaker|clothes|t-?shirt|jean\b|amazon|aliexpress|jumia|montre|watch\b/i },
     { cat: "food", re: /caf[eé]|coffee|kahwa|9ahwa|restaurant|\bresto\b|pizz|burger|tacos|kebab|shawarma|panini|sandwich|sushi|pasta|couscous|taji?ne|tagine|snack|grill|food|breakfast|brunch|lunch|dinner|d[eé]jeuner|d[iî]ner|petit\s*dej|boulangerie|patisserie|p[aâ]tisserie|glovo|mcdo|mcdonald|kfc|dominos|marjane|carrefour|acima|aswak|\bbim\b|hanout|market|supermarch|grocer|[eé]picerie|fruit|l[eé]gume/i }
   ];
 
