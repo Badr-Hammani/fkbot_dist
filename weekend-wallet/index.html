@@ -331,6 +331,10 @@
   .plan-budget-panel .btn.primary{font-size:16px; box-shadow:0 9px 24px rgba(232,158,36,.22)}
   .plan-budget-actions{display:grid; gap:9px}
   .plan-budget-panel .hint{margin:12px 2px 0}
+  .plan-budget-source{display:inline-flex; align-items:center; margin-top:2px; padding:4px 8px; border-radius:999px; font-size:10px; font-weight:850; letter-spacing:.08em; text-transform:uppercase}
+  .plan-budget-source.active{color:var(--good); background:color-mix(in srgb, var(--good) 12%, var(--card2))}
+  .plan-budget-source.planned{color:var(--accent-deep); background:color-mix(in srgb, var(--accent) 12%, var(--card2))}
+  .plan-budget-source-copy{margin:8px 0 0; color:var(--ink2); font-size:12px; line-height:1.45}
 
   .commitment-list{display:grid; gap:10px}
   .commitment-card{
@@ -423,6 +427,7 @@
   .safe-card-top > svg{width:30px; height:30px; color:var(--accent-deep); flex:none}
   .safe-amount{font-size:43px; line-height:1; letter-spacing:-.045em; margin-top:7px}
   .safe-card p,.debt-card p{margin:5px 0 0; color:var(--ink2); font-size:13px}
+  .safe-over-copy{margin-top:6px; color:var(--bad); font-size:12.5px; font-weight:800}
   .safe-stats,.debt-card-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:16px}
   .safe-stats > div,.debt-card-grid > div{background:color-mix(in srgb, var(--card) 72%, transparent); border:1px solid color-mix(in srgb, var(--line) 82%, transparent); border-radius:14px; padding:10px 12px}
   .safe-stats span,.debt-card-grid span{display:block; color:var(--ink3); font-size:10px; text-transform:uppercase; letter-spacing:.08em; font-weight:700}
@@ -436,6 +441,8 @@
   .safe-card-foot button{background:var(--accent); color:var(--on-accent); border-radius:999px; padding:9px 13px; font-size:12px; font-weight:800; white-space:nowrap}
   .debt-card{background:linear-gradient(145deg, color-mix(in srgb, var(--bad) 9%, var(--card)), var(--card)); border:1px solid color-mix(in srgb, var(--bad) 25%, var(--line))}
   .debt-card h2{margin:6px 0 0; font-size:20px; letter-spacing:-.02em}
+  .debt-cycle-label{display:block; margin-top:6px; color:var(--ink3); font-size:10.5px; font-weight:750; letter-spacing:.07em; text-transform:uppercase}
+  .debt-movement{margin-top:6px !important; font-size:13px !important; font-weight:850}
   .debt-balance{font-size:24px; font-weight:850; letter-spacing:-.03em; text-align:right}
   .debt-card-grid{grid-template-columns:1fr 1fr 1fr; margin-top:15px}
   .debt-card-grid > div:last-child{grid-column:auto}
@@ -513,6 +520,8 @@
     max-height:92dvh; overflow-y:auto;
   }
   .sheet.show{transform:translateY(0)}
+  .sheet[aria-hidden="true"]{visibility:hidden; pointer-events:none}
+  .sheet[aria-hidden="false"]{visibility:visible}
   @media (prefers-reduced-motion: reduce){ .sheet{transition:none} .backdrop{transition:none} }
   .grab{width:40px; height:5px; border-radius:3px; background:var(--line); margin:0 auto 14px}
   .sheet-x{
@@ -579,6 +588,8 @@
 
   .viewer{position:fixed; inset:0; z-index:90; background:rgba(8,6,18,.94); display:none; place-items:center; padding:20px}
   .viewer.show{display:grid}
+  .viewer[aria-hidden="true"]{visibility:hidden; pointer-events:none}
+  .viewer[aria-hidden="false"]{visibility:visible}
   .viewer img{max-width:100%; max-height:82dvh; border-radius:12px}
   .viewer .close{position:absolute; top:calc(16px + env(safe-area-inset-top)); right:18px; color:#fff; font-size:15px; font-weight:700; background:rgba(255,255,255,.14); padding:8px 14px; border-radius:999px}
 
@@ -626,13 +637,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=7.2"></script>
+<script src="scan.js?v=7.3"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "7.2";
+  var APP_VERSION = "7.3";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1356,12 +1367,13 @@
   function safeSpendCard(){
     var s = safeSpendSnapshot();
     if(!s) return "";
-    var status = s.over > 0 ? '<span class="safe-status bad">'+fmt(s.over)+' over today’s guardrail</span>'
+    var status = s.over > 0 ? '<span class="safe-status bad">Guardrail exceeded</span>'
       : '<span class="safe-status">'+fmt(s.daily)+' daily guardrail</span>';
+    var overLine = s.over > 0 ? '<div class="safe-over-copy">You’re '+fmt(s.over)+' over today’s guardrail</div>' : '';
     return '<section class="safe-card">'+
-      '<div class="safe-card-top"><div><span class="micro">Safe to spend</span><h2 class="safe-amount money">'+fmt(s.left)+'</h2><p>left for today · after what you already spent</p></div>'+IC.wallet+'</div>'+
+      '<div class="safe-card-top"><div><span class="micro">Safe to spend</span><h2 class="safe-amount money">'+fmt(s.left)+'</h2>'+overLine+'<p>left for today · after what you already spent</p></div>'+IC.wallet+'</div>'+
       '<div class="safe-stats"><div><span>Today’s limit</span><b class="money">'+fmt(s.daily)+'</b></div>'+
-      '<div><span>Weekend room</span><b class="money">'+fmt(s.week)+'</b></div></div>'+
+      '<div><span>Next 7 days</span><b class="money">'+fmt(s.week)+'</b></div></div>'+
       '<div class="safe-insight"><span>'+IC.check+'</span><div><b>What if I borrow nothing this week?</b><br><span>Stay inside about <strong class="money">'+fmt(s.week)+'</strong> of planned spending and no new shortfall needs to be recorded.</span></div></div>'+
       '<div class="safe-card-foot">'+status+'<button id="h-protect">Protect today’s limit</button></div></section>';
   }
@@ -1369,11 +1381,12 @@
     var s = debtSnapshot();
     if(!s) return "";
     var periodWord = salaryReceiptEntries().length > 0 ? "cycle" : "month";
+    var cycleLabel = periodLabel(monthKey());
     var movement = s.now.net > 0 ? '<span class="debt-bad">Debt grew '+fmt(s.now.net)+' this '+periodWord+'</span>'
       : s.now.net < 0 ? '<span class="debt-good">Debt fell '+fmt(-s.now.net)+' this '+periodWord+'</span>'
       : '<span class="debt-neutral">No debt change this '+periodWord+'</span>';
     var streak = s.noBorrowDays === null ? "No new borrowing recorded yet" : s.noBorrowDays+" day"+(s.noBorrowDays===1?"":"s")+" without a new draw";
-    return '<section class="debt-card"><div class="debt-card-head"><div><span class="micro">Debt escape</span><h2>'+esc(s.loan.name)+'</h2><p>'+movement+'</p></div><div class="debt-balance money">'+fmt(s.remaining)+'</div></div>'+
+    return '<section class="debt-card"><div class="debt-card-head"><div><span class="micro">Debt escape</span><h2>'+esc(s.loan.name)+'</h2><span class="debt-cycle-label">'+esc(cycleLabel)+'</span><p class="debt-movement">'+movement+'</p></div><div class="debt-balance money">'+fmt(s.remaining)+'</div></div>'+
       '<div class="debt-card-grid"><div><span>This '+periodWord+' borrowed</span><b class="money">'+fmt(s.now.added)+'</b></div><div><span>Paid back</span><b class="money">'+fmt(s.now.paid)+'</b></div><div><span>Debt-free estimate</span><b>'+debtFreeLabel(s)+'</b></div></div>'+
       '<div class="debt-streak">'+IC.check+' <span>'+streak+'</span></div><button class="btn" id="h-debt-open">Build an escape plan</button></section>';
   }
@@ -1649,7 +1662,7 @@
     if(d === iso(y)) return "Yesterday";
     return fromIso(d).toLocaleDateString(undefined,{weekday:"long", month:"short", day:"numeric"});
   }
-  function dayTotalText(out){ return out < 0 ? "+"+fmt(-out) : fmt(out); }
+  function dayTotalText(out){ return out < 0 ? "Net in +"+fmt(-out) : out > 0 ? "Net out "+fmt(out) : "Balanced"; }
   function dayRow(r){ return r.exp ? expRow(r.exp) : r.led ? ledgerRow(r.led) : salaryRow(r.salary); }
 
   /* borrowing doesn't silently change your budget — you decide */
@@ -2179,8 +2192,8 @@
     var spent = groups.reduce(function(s,g){ return s + Math.max(g.out,0); }, 0);
     var h = '<div class="stat-row">' +
       '<div class="stat"><span class="micro">Days</span><div class="v money">'+groups.length+'</div></div>' +
-      '<div class="stat"><span class="micro">Avg a day</span><div class="v money">'+fmt(spent/groups.length)+'</div></div>' +
-      '<div class="stat"><span class="micro">Biggest</span><div class="v money">'+
+      '<div class="stat"><span class="micro">Avg net out/day</span><div class="v money">'+fmt(spent/groups.length)+'</div></div>' +
+      '<div class="stat"><span class="micro">Biggest net out</span><div class="v money">'+
         fmt(Math.max.apply(null, groups.map(function(g){ return Math.max(g.out, 0); })))+'</div></div></div>';
     var mk = "";
     groups.forEach(function(g){
@@ -2188,7 +2201,7 @@
       if(m !== mk){
         mk = m;
         h += '<div class="sec"><span class="micro">'+fromIso(m+"-01").toLocaleDateString(undefined,{month:"long", year:"numeric"})+'</span>' +
-          '<span class="micro money">'+fmt(monthSpent(m))+'</span></div>';
+          '<span class="micro money">Spent '+fmt(monthSpent(m))+'</span></div>';
       }
       var open = openDay === g.date;
       h += '<div class="wk" data-day="'+g.date+'" role="button" tabindex="0" aria-expanded="'+open+'">' +
@@ -2253,7 +2266,7 @@
 
       h += '<div class="wk"><div class="wk-top">' +
         '<span class="wk-label">'+label+(now?' · now':'')+'</span>' +
-        '<span class="wk-amt money">'+fmt(out)+'</span></div>' +
+        '<span class="wk-amt money">'+dayTotalText(out)+'</span></div>' +
         '<div class="wk-sub">'+bits.join(' · ')+'</div>';
 
       if(now && spendable > 0){
@@ -2906,9 +2919,17 @@
     var autoD = autoDailyBudget();
     var rr = restRemaining();
     var freshFrom = state.restFrom && state.restFrom !== todayIso();
+    var manualBudgetActive = state.restAmount > 0 && state.restFrom;
+    var budgetSource = manualBudgetActive ? 'ACTIVE · manual money pool' : state.salary > 0 ? 'ACTIVE · salary plan' : 'SET A SOURCE';
+    var budgetSourceClass = manualBudgetActive || state.salary > 0 ? 'active' : 'planned';
+    var budgetSourceCopy = manualBudgetActive
+      ? 'This pool controls your daily guidance. Salary commitments and debt payments are tracked separately.'
+      : state.salary > 0
+      ? 'No manual pool is active. Left to spend comes from salary minus commitments, savings, and people flow.'
+      : 'Set your salary or enter a money pool to activate daily guidance.';
     h += '<div class="panel plan-budget-panel">' +
       '<div class="plan-budget-head"><span class="plan-budget-icon">'+IC.wallet+'</span><div><h3>Daily budget</h3>' +
-      '<p class="plan-budget-copy">Tell me how much money you have from <b>today</b> until the end of this salary cycle, including anything you plan to borrow. I will turn it into a daily amount that adjusts as you spend.</p></div></div>' +
+      '<span class="plan-budget-source '+budgetSourceClass+'">'+budgetSource+'</span><p class="plan-budget-copy">Tell me how much money you have from <b>today</b> until the end of this salary cycle, including anything you plan to borrow. I will turn it into a daily amount that adjusts as you spend.</p><p class="plan-budget-source-copy">'+budgetSourceCopy+'</p></div></div>' +
       '<div class="field plan-budget-field"><label class="micro" for="p-rest" style="display:block; margin-bottom:6px">Money for the rest of the cycle</label>' +
       '<input id="p-rest" type="text" inputmode="decimal" min="0" placeholder="e.g. 1000" value="'+(state.restAmount||"")+'"></div>' +
       '<div class="plan-budget-actions"><button class="btn primary" id="p-rest-save">Set daily budget</button>' +
@@ -3750,6 +3771,10 @@
     setTimeout(function(){ syncToggleSemantics(sheet); }, 0);
   });
   document.addEventListener("keydown", function(ev){
+    var viewer = $("#viewer");
+    if(viewer.classList.contains("show") && ev.key === "Escape"){
+      ev.preventDefault(); closeViewer(); return;
+    }
     if(!sheet.classList.contains("show")) return;
     if(ev.key === "Escape"){
       ev.preventDefault(); closeSheet(); return;
@@ -3965,6 +3990,7 @@
     if(title){ title.id = "sheet-title"; sheet.setAttribute("aria-labelledby", "sheet-title"); }
     else { sheet.removeAttribute("aria-labelledby"); sheet.setAttribute("aria-label", "Dialog"); }
     sheet.setAttribute("aria-hidden", "false");
+    if("inert" in sheet) sheet.inert = false;
     backdrop.setAttribute("aria-hidden", "false");
     shell.setAttribute("aria-hidden", "true");
     if("inert" in shell) shell.inert = true;
@@ -3982,6 +4008,7 @@
     sheet.classList.remove("show");
     backdrop.classList.remove("show");
     sheet.setAttribute("aria-hidden", "true");
+    if("inert" in sheet) sheet.inert = true;
     backdrop.setAttribute("aria-hidden", "true");
     shell.setAttribute("aria-hidden", "false");
     if("inert" in shell) shell.inert = false;
@@ -4271,6 +4298,15 @@
   });
 
   var pendingDelete = null;
+  var viewerReturnFocus = null;
+  function closeViewer(){
+    var viewer = $("#viewer");
+    viewer.classList.remove("show");
+    viewer.setAttribute("aria-hidden", "true");
+    var focus = viewerReturnFocus;
+    viewerReturnFocus = null;
+    if(focus && document.contains(focus)) focus.focus();
+  }
   function openDetail(id){
     var e = null;
     for(var i=0;i<state.expenses.length;i++){ if(state.expenses[i].id===id){ e = state.expenses[i]; break; } }
@@ -4301,6 +4337,7 @@
     if(safePhoto(e.photo)){
       $("#d-photo").addEventListener("click", function(){
         $("#viewer-img").src = safePhoto(e.photo);
+        viewerReturnFocus = document.activeElement;
         $("#viewer").classList.add("show");
         $("#viewer").setAttribute("aria-hidden", "false");
       });
@@ -4328,8 +4365,8 @@
     });
   }
 
-  $("#viewer-close").addEventListener("click", function(){ $("#viewer").classList.remove("show"); $("#viewer").setAttribute("aria-hidden", "true"); });
-  $("#viewer").addEventListener("click", function(ev){ if(ev.target===this){ this.classList.remove("show"); this.setAttribute("aria-hidden", "true"); } });
+  $("#viewer-close").addEventListener("click", closeViewer);
+  $("#viewer").addEventListener("click", function(ev){ if(ev.target===this) closeViewer(); });
 
   /* ---------- view event wiring ---------- */
   function bindView(){
