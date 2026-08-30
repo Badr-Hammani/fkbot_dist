@@ -2108,6 +2108,9 @@
     var seen = {};
     state.expenses.forEach(function(e){ seen[keyFor(e.date)] = 1; });
     ledgerItems().forEach(function(it){ seen[keyFor(it.date)] = 1; });
+    /* Show a newly opened salary cycle even before its first expense, so the
+       user can see that the previous calendar records are historical. */
+    if(cycleHistory) seen[monthKey()] = 1;
     var keys = Object.keys(seen).sort().reverse();
     if(!keys.length){
       return emptyBox(IC.history, 'Every expense you log — weekday or weekend —<br>adds up here month by month.');
