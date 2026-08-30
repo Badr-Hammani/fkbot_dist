@@ -434,7 +434,7 @@
   .debt-bad{color:var(--bad); font-weight:800}.debt-good{color:var(--good); font-weight:800}.debt-neutral{color:var(--warn); font-weight:800}
   .debt-streak{margin-top:9px}
   .debt-card .btn{margin-top:12px; background:color-mix(in srgb, var(--bad) 10%, var(--card2)); border-color:color-mix(in srgb, var(--bad) 25%, var(--line)); color:var(--ink)}
-  /* v6.4 shortfall funding sheet: a decision should feel clear before it feels clever. */
+  /* v6.5 salary-cycle budgeting: a decision should feel clear before it feels clever. */
   .funding-screen{padding:0 2px 2px}
   .funding-screen h2{margin:8px 36px 18px 0; font-size:28px; line-height:1.08; letter-spacing:-.035em}
   .funding-expense{display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:18px; background:linear-gradient(145deg, color-mix(in srgb, var(--card2) 86%, var(--card)), var(--card2)); border:1px solid color-mix(in srgb, var(--line) 88%, transparent)}
@@ -609,13 +609,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=6.4"></script>
+<script src="scan.js?v=6.5"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "6.4";
+  var APP_VERSION = "6.5";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -722,13 +722,42 @@
       var item = value[k], date = item && typeof item === "object" ? String(item.date || "") : "";
       var amount = item && typeof item === "object" ? +item.amount : 0;
       if(!ISO_RE.test(date) || !(amount > 0)) return;
-      out[date.slice(0,7)] = {amount:Math.round(amount*100)/100, date:date, ts:+item.ts||0};
+      /* New receipts are keyed by their actual date so two salaries in the
+         same calendar month remain distinct. Keep legacy YYYY-MM keys intact
+         so old backups still load exactly as before. */
+      var outKey = ISO_RE.test(String(k)) ? String(k) : date.slice(0,7);
+      var next = {amount:Math.round(amount*100)/100, date:date, ts:+item.ts||0};
+      if(!out[outKey] || (+next.ts||0) >= (+out[outKey].ts||0)) out[outKey] = next;
     });
     return out;
   }
+  function receiptEntriesFrom(store){
+    var byDate = {};
+    if(!store || typeof store !== "object") return [];
+    Object.keys(store).forEach(function(k){
+      var item = store[k], date = item && typeof item === "object" ? String(item.date || "") : "";
+      var amount = item && typeof item === "object" ? +item.amount : 0;
+      if(!ISO_RE.test(date) || !(amount > 0)) return;
+      var next = {amount:Math.round(amount*100)/100, date:date, ts:+item.ts||0, key:String(k)};
+      var old = byDate[date];
+      /* A date-keyed record wins ties over a legacy calendar-keyed record. */
+      if(!old || (+next.ts||0) > (+old.ts||0) ||
+         ((+next.ts||0) === (+old.ts||0) && ISO_RE.test(next.key) && !ISO_RE.test(old.key))) byDate[date] = next;
+    });
+    return Object.keys(byDate).sort().map(function(date){ return byDate[date]; });
+  }
+  function salaryReceiptEntries(){ return receiptEntriesFrom(state.salaryReceived); }
+  function salaryReceiptForDate(date){
+    var rows = salaryReceiptEntries();
+    for(var i=0;i<rows.length;i++) if(rows[i].date === date) return rows[i];
+    return null;
+  }
   function salaryReceiptForMonth(mk){
-    var item = state.salaryReceived && state.salaryReceived[mk];
-    return item && ISO_RE.test(String(item.date || "")) && +item.amount > 0 ? item : null;
+    var direct = state.salaryReceived && state.salaryReceived[mk];
+    if(direct && ISO_RE.test(String(direct.date || "")) && +direct.amount > 0) return direct;
+    var rows = salaryReceiptEntries(), found = null;
+    rows.forEach(function(item){ if(String(item.date).slice(0,7) === String(mk).slice(0,7)) found = item; });
+    return found;
   }
   function salaryReceiptDateLabel(item){
     return fromIso(item.date).toLocaleDateString(undefined,{month:"short",day:"numeric"});
@@ -794,8 +823,10 @@
   }
   /* "money for the rest of the month" belongs to the month you set it in */
   function retireStalePool(s){
-    if(s.restFrom && s.restFrom.slice(0,7) !== todayIso().slice(0,7)){
-      s.restAmount = 0; s.restFrom = ""; s.restTs = 0; s.restAsk = todayIso().slice(0,7);
+    var today = todayIso(), currentKey = periodKeyForState(s, today);
+    var poolKey = s.restFrom ? periodKeyForState(s, s.restFrom) : "";
+    if(s.restFrom && poolKey !== currentKey){
+      s.restAmount = 0; s.restFrom = ""; s.restTs = 0; s.restAsk = currentKey;
     }
   }
 
@@ -886,6 +917,57 @@
     var day = new Date().getDay();
     return (5 - day + 7) % 7;
   }
+  /* A budget period follows the money, not the calendar. The first logged
+     salary receipt starts a cycle; the next receipt closes it. Until another
+     receipt is logged, the next cycle is estimated one month later so daily
+     guidance still has a useful end date. */
+  function addMonthsClamped(dateStr, offset){
+    var d = fromIso(dateStr), day = d.getDate();
+    d.setDate(1); d.setMonth(d.getMonth()+offset);
+    var dim = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+    d.setDate(Math.min(day, dim));
+    return iso(d);
+  }
+  function periodKeyForState(s, dateStr){
+    var rows = receiptEntriesFrom(s && s.salaryReceived), start = "";
+    rows.forEach(function(item){ if(item.date <= dateStr) start = item.date; });
+    return start || String(dateStr).slice(0,7);
+  }
+  function periodKeyForDate(dateStr){ return periodKeyForState(state, dateStr); }
+  function periodBounds(mk){
+    mk = String(mk || monthKey());
+    if(ISO_RE.test(mk)){
+      var rows = salaryReceiptEntries(), end = "";
+      rows.some(function(item){ if(item.date > mk){ end = item.date; return true; } return false; });
+      end = end || addMonthsClamped(mk, 1);
+      if(end <= mk) end = addMonthsClamped(mk, 1);
+      return {start:mk, endExclusive:end, salary:true};
+    }
+    var d = fromIso(mk+"-01"), next = new Date(d);
+    next.setMonth(next.getMonth()+1);
+    return {start:iso(d), endExclusive:iso(next), salary:false};
+  }
+  function dateInPeriod(dateStr, mk){
+    var b = periodBounds(mk);
+    return dateStr >= b.start && dateStr < b.endExclusive;
+  }
+  function periodLabel(mk){
+    var b = periodBounds(mk), start = fromIso(b.start), end = fromIso(b.endExclusive);
+    end.setDate(end.getDate()-1);
+    if(!b.salary) return start.toLocaleDateString(undefined,{month:"long",year:"numeric"});
+    var sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+    var s = start.toLocaleDateString(undefined,{month:"short",day:"numeric"});
+    var e = end.toLocaleDateString(undefined,{month:sameMonth?"short":"short",day:"numeric",year:"numeric"});
+    return s+" – "+e+" cycle";
+  }
+  function periodShortLabel(mk, current){
+    if(current) return "Now";
+    if(!ISO_RE.test(String(mk))) return fromIso(String(mk)+"-01").toLocaleDateString(undefined,{month:"short"});
+    var b = periodBounds(mk), start = fromIso(b.start), end = fromIso(b.endExclusive);
+    end.setDate(end.getDate()-1);
+    return start.toLocaleDateString(undefined,{month:"short",day:"numeric"})+"–"+
+      end.toLocaleDateString(undefined,{month:"short",day:"numeric"});
+  }
   /* only Fri/Sat/Sun expenses belong to a weekend; weekday spending is monthly */
   function weekendKeyOf(dateStr){
     var day = fromIso(dateStr).getDay();
@@ -897,8 +979,8 @@
   }
   function total(list){ return list.reduce(function(s,e){ return s + e.amount; }, 0); }
   function monthSpent(mk){
-    mk = mk || todayIso().slice(0,7);
-    return total(state.expenses.filter(function(e){ return e.date.slice(0,7)===mk; }));
+    mk = mk || monthKey();
+    return total(state.expenses.filter(function(e){ return dateInPeriod(e.date, mk); }));
   }
   function spentOn(dIso){
     return total(state.expenses.filter(function(e){ return e.date===dIso; }));
@@ -1174,6 +1256,13 @@
   }
 
   function monthOffsetKey(mk, offset){
+    mk = String(mk);
+    if(ISO_RE.test(mk)){
+      var rows = salaryReceiptEntries(), index = -1;
+      rows.some(function(item, i){ if(item.date === mk){ index = i; return true; } return false; });
+      if(index > -1 && rows[index+offset]) return rows[index+offset].date;
+      return addMonthsClamped(mk, offset);
+    }
     var d = fromIso(mk+"-01"); d.setMonth(d.getMonth()+offset); return iso(d).slice(0,7);
   }
   function debtSnapshot(){
@@ -1227,12 +1316,13 @@
   function debtEscapeCard(){
     var s = debtSnapshot();
     if(!s) return "";
-    var movement = s.now.net > 0 ? '<span class="debt-bad">Debt grew '+fmt(s.now.net)+' this month</span>'
-      : s.now.net < 0 ? '<span class="debt-good">Debt fell '+fmt(-s.now.net)+' this month</span>'
-      : '<span class="debt-neutral">No debt change this month</span>';
+    var periodWord = salaryReceiptEntries().length > 0 ? "cycle" : "month";
+    var movement = s.now.net > 0 ? '<span class="debt-bad">Debt grew '+fmt(s.now.net)+' this '+periodWord+'</span>'
+      : s.now.net < 0 ? '<span class="debt-good">Debt fell '+fmt(-s.now.net)+' this '+periodWord+'</span>'
+      : '<span class="debt-neutral">No debt change this '+periodWord+'</span>';
     var streak = s.noBorrowDays === null ? "No new borrowing recorded yet" : s.noBorrowDays+" day"+(s.noBorrowDays===1?"":"s")+" without a new draw";
     return '<section class="debt-card"><div class="debt-card-head"><div><span class="micro">Debt escape</span><h2>'+esc(s.loan.name)+'</h2><p>'+movement+'</p></div><div class="debt-balance money">'+fmt(s.remaining)+'</div></div>'+
-      '<div class="debt-card-grid"><div><span>This month borrowed</span><b class="money">'+fmt(s.now.added)+'</b></div><div><span>Paid back</span><b class="money">'+fmt(s.now.paid)+'</b></div><div><span>Debt-free estimate</span><b>'+debtFreeLabel(s)+'</b></div></div>'+
+      '<div class="debt-card-grid"><div><span>This '+periodWord+' borrowed</span><b class="money">'+fmt(s.now.added)+'</b></div><div><span>Paid back</span><b class="money">'+fmt(s.now.paid)+'</b></div><div><span>Debt-free estimate</span><b>'+debtFreeLabel(s)+'</b></div></div>'+
       '<div class="debt-streak">'+IC.check+' <span>'+streak+'</span></div><button class="btn" id="h-debt-open">Build an escape plan</button></section>';
   }
   function openSafeLimitSheet(){
@@ -1249,7 +1339,7 @@
     if(!s) return;
     var max = Math.max.apply(null, s.chart.map(function(r){ return Math.max(r.added,r.paid); }).concat([s.loan.amount,1]));
     var bars = s.chart.map(function(r){
-      var label = r.mk === monthKey() ? "Now" : fromIso(r.mk+"-01").toLocaleDateString(undefined,{month:"short"});
+      var label = periodShortLabel(r.mk, r.mk === monthKey());
       return '<div class="debt-chart-col"><div class="debt-bars"><i style="height:'+Math.max(r.added/max*100, r.added>0?5:0)+'%" title="Borrowed '+fmt(r.added)+'"></i><b style="height:'+Math.max(r.paid/max*100, r.paid>0?5:0)+'%" title="Paid '+fmt(r.paid)+'"></b></div><span>'+label+'</span></div>';
     }).join("");
     var usual = s.monthlyNet > 0 ? 'At the recent pace, your usual payment shrinks debt by about '+fmt(s.monthlyNet)+' per month.' : 'Recent extra borrowing is cancelling out the usual payment — stop new shortfalls first.';
@@ -1265,7 +1355,8 @@
   }
 
   function viewHome(){
-    var monthName = new Date().toLocaleDateString(undefined,{month:"long"});
+    var monthName = periodLabel(monthKey());
+    var periodWord = salaryReceiptEntries().length > 0 ? "cycle" : "month";
     var pm = planMath();
     var mSpent = monthSpent();
     var tSpent = spentOn(todayIso());
@@ -1291,7 +1382,7 @@
         '<div class="hero-top"><span class="hero-when">'+monthName+'</span>' +
         '<span class="hero-live" style="color:var(--ink2)">Today: <b class="money" style="color:var(--ink)">'+fmt(tSpent)+'</b></span></div>' +
         '<div class="hero-amount money'+(mLeft<0?" over":"")+'">'+fmt(Math.abs(mLeft))+'</div>' +
-        '<div class="hero-caption">'+(mLeft<0? "over this month" : "left this month") +
+        '<div class="hero-caption">'+(mLeft<0? "over this "+periodWord : "left this "+periodWord) +
         ' · spent <strong class="money">'+fmt(mSpent)+'</strong> of <strong class="money">'+fmt(Math.max(spendable,0))+'</strong>'+flowNote+'</div>' +
         '<div class="meter">'+meterHtml(mSpent + Math.max(mFlow.net,0), Math.max(spendable,0))+
         '<div class="meter-row"><span>after your loan, subscriptions & savings' +
@@ -1335,7 +1426,7 @@
         '<div class="hero-top"><span class="hero-when">'+monthName+'</span>' +
         '<span class="hero-live" style="color:var(--ink2)">Today: <b class="money" style="color:var(--ink)">'+fmt(tSpent)+'</b></span></div>' +
         '<div class="hero-amount money">'+(gone<0? "+"+fmt(-gone) : fmt(gone))+'</div>' +
-        '<div class="hero-caption">'+(gone<0? "came in this month" : "out of your pocket this month")+nNote+
+        '<div class="hero-caption">'+(gone<0? "came in this "+periodWord : "out of your pocket this "+periodWord)+nNote+
         ' · add your salary in <strong>Plan</strong> to see what\'s left</div>' +
         '</section>';
     }
@@ -1343,7 +1434,7 @@
     /* new month, and last month you were running on a set-aside pool —
        last month's number is gone, so ask for this month's */
     if(state.restAsk === monthKey() && !(state.restAmount > 0)){
-      h += '<div class="suggest"><span class="txt">New month. How much do you have from today to the end of ' +
+      h += '<div class="suggest"><span class="txt">New '+periodWord+'. How much do you have from today to the end of ' +
         monthName + ' — borrowing included?</span><button data-task="plan" id="h-newmonth">Set it</button></div>';
     }
 
@@ -1352,13 +1443,13 @@
     if(tb > 0){
       var dLeft = tb - tSpent;
       h += '<div class="sec"><span class="micro">Today</span>' +
-        '<span class="micro">'+daysLeftInMonth()+' days left this month</span></div>';
+        '<span class="micro">'+daysLeftInMonth()+' days left this '+periodWord+'</span></div>';
       var poolLine = "";
       var rr = restRemaining();
       if(rr !== null){
         poolLine = rr < 0
-          ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">'+fmt(-rr)+' past your '+fmt(state.restAmount)+' for the month</span></div>'
-          : '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">'+fmt(rr)+' left of your '+fmt(state.restAmount)+' for the rest of the month</span></div>';
+          ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">'+fmt(-rr)+' past your '+fmt(state.restAmount)+' for the '+periodWord+'</span></div>'
+          : '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">'+fmt(rr)+' left of your '+fmt(state.restAmount)+' for the rest of the '+periodWord+'</span></div>';
         var pf = poolFlow();
         if(pf.out > 0 || pf.inn > 0){
           var bits2 = [];
@@ -1448,8 +1539,8 @@
     }
 
     /* month category breakdown */
-    h += catBreakdown(state.expenses.filter(function(e){ return e.date.slice(0,7)===todayIso().slice(0,7); }),
-                      "Where it went — "+monthName);
+    h += catBreakdown(state.expenses.filter(function(e){ return dateInPeriod(e.date, monthKey()); }),
+                      "Where it went — "+periodLabel(monthKey()));
 
     /* recent days — the newest few. Every day lives in History > Days. */
     var groups = dayGroups(5);
@@ -1997,37 +2088,39 @@
      two must never disagree. */
   function monthOut(mk){
     var net = 0;
-    ledgerItems().forEach(function(it){ if(it.date.slice(0,7) === mk) net += -it.cash; });
+    ledgerItems().forEach(function(it){ if(dateInPeriod(it.date, mk)) net += -it.cash; });
     return Math.round((monthSpent(mk) + net)*100)/100;
   }
   function monthGivenOut(mk){
     var out = 0;
-    ledgerItems().forEach(function(it){ if(it.date.slice(0,7) === mk && it.cash < 0) out += -it.cash; });
+    ledgerItems().forEach(function(it){ if(dateInPeriod(it.date, mk) && it.cash < 0) out += -it.cash; });
     return Math.round(out*100)/100;
   }
   function monthMissing(mk){
     return total(state.expenses.filter(function(e){
-      return e.cat === "missing" && e.date.slice(0,7) === mk;
+      return e.cat === "missing" && dateInPeriod(e.date, mk);
     }));
   }
 
   function historyMonths(){
+    var cycleHistory = salaryReceiptEntries().length > 0;
+    var keyFor = function(date){ return cycleHistory ? periodKeyForDate(date) : date.slice(0,7); };
     var seen = {};
-    state.expenses.forEach(function(e){ seen[e.date.slice(0,7)] = 1; });
-    ledgerItems().forEach(function(it){ seen[it.date.slice(0,7)] = 1; });
+    state.expenses.forEach(function(e){ seen[keyFor(e.date)] = 1; });
+    ledgerItems().forEach(function(it){ seen[keyFor(it.date)] = 1; });
     var keys = Object.keys(seen).sort().reverse();
     if(!keys.length){
       return emptyBox(IC.history, 'Every expense you log — weekday or weekend —<br>adds up here month by month.');
     }
-    var thisMk = todayIso().slice(0,7);
+    var thisMk = monthKey();
     /* the plan only describes THIS month — applying it to old months would
        invent a "saving" out of months you barely logged */
     var spendable = state.salary > 0 ? Math.max(planMath().left, 0) : 0;
     var h = "";
     keys.forEach(function(k){
       var out = monthOut(k), now = k === thisMk;
-      var n = state.expenses.filter(function(e){ return e.date.slice(0,7)===k; }).length;
-      var label = fromIso(k+"-01").toLocaleDateString(undefined,{month:"long", year:"numeric"});
+      var n = state.expenses.filter(function(e){ return keyFor(e.date)===k; }).length;
+      var label = cycleHistory ? periodLabel(k) : fromIso(k+"-01").toLocaleDateString(undefined,{month:"long", year:"numeric"});
       var bits = [n+' expense'+(n===1?"":"s")];
       var given = monthGivenOut(k), miss = monthMissing(k);
       if(given > 0) bits.push('<span style="color:var(--bad)">'+fmt(given)+' given out</span>');
@@ -2174,20 +2267,28 @@
 
   /* ---------- plan (salary, loan, subscriptions, goals) ---------- */
   function fridaysInMonth(){
-    var now = new Date(), n = 0;
-    var d = new Date(now.getFullYear(), now.getMonth(), 1);
-    while(d.getMonth() === now.getMonth()){
+    var bounds = periodBounds(monthKey()), n = 0;
+    var d = fromIso(bounds.start), end = fromIso(bounds.endExclusive);
+    while(d < end){
       if(d.getDay() === 5) n++;
       d.setDate(d.getDate()+1);
     }
-    return n;
+    return Math.max(n, 1);
   }
   /* a bill's plan is the usual monthly amount, but the month you actually pay
      it you can log a different figure — 2,770 on a 2,500 loan. From then on
      that month uses the real number, so the extra comes out of your spending
      money instead of quietly disappearing. */
-  function monthKey(){ return todayIso().slice(0,7); }
-  function paidRec(c, mk){ return (c.paid || {})[mk || monthKey()] || null; }
+  function monthKey(){ return periodKeyForDate(todayIso()); }
+  function paidRec(c, mk){
+    var key = mk || monthKey(), paid = c.paid || {};
+    /* A legacy YYYY-MM payment belongs to the old calendar ledger. Once a
+       salary cycle starts mid-month, do not pull that old payment into the
+       fresh cycle unless a payment was explicitly logged for its date key. */
+    if(paid[key]) return paid[key];
+    if(!mk && ISO_RE.test(String(key))) return null;
+    return paid[key] || null;
+  }
   function billFor(c, mk){
     var p = paidRec(c, mk);
     return p && p.amt > 0 ? p.amt : c.amount;
@@ -2236,12 +2337,24 @@
   }
   function loanMonthStats(c){
     var by = {};
+    var periodKey = function(date){
+      var rows = [], start = "";
+      Object.keys(state.salaryReceived||{}).forEach(function(k){
+        var item = state.salaryReceived[k];
+        if(item && /^\d{4}-\d{2}-\d{2}$/.test(String(item.date||"")) && +item.amount > 0){
+          rows.push({date:String(item.date)});
+        }
+      });
+      rows.sort(function(a,b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+      rows.forEach(function(item){ if(item.date <= date) start = item.date; });
+      return start || date.slice(0,7);
+    };
     function row(mk){
       if(!by[mk]) by[mk] = { mk:mk, added:0, paid:0, net:0, items:[] };
       return by[mk];
     }
     loanAdditionItems(c).forEach(function(it){
-      var r = row(it.date.slice(0,7));
+      var r = row(periodKey(it.date));
       r.added += it.amount; r.items.push(it);
     });
     Object.keys(c.paid||{}).forEach(function(mk){
@@ -2293,14 +2406,20 @@
       if(e.date > state.restFrom) return true;
       return e.date === state.restFrom && (e.ts || 0) >= poolStartTs();
     }
-    return state.salary > 0 && e.date.slice(0,7) === monthKey();
+    var currentKey = monthKey();
+    return state.salary > 0 && (typeof dateInPeriod === "function"
+      ? dateInPeriod(e.date, currentKey)
+      : e.date.slice(0,7) === currentKey);
   }
   function candidateCountsAgainstBudget(date){
     if(!ISO_RE.test(String(date || ""))) return false;
     if(state.restAmount > 0 && state.restFrom){
       return date > state.restFrom || date === state.restFrom;
     }
-    return state.salary > 0 && date.slice(0,7) === monthKey();
+    var currentKey = monthKey();
+    return state.salary > 0 && (typeof dateInPeriod === "function"
+      ? dateInPeriod(date, currentKey)
+      : date.slice(0,7) === currentKey);
   }
   function moneyAvailableForCandidate(existing, date){
     if(!candidateCountsAgainstBudget(date)) return null;
@@ -2408,9 +2527,8 @@
     }
   }
   function daysLeftInMonth(){
-    var now = new Date();
-    var dim = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
-    return dim - now.getDate() + 1;   // includes today
+    var bounds = periodBounds(monthKey());
+    return Math.max(Math.ceil((fromIso(bounds.endExclusive).getTime()-fromIso(todayIso()).getTime())/86400000), 1); // includes today
   }
   function spentSince(dIso){
     return total(state.expenses.filter(function(e){ return e.date >= dIso; }));
@@ -2461,8 +2579,7 @@
              net: Math.round((out - inn)*100)/100 };
   }
   function monthStartIso(){
-    var n = new Date();
-    return iso(new Date(n.getFullYear(), n.getMonth(), 1));
+    return periodBounds(monthKey()).start;
   }
   /* every person-money movement, flattened and dated, so it can sit in the
      day list next to your expenses. cash = effect on your pocket that day. */
@@ -2508,9 +2625,10 @@
   }
   function isWeekendDay(dIso){ return weekendKeyOf(dIso) !== null; }
   function weekendDaysLeft(){
-    var n = new Date(), dim = new Date(n.getFullYear(), n.getMonth()+1, 0).getDate(), c = 0;
-    for(var d = n.getDate(); d <= dim; d++){
-      if(isWeekendDay(iso(new Date(n.getFullYear(), n.getMonth(), d)))) c++;
+    var bounds = periodBounds(monthKey()), d = fromIso(todayIso()), end = fromIso(bounds.endExclusive), c = 0;
+    while(d < end){
+      if(isWeekendDay(iso(d))) c++;
+      d.setDate(d.getDate()+1);
     }
     return c;
   }
@@ -2561,16 +2679,25 @@
   function markSalaryReceived(){
     var amount = Math.round((+state.salary || 0)*100)/100;
     if(!(amount > 0)){ toast("Save your monthly salary first"); return; }
-    var mk = monthKey(), date = todayIso();
-    var previous = state.salaryReceived[mk] || null;
-    if(previous && previous.date === date && Math.abs(+previous.amount - amount) < 0.01){
-      toast("Salary already logged today"); return;
+    var dateInput = $("#p-salary-date");
+    var date = dateInput && ISO_RE.test(String(dateInput.value || "")) ? dateInput.value : todayIso();
+    if(date > todayIso()){ toast("Salary date cannot be in the future"); return; }
+    var key = date, previous = state.salaryReceived[key] || null;
+    if(!previous){
+      Object.keys(state.salaryReceived||{}).some(function(k){
+        var item = state.salaryReceived[k];
+        if(item && item.date === date){ key = k; previous = item; return true; }
+        return false;
+      });
     }
-    if(previous && !window.confirm("Update this month’s salary receipt?")) return;
-    state.salaryReceived[mk] = {amount:amount, date:date, ts:Date.now()};
+    if(previous && previous.date === date && Math.abs(+previous.amount - amount) < 0.01){
+      toast("Salary already logged for "+salaryReceiptDateLabel(previous)); return;
+    }
+    if(previous && !window.confirm("Update the salary receipt for "+salaryReceiptDateLabel(previous)+"?")) return;
+    state.salaryReceived[key] = {amount:amount, date:date, ts:Date.now()};
     if(!save()){
-      if(previous) state.salaryReceived[mk] = previous;
-      else delete state.salaryReceived[mk];
+      if(previous) state.salaryReceived[key] = previous;
+      else delete state.salaryReceived[key];
       toast("Could not save — your money data was not changed");
       return;
     }
@@ -2580,11 +2707,13 @@
 
   function viewPlan(){
     var m = planMath();
-    var monthName = new Date().toLocaleDateString(undefined, {month:"long", year:"numeric"});
+    var monthName = periodLabel(monthKey());
+    var periodWord = salaryReceiptEntries().length > 0 ? "cycle" : "month";
     var salaryReceipt = salaryReceiptForMonth(monthKey());
+    var salaryDateValue = salaryReceipt ? salaryReceipt.date : todayIso();
     var salaryReceiptCopy = salaryReceipt
       ? IC.check+"Salary received · "+fmt(salaryReceipt.amount)+" · "+(salaryReceipt.date===todayIso()?"today":salaryReceiptDateLabel(salaryReceipt))
-      : IC.banknote+"Log salary received today";
+      : IC.banknote+"Log salary received";
     var h = '<div class="sec"><span class="micro">'+monthName+'</span></div>';
 
     if(!state.salary){
@@ -2599,7 +2728,7 @@
         '<div class="flow-row flow-left"><span class="lbl">'+(m.left<0?"Over-committed":"Left to spend")+'</span>' +
         '<span class="val money'+(m.left<0?" neg":"")+'">'+fmt(Math.abs(m.left))+'</span></div>' +
         (m.left > 0 ?
-          '<div class="suggest"><span class="txt">'+nWk+' weekends this month — that\'s about <b class="money">'+fmt(perWk)+'</b> each if you split it evenly.</span>' +
+          '<div class="suggest"><span class="txt">'+nWk+' weekends in this '+periodWord+' — that\'s about <b class="money">'+fmt(perWk)+'</b> each if you split it evenly.</span>' +
           '<button id="p-apply" data-amt="'+perWk+'">Use as budget</button></div>'
         : (m.left < 0 ?
           '<div class="suggest"><span class="txt">Your loan, subscriptions and savings add up to more than your salary. Trim something below.</span></div>' : "")) +
@@ -2616,22 +2745,25 @@
       '<input id="p-payday-end" type="number" inputmode="numeric" min="1" max="31" placeholder="End, e.g. 31" aria-label="Last possible payday" value="'+(state.paydayEnd||state.payday||"")+'">' +
       '</div><div class="hint" style="margin-top:6px">Use the same day twice for a fixed payday.</div></div></div>' +
       '<button class="btn primary" id="p-salary-save">Save salary</button>' +
+      '<div class="field" style="margin-top:12px"><label class="micro" for="p-salary-date" style="display:block; margin-bottom:6px">Salary received on</label>' +
+      '<input id="p-salary-date" type="date" value="'+salaryDateValue+'" max="'+todayIso()+'">' +
+      '<div class="hint" style="margin-top:6px">This date starts your spending cycle. You can choose yesterday if your salary arrived yesterday.</div></div>' +
       '<button class="btn" id="p-salary-received">'+salaryReceiptCopy+'</button>' +
-      '<div class="hint">This records when your salary arrived without adding it twice to your monthly budget.</div></div>';
+      '<div class="hint">This records when your salary arrived and starts a fresh spending cycle without adding it twice to your monthly budget.</div></div>';
 
     var autoD = autoDailyBudget();
     var rr = restRemaining();
     var freshFrom = state.restFrom && state.restFrom !== todayIso();
     h += '<div class="panel plan-budget-panel">' +
       '<div class="plan-budget-head"><span class="plan-budget-icon">'+IC.wallet+'</span><div><h3>Daily budget</h3>' +
-      '<p class="plan-budget-copy">Tell me how much money you have from <b>today</b> until month-end, including anything you plan to borrow. I will turn it into a daily amount that adjusts as you spend.</p></div></div>' +
-      '<div class="field plan-budget-field"><label class="micro" for="p-rest" style="display:block; margin-bottom:6px">Money for the rest of the month</label>' +
+      '<p class="plan-budget-copy">Tell me how much money you have from <b>today</b> until the end of this salary cycle, including anything you plan to borrow. I will turn it into a daily amount that adjusts as you spend.</p></div></div>' +
+      '<div class="field plan-budget-field"><label class="micro" for="p-rest" style="display:block; margin-bottom:6px">Money for the rest of the cycle</label>' +
       '<input id="p-rest" type="text" inputmode="decimal" min="0" placeholder="e.g. 1000" value="'+(state.restAmount||"")+'"></div>' +
       '<div class="plan-budget-actions"><button class="btn primary" id="p-rest-save">Set daily budget</button>' +
       '<button class="btn" id="p-cash">'+IC.wallet+'Check my cash</button></div>' +
       (rr !== null
         ? '<div class="hint">You can spend about <b class="money" style="color:var(--ink)">'+fmt(autoD)+'</b> a day — '+
-          (rr<0? '<span style="color:var(--bad)">'+fmt(-rr)+' past your '+fmt(state.restAmount)+'</span>' : fmt(rr)+' left of '+fmt(state.restAmount))+
+          (rr<0? '<span style="color:var(--bad)">'+fmt(-rr)+' past your '+fmt(state.restAmount)+' for the '+periodWord+'</span>' : fmt(rr)+' left of '+fmt(state.restAmount))+
           ' over the '+daysLeftInMonth()+' days left'+(freshFrom? ', counting from '+fromIso(state.restFrom).toLocaleDateString(undefined,{month:"short",day:"numeric"}) : '')+'.'+
           (freshFrom? ' <button id="p-rest-reset" style="color:var(--accent-deep); font-weight:700; background:none; padding:0">Restart from today</button>' : '')+'</div>'
         : (autoD>0 ? '<div class="hint">Or I can spread your salary: about <b class="money">'+fmt(autoD)+'</b>/day for '+daysLeftInMonth()+' days.</div>' : '')) +
@@ -2639,7 +2771,7 @@
 
     h += '<div class="sec"><span class="micro">Loan & subscriptions</span>' +
       '<span class="micro money sec-total">'+(state.commitments.length
-        ? "− "+fmt(m.bills)+(m.extra? " this month" : " / mo") : "")+'</span></div>';
+        ? "− "+fmt(m.bills)+(m.extra? " this "+periodWord : " / mo") : "")+'</span></div>';
     if(state.commitments.length){
       h += '<div class="commitment-list">';
       state.commitments.forEach(function(c){
@@ -2649,7 +2781,7 @@
         var p = paidRec(c), diff = p ? Math.round((p.amt - c.amount)*100)/100 : 0;
         var paidLine = p
           ? '<span class="subline hl money" style="color:'+(diff>0?"var(--bad)":"var(--good)")+'">'+IC.check+
-            ' paid '+fmt(p.amt)+' this month'+(diff? ' · '+fmt(Math.abs(diff))+(diff>0? ' more' : ' less')+' than usual' : "")+'</span>'
+            ' paid '+fmt(p.amt)+' this '+periodWord+(diff? ' · '+fmt(Math.abs(diff))+(diff>0? ' more' : ' less')+' than usual' : "")+'</span>'
           : "";
         var progressLine = "";
         if(c.kind === "loan"){
@@ -2659,7 +2791,7 @@
               : activity.net < 0 ? 'debt down '+fmt(-activity.net) : 'no debt change';
             progressLine = '<span class="subline hl money" style="color:'+
               (activity.net>0?'var(--bad)':activity.net<0?'var(--good)':'var(--warn)')+'">'+
-              (activity.added>0? '+'+fmt(activity.added)+' borrowed extra · ' : '')+movement+' this month</span>';
+              (activity.added>0? '+'+fmt(activity.added)+' borrowed extra · ' : '')+movement+' this '+periodWord+'</span>';
           }
         }
         h += '<button class="row-item commitment-card '+(c.kind==="loan"?"loan-row":"subscription-row")+'" data-cm="'+esc(c.id)+'">' + kindTile(c) +
@@ -2749,28 +2881,26 @@
   }
 
   function previousMonthKey(mk){
-    var d = fromIso(mk+"-01");
-    d.setMonth(d.getMonth()-1);
-    return iso(d).slice(0,7);
+    return monthOffsetKey(mk, -1);
   }
   function loanProgressHtml(c){
     if(!c || c.kind !== "loan") return "";
+    var periodWord = salaryReceiptEntries().length > 0 ? "cycle" : "month";
     var now = loanMonthStat(c, monthKey());
     var prev = loanMonthStat(c, previousMonthKey(monthKey()));
     var stateText = now.net > 0 ? 'Debt grew '+fmt(now.net)
       : now.net < 0 ? 'Debt fell '+fmt(-now.net) : 'No debt change';
     var stateColor = now.net > 0 ? 'var(--bad)' : now.net < 0 ? 'var(--good)' : 'var(--warn)';
     var compare = "";
-    if(now.added === 0) compare = 'No extra borrowing this month';
+    if(now.added === 0) compare = 'No extra borrowing this '+periodWord;
     else if(prev.added > 0){
       var delta = Math.round((now.added-prev.added)*100)/100;
-      compare = delta < 0 ? fmt(-delta)+' less borrowing than last month'
-        : delta > 0 ? fmt(delta)+' more borrowing than last month' : 'Borrowing matches last month';
-    }else compare = 'New borrowing this month';
+      compare = delta < 0 ? fmt(-delta)+' less borrowing than last '+periodWord
+        : delta > 0 ? fmt(delta)+' more borrowing than last '+periodWord : 'Borrowing matches last '+periodWord;
+    }else compare = 'New borrowing this '+periodWord;
 
     var rows = loanMonthStats(c).slice(0,12).map(function(r){
-      var label = r.mk === monthKey() ? "This month"
-        : fromIso(r.mk+"-01").toLocaleDateString(undefined,{month:"short",year:"numeric"});
+      var label = r.mk === monthKey() ? "This cycle" : periodLabel(r.mk);
       var netText = r.net > 0 ? 'Debt +'+fmt(r.net) : r.net < 0 ? 'Debt −'+fmt(-r.net) : 'No change';
       var netColor = r.net > 0 ? 'var(--bad)' : r.net < 0 ? 'var(--good)' : 'var(--ink3)';
       var items = r.items.map(function(it){
@@ -3460,9 +3590,9 @@
                           cat: "missing", note: "Not logged", date: todayIso(), photo: null });
   }
   function missingThisMonth(){
-    var mk = todayIso().slice(0,7);
+    var mk = monthKey();
     return total(state.expenses.filter(function(e){
-      return e.cat === "missing" && e.date.slice(0,7) === mk;
+      return e.cat === "missing" && dateInPeriod(e.date, mk);
     }));
   }
 
