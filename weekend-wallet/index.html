@@ -282,6 +282,31 @@
   }
   .goal-pct{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .mini-btn.primary{background:var(--accent); border-color:transparent; color:var(--on-accent)}
+  .secondary-card{
+    position:relative; overflow:hidden; background:linear-gradient(145deg, color-mix(in srgb, var(--card2) 42%, var(--card)), var(--card));
+    border:1px solid color-mix(in srgb, var(--line) 90%, transparent); border-radius:22px; padding:16px; margin-top:10px;
+    box-shadow:0 12px 28px rgba(10,8,26,.12);
+  }
+  .secondary-card::before{content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--accent); opacity:.85}
+  .secondary-card > *{position:relative; z-index:1}
+  .secondary-card .goal-top{gap:12px}
+  .secondary-card .goal-name{display:flex; align-items:center; gap:8px}
+  .secondary-card .goal-name::before{content:""; width:9px; height:9px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); flex:none}
+  .secondary-card .goal-amt{font-size:14px}
+  .secondary-card .goal-foot{margin-top:11px}
+  .secondary-card.weekend-card::before{background:var(--good)}
+  .secondary-card.weekend-card .goal-name::before{background:var(--good); box-shadow:0 0 0 4px color-mix(in srgb, var(--good) 14%, transparent)}
+  .secondary-list{border-radius:22px; box-shadow:0 12px 28px rgba(10,8,26,.10)}
+  .secondary-list .row-item{min-height:68px; padding:14px}
+  .secondary-list .row-item .name .ttl{font-size:15px}
+  .spark-card{padding:14px 16px 9px; margin-bottom:12px}
+  .secondary-card-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:8px}
+  .spark-total{font-size:13px; font-weight:850}
+  .notice-card{display:flex; align-items:flex-start; gap:10px; border-radius:18px; padding:12px 14px; margin:0 0 12px; box-shadow:0 10px 22px rgba(10,8,26,.08)}
+  .notice-danger{background:color-mix(in srgb, var(--bad) 10%, var(--card)); border:1px solid color-mix(in srgb, var(--bad) 25%, var(--line))}
+  .notice-icon{color:var(--bad); flex:none; display:flex}
+  .notice-copy{font-size:13px; color:var(--ink); flex:1; line-height:1.45}
+  .notice-amount{color:var(--bad)}
 
   .panel{background:var(--card); border:1px solid var(--line); border-radius:18px; padding:16px; margin-top:12px}
   .panel h3{margin:0 0 4px; font-size:15px}
@@ -412,6 +437,16 @@
     .cat-breakdown{flex-direction:column !important; align-items:stretch !important; gap:8px !important}
     .cat-breakdown .donut-container{align-self:center}
     .cat-breakdown .cat-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:8px}
+    .debt-card-head{gap:10px}
+    .debt-card-head > div:first-child{min-width:0}
+    .debt-balance{max-width:45%; font-size:21px}
+    .debt-card h2{overflow-wrap:anywhere}
+    .debt-card-grid{grid-template-columns:1fr 1fr}
+    .debt-card-grid > div:last-child{grid-column:1/-1}
+    .secondary-card{padding:14px}
+    .secondary-card .goal-top{align-items:flex-start}
+    .secondary-card .goal-amt{max-width:48%; text-align:right}
+    .secondary-list .row-item{gap:9px; padding-left:12px; padding-right:12px}
   }
 
   /* v6 money-confidence cards: the home screen answers “what can I spend?”
@@ -637,13 +672,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=7.3"></script>
+<script src="scan.js?v=7.4"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "7.3";
+  var APP_VERSION = "7.4";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1289,10 +1324,10 @@
     var n = bars.length, viewW = 200, padL = 8, padR = 8, innerW = viewW - padL - padR;
     var slot = innerW / n, barW = Math.max(slot * 0.55, 4);
 
-    var h = '<div style="background:var(--card); border:1px solid var(--line); border-radius:16px; padding:12px 14px 8px; margin:0 0 12px;">' +
-            '<div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">' +
-            '<span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--ink2);">Last 7 days</span>' +
-            '<span class="money" style="font-size:12px; font-weight:800; color:var(--ink);">'+fmt(totalWeek)+'</span>' +
+    var h = '<section class="secondary-card spark-card">' +
+            '<div class="secondary-card-head">' +
+            '<span class="micro">Last 7 days</span>' +
+            '<span class="money spark-total">'+fmt(totalWeek)+'</span>' +
             '</div>';
     h += '<svg viewBox="0 0 200 44" style="width:100%; height:44px; display:block; overflow:visible;">';
 
@@ -1314,7 +1349,7 @@
       h += '<text x="'+cx.toFixed(1)+'" y="43" text-anchor="middle" font-size="6.5" fill="'+(b.isToday?"var(--accent)":"var(--ink3)")+'" font-weight="'+(b.isToday?"800":"600")+'">'+dayLbl+'</text>';
     });
 
-    h += '</svg></div>';
+    h += '</svg></section>';
     return h;
   }
 
@@ -1528,14 +1563,14 @@
           poolLine += '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink3)">'+fmt(pf.borrowed)+' borrowed — already part of this budget</span></div>';
         }
       }
-      h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+
+      h += '<section class="goal secondary-card today-card"><div class="goal-top"><span class="goal-name">'+
         new Date().toLocaleDateString(undefined,{weekday:"long"})+'</span>' +
         '<span class="goal-amt money">'+(dLeft<0
           ? '<b style="color:var(--bad)">'+fmt(Math.abs(dLeft))+'</b> over'
           : '<b>'+fmt(dLeft)+'</b> left today')+'</span></div>' +
         meterHtml(tSpent, tb) +
         '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(tSpent)+' of '+fmt(tb)+
-        ' · rebalances daily</span></div>' + poolLine + '</div>';
+        ' · rebalances daily</span></div>' + poolLine + '</section>';
     }
 
     /* weekend card — the same pool, seen over Fri-Sun instead of one day */
@@ -1550,24 +1585,24 @@
       var wkPlan = weekendPlan(fri, true);
       if(wkPlan > 0){
         var wkLeft = Math.round((wkPlan - wkSpent)*100)/100;
-        h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+weekendLabel(fri)+'</span>' +
+        h += '<section class="goal secondary-card weekend-card"><div class="goal-top"><span class="goal-name">'+weekendLabel(fri)+'</span>' +
           '<span class="goal-amt money">'+(wkLeft<0
             ? '<b style="color:var(--bad)">'+fmt(Math.abs(wkLeft))+'</b> over'
             : '<b>'+fmt(wkLeft)+'</b> left')+'</span></div>' +
           meterHtml(wkSpent, wkPlan) +
           '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(wkSpent)+
-          ' of '+fmt(wkPlan)+' · set from the money you had on Friday</span></div></div>';
+          ' of '+fmt(wkPlan)+' · set from the money you had on Friday</span></div></section>';
       }else{
         h += '<div class="empty">Set your salary or your money for the rest of the month in <b>Plan</b> — your weekend number comes out of it.</div>';
       }
     }else if(rs){
       /* before the weekend: a forecast, not a target */
       var soon = Math.round(rs.weekend * 3);
-      h += '<div class="goal"><div class="goal-top"><span class="goal-name">'+weekendLabel(fri)+'</span>' +
+      h += '<section class="goal secondary-card weekend-card"><div class="goal-top"><span class="goal-name">'+weekendLabel(fri)+'</span>' +
         '<span class="goal-amt money"><b>'+fmt(wkSpent)+'</b> spent</span></div>' +
         '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">' +
         'At today\'s rate the coming weekend has about <b class="money">'+fmt(soon)+
-        '</b> — spend less this week and it grows.</span></div></div>';
+        '</b> — spend less this week and it grows.</span></div></section>';
     }else{
       h += '<div class="empty">Set your salary or your money for the rest of the month in <b>Plan</b> — your weekend number comes out of it.</div>';
     }
@@ -1580,7 +1615,7 @@
     /* upcoming bills */
     var up = upcomingBills();
     if(up.length){
-      h += '<div class="sec"><span class="micro">Coming up</span></div><div class="row-list">';
+      h += '<div class="sec"><span class="micro">Coming up</span></div><div class="row-list secondary-list">';
       up.forEach(function(u){
         var soon = u.days <= 1;
         h += '<button class="row-item" data-cm="'+esc(u.c.id)+'">' + kindTile(u.c) +
@@ -1598,10 +1633,9 @@
     /* not-logged badge — alert if there's any untracked spending */
     var missing = missingThisMonth();
     if(missing > 0){
-      h += '<div style="display:flex; align-items:center; gap:10px; background:color-mix(in srgb, var(--bad) 10%, var(--card)); border:1px solid color-mix(in srgb, var(--bad) 25%, var(--line)); border-radius:14px; padding:10px 14px; margin:0 0 12px;">' +
-           '<span style="color:var(--bad); flex:none; display:flex;">'+catIcon("missing")+'</span>' +
-           '<span style="font-size:13px; color:var(--ink); flex:1;">' +
-           '<b class="money" style="color:var(--bad);">'+fmt(missing)+'</b> logged as <b>Not logged</b> this month — from your cash checks.</span>' +
+      h += '<div class="notice-card notice-danger">' +
+           '<span class="notice-icon">'+catIcon("missing")+'</span>' +
+           '<span class="notice-copy"><b class="money notice-amount">'+fmt(missing)+'</b> logged as <b>Not logged</b> this month — from your cash checks.</span>' +
            '</div>';
     }
 
