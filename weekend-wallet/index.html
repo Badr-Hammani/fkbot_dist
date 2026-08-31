@@ -701,13 +701,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=7.5"></script>
+<script src="scan.js?v=7.5.1"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "7.5";
+  var APP_VERSION = "7.5.1";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -3137,7 +3137,7 @@
   function payBlock(c){
     var p = paidRec(c);
     var periodWord = salaryReceiptEntries().length > 0 ? "cycle" : "month";
-    var cycle = periodLabel(monthKey())+' '+periodWord;
+    var cycle = periodLabel(monthKey());
     var poolActive = state.restAmount > 0 && state.restFrom;
     if(p){
       var diff = Math.round((p.amt - c.amount)*100)/100;
