@@ -360,6 +360,35 @@
   .plan-budget-source.active{color:var(--good); background:color-mix(in srgb, var(--good) 12%, var(--card2))}
   .plan-budget-source.planned{color:var(--accent-deep); background:color-mix(in srgb, var(--accent) 12%, var(--card2))}
   .plan-budget-source-copy{margin:8px 0 0; color:var(--ink2); font-size:12px; line-height:1.45}
+  .cycle-banner{
+    margin-top:12px; padding:15px 16px; border-radius:20px;
+    background:linear-gradient(135deg, color-mix(in srgb, var(--accent) 15%, var(--card2)), var(--card));
+    border:1px solid color-mix(in srgb, var(--accent) 34%, var(--line)); box-shadow:0 10px 24px rgba(10,8,26,.10);
+  }
+  .cycle-banner-top{display:flex; align-items:center; gap:11px}
+  .cycle-banner-icon{display:grid; place-items:center; width:38px; height:38px; flex:none; border-radius:13px; color:var(--accent-deep); background:color-mix(in srgb, var(--accent) 18%, var(--card))}
+  .cycle-banner-icon svg{width:19px; height:19px}
+  .cycle-banner-kicker{display:block; color:var(--ink3); font-size:10px; font-weight:850; letter-spacing:.11em; text-transform:uppercase}
+  .cycle-banner-range{display:block; margin-top:2px; color:var(--ink); font-size:16px; font-weight:800; letter-spacing:-.01em}
+  .cycle-banner-copy{margin:9px 0 0 49px; color:var(--ink2); font-size:12.5px; line-height:1.45}
+  .payment-status{margin:14px 0; padding:15px; border-radius:18px; border:1px solid var(--line); background:var(--card2)}
+  .payment-status.pending{border-color:color-mix(in srgb, var(--accent) 45%, var(--line)); background:linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--card2)), var(--card2))}
+  .payment-status.paid{border-color:color-mix(in srgb, var(--good) 35%, var(--line)); background:linear-gradient(135deg, color-mix(in srgb, var(--good) 9%, var(--card2)), var(--card2))}
+  .payment-status-head{display:flex; align-items:flex-start; gap:10px}
+  .payment-status-icon{display:grid; place-items:center; width:34px; height:34px; flex:none; border-radius:11px; color:var(--accent-deep); background:color-mix(in srgb, var(--accent) 16%, var(--card))}
+  .payment-status.paid .payment-status-icon{color:var(--good); background:color-mix(in srgb, var(--good) 14%, var(--card))}
+  .payment-status-icon svg{width:18px; height:18px}
+  .payment-status-title{flex:1; min-width:0; line-height:1.3}
+  .payment-status-title b{display:block; color:var(--ink); font-size:14px}
+  .payment-status-title span{display:block; margin-top:3px; color:var(--ink3); font-size:11.5px}
+  .payment-status-value{flex:none; color:var(--ink); font-size:16px; font-weight:850; text-align:right}
+  .payment-status.paid .payment-status-value{color:var(--good)}
+  .payment-status-copy{margin:11px 0 0; color:var(--ink2); font-size:12.5px; line-height:1.5}
+  .payment-status .field{margin-top:13px; margin-bottom:0}
+  .payment-status .btn{margin-top:12px}
+  .direction-in{color:var(--good); font-weight:700}
+  .direction-out{color:var(--bad); font-weight:700}
+  .direction-mixed{color:var(--accent-deep); font-weight:700}
 
   .commitment-list{display:grid; gap:10px}
   .commitment-card{
@@ -672,13 +701,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=7.4"></script>
+<script src="scan.js?v=7.5"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "7.4";
+  var APP_VERSION = "7.5";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1728,10 +1757,10 @@
       (person.log||[]).forEach(function(entry){ if(entry.id === logId) log = entry; });
     });
     if(!d || !log) return;
-    var beforeTs = log.ts, oldDate = iso(new Date(log.ts));
+    var beforeTs = log.ts, oldDate = iso(new Date(log.ts)), logKind = ledgerKindForLog(d, log.id);
     openSheet(
       '<h2>Change money log date</h2>'+
-      '<p class="hint" style="margin-top:0">'+esc(log.dir==="b"?"They gave you":"You gave them")+' '+fmt(log.amt)+' with '+esc(d.name)+'.</p>'+
+      '<p class="hint" style="margin-top:0"><span class="direction-'+ledgerTone(logKind)+'">'+esc(ledgerLabel(logKind))+'</span> '+fmt(log.amt)+' with '+esc(d.name)+'.</p>'+
       '<div class="field"><label class="micro" for="ledger-date">Date</label>'+
       '<input id="ledger-date" type="date" value="'+oldDate+'" max="'+todayIso()+'"></div>'+
       '<div class="hint">Only the date changes. The amount, person and balance stay exactly the same. The salary cycle and History use the new date.</div>'+
@@ -1766,9 +1795,9 @@
       '<div class="field"><label class="micro" for="b-date">When did it happen?</label>' +
       '<input id="b-date" type="date" value="'+todayIso()+'" max="'+todayIso()+'"></div>' +
       '<div class="row2">' +
-      '<button class="btn" id="b-igave">I gave them</button>' +
-      '<button class="btn primary" id="b-theygave">They gave me</button></div>' +
-      '<div class="hint">One balance per person covers everything — lending, borrowing and paying back. Giving money always moves the balance your way.</div>'
+      '<button class="btn" id="b-igave">Money out · I gave them</button>' +
+      '<button class="btn primary" id="b-theygave">Money in · They gave me</button></div>' +
+      '<div class="hint">Money in increases what you have today and records borrowing or repayment. Money out reduces what you have and records lending or paying them back.</div>'
     );
     sheet.querySelectorAll("[data-bname]").forEach(function(c){
       c.addEventListener("click", function(){ $("#b-name").value = c.getAttribute("data-bname"); });
@@ -1797,8 +1826,9 @@
     var d = null;
     state.debts.forEach(function(x){ if(x.id===id) d = x; });
     if(!d) return;
-    var hist = (d.log||[]).slice(-6).reverse().map(function(l){
-      return '<button type="button" class="flow-row ledger-history-item" data-ledger-edit="'+esc(l.id)+'" style="padding:5px 0"><span class="lbl"><span>'+(l.dir==="b"?"they gave":"you gave")+
+    var hist = ledgerEntries(d).slice(-6).reverse().map(function(entry){
+      var l = entry.log, tone = ledgerTone(entry.kind);
+      return '<button type="button" class="flow-row ledger-history-item" data-ledger-edit="'+esc(l.id)+'" style="padding:5px 0"><span class="lbl"><span class="direction-'+tone+'">'+esc(ledgerLabel(entry.kind))+'</span>'+
         (l.note? " · "+esc(l.note) : "")+
         ' · '+new Date(l.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+'</span><span class="edit-hint">Edit date</span></span>' +
         '<span class="val money" style="color:'+(l.dir==="b"?"var(--good)":"var(--bad)")+'">'+(l.dir==="b"?"+":"−")+fmt(l.amt)+'</span></button>';
@@ -1811,8 +1841,8 @@
       '<div><label class="micro" for="d2-date" style="display:block; margin-bottom:6px">Date</label>'+
       '<input id="d2-date" type="date" value="'+todayIso()+'" max="'+todayIso()+'"></div></div>' +
       '<div class="row2">' +
-      '<button class="btn" id="d2-igave">I gave them</button>' +
-      '<button class="btn primary" id="d2-theygave">They gave me</button></div>' +
+      '<button class="btn" id="d2-igave">Money out · I gave them</button>' +
+      '<button class="btn primary" id="d2-theygave">Money in · They gave me</button></div>' +
       (hist? '<div class="micro" style="margin:4px 0 6px">History</div>'+hist : "") +
       '<div style="height:12px"></div>' +
       ((d.log||[]).length? '<button class="btn ghost" id="d2-undo" style="color:var(--ink2)">Undo last entry</button><div style="height:10px"></div>' : "") +
@@ -2113,7 +2143,36 @@
       '<span class="exp-amt money">'+fmt(e.amount)+'</span></button>';
   }
 
-  var LEDGER_LABEL = { gave:"you gave", repaid:"paid you back", borrowed:"you borrowed", mixed:"paid you back" };
+  var LEDGER_LABEL = {
+    gave:"You lent them money",
+    paidBack:"You paid them back",
+    repaid:"They paid you back",
+    borrowed:"Borrowed from them",
+    mixed:"Part repaid · part borrowed"
+  };
+  function ledgerKind(balanceBefore, l){
+    if(l.dir === "b"){
+      var incoming = classifyIncoming(balanceBefore, l.amt);
+      return incoming.repay <= 0 ? "borrowed" : incoming.repay >= l.amt ? "repaid" : "mixed";
+    }
+    return balanceBefore > 0 ? "paidBack" : "gave";
+  }
+  function ledgerEntries(d){
+    var bal = 0, rows = [];
+    (d.log||[]).forEach(function(l){
+      var kind = ledgerKind(bal, l);
+      rows.push({log:l, kind:kind, balanceBefore:bal});
+      bal += l.dir === "b" ? l.amt : -l.amt;
+    });
+    return rows;
+  }
+  function ledgerKindForLog(d, id){
+    var kind = "gave";
+    ledgerEntries(d).some(function(entry){ if(entry.log.id === id){ kind = entry.kind; return true; } return false; });
+    return kind;
+  }
+  function ledgerLabel(kind){ return LEDGER_LABEL[kind] || "Money movement"; }
+  function ledgerTone(kind){ return kind === "borrowed" || kind === "repaid" ? "in" : kind === "mixed" ? "mixed" : "out"; }
   function salaryItems(){
     return salaryReceiptEntries().map(function(item){
       return { name:"Salary", amount:item.amount, date:item.date,
@@ -2135,7 +2194,7 @@
       '<span class="exp-thumb" style="color:var('+v+'); background:color-mix(in srgb, var('+v+') 15%, var(--card2))">'+IC.person+'</span>' +
       '<span class="exp-main"><span class="exp-title">'+esc(it.name)+'</span>' +
       '<span class="exp-sub"><span class="cat-dot" style="background:var('+v+')"></span>'+
-      LEDGER_LABEL[it.kind]+(it.note? " · "+esc(it.note):"")+'</span></span>' +
+      '<span class="direction-'+ledgerTone(it.kind)+'">'+esc(ledgerLabel(it.kind))+'</span>'+(it.note? " · "+esc(it.note):"")+'</span></span>' +
       '<span class="exp-amt money" style="color:var('+v+')">'+sign+fmt(it.amt)+'</span></button>';
   }
 
@@ -2189,7 +2248,7 @@
     if(!rows.length) return "";
     var max = byCat[rows[0].id];
     var h = '<div class="sec"><span class="micro">'+title+'</span></div>';
-    
+
     h += '<div class="cat-breakdown" style="display:flex; align-items:center; gap:14px; background:var(--card); border:1px solid var(--line); border-radius:18px; padding:12px 14px;">';
     h += donutChartHtml(rows, byCat);
     h += '<div class="cats" style="flex:1; background:none; border:0; padding:0; margin:0; width:100%;">';
@@ -2776,13 +2835,12 @@
       (d.log||[]).forEach(function(l){
         var kind, cash;
         if(l.dir === "b"){
-          var c = classifyIncoming(bal, l.amt);
+          kind = ledgerKind(bal, l);
           bal += l.amt;
-          kind = c.repay <= 0 ? "borrowed" : c.repay >= l.amt ? "repaid" : "mixed";
           cash = l.amt;                         // every incoming transfer is green cash in the log
         }else{
+          kind = ledgerKind(bal, l);
           bal -= l.amt;
-          kind = "gave";
           cash = -l.amt;                        // out of your pocket, same as spending
         }
         out.push({ pid:d.id, name:d.name, amt:l.amt, dir:l.dir, kind:kind, cash:cash,
@@ -2900,7 +2958,13 @@
     var salaryReceiptCopy = salaryReceipt
       ? IC.check+"Salary received · "+fmt(salaryReceipt.amount)+" · "+(salaryReceipt.date===todayIso()?"today":salaryReceiptDateLabel(salaryReceipt))
       : IC.banknote+"Log salary received";
-    var h = '<div class="sec"><span class="micro">'+monthName+'</span></div>';
+    var cycleTitle = salaryReceipt ? "Current salary cycle" : "Current calendar month";
+    var cycleCopy = salaryReceipt
+      ? "Started by salary received "+salaryReceiptDateLabel(salaryReceipt)+". New spending and payments belong here."
+      : "Log salary received below to start a cycle from the day your money arrived.";
+    var h = '<div class="cycle-banner" aria-label="'+cycleTitle+'"><div class="cycle-banner-top">'+
+      '<span class="cycle-banner-icon">'+IC.history+'</span><span><span class="cycle-banner-kicker">'+cycleTitle+'</span><strong class="cycle-banner-range">'+esc(monthName)+'</strong></span></div>'+
+      '<p class="cycle-banner-copy">'+esc(cycleCopy)+'</p></div>';
 
     if(!state.salary){
       h += emptyBox(IC.banknote, 'Add your salary below and I\'ll show how much is<br>left after your loan, subscriptions and savings.');
@@ -2957,16 +3021,16 @@
     var budgetSource = manualBudgetActive ? 'ACTIVE · manual money pool' : state.salary > 0 ? 'ACTIVE · salary plan' : 'SET A SOURCE';
     var budgetSourceClass = manualBudgetActive || state.salary > 0 ? 'active' : 'planned';
     var budgetSourceCopy = manualBudgetActive
-      ? 'This pool controls your daily guidance. Salary commitments and debt payments are tracked separately.'
+      ? 'This pool controls daily guidance. Salary commitments and debt payments are tracked separately. Clear it to return to the salary plan.'
       : state.salary > 0
-      ? 'No manual pool is active. Left to spend comes from salary minus commitments, savings, and people flow.'
+      ? 'Salary plan is active. Set a money pool only when you want to override daily guidance from today.'
       : 'Set your salary or enter a money pool to activate daily guidance.';
     h += '<div class="panel plan-budget-panel">' +
       '<div class="plan-budget-head"><span class="plan-budget-icon">'+IC.wallet+'</span><div><h3>Daily budget</h3>' +
       '<span class="plan-budget-source '+budgetSourceClass+'">'+budgetSource+'</span><p class="plan-budget-copy">Tell me how much money you have from <b>today</b> until the end of this salary cycle, including anything you plan to borrow. I will turn it into a daily amount that adjusts as you spend.</p><p class="plan-budget-source-copy">'+budgetSourceCopy+'</p></div></div>' +
       '<div class="field plan-budget-field"><label class="micro" for="p-rest" style="display:block; margin-bottom:6px">Money for the rest of the cycle</label>' +
       '<input id="p-rest" type="text" inputmode="decimal" min="0" placeholder="e.g. 1000" value="'+(state.restAmount||"")+'"></div>' +
-      '<div class="plan-budget-actions"><button class="btn primary" id="p-rest-save">Set daily budget</button>' +
+      '<div class="plan-budget-actions"><button class="btn primary" id="p-rest-save">'+(manualBudgetActive ? 'Update money pool' : 'Set money pool')+'</button>' +
       '<button class="btn" id="p-cash">'+IC.wallet+'Check my cash</button></div>' +
       (rr !== null
         ? '<div class="hint">You can spend about <b class="money" style="color:var(--ink)">'+fmt(autoD)+'</b> a day — '+
@@ -3025,8 +3089,9 @@
       h += '<div class="row-list">';
       state.debts.forEach(function(d){
         var last = d.log && d.log.length ? d.log[d.log.length-1] : null;
+        var lastKind = last ? ledgerKindForLog(d, last.id) : "gave";
         var sub = last
-          ? (last.dir==="b" ? "they gave " : "you gave ")+fmt(last.amt)+
+          ? '<span class="direction-'+ledgerTone(lastKind)+'">'+esc(ledgerLabel(lastKind))+'</span> · '+fmt(last.amt)+
             (last.note? " · "+esc(last.note) : "")+" · "+new Date(last.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})
           : "no activity yet";
         var tint = d.balance > 0 ? "--bad" : d.balance < 0 ? "--good" : "--warn";
@@ -3072,22 +3137,26 @@
   function payBlock(c){
     var p = paidRec(c);
     var periodWord = salaryReceiptEntries().length > 0 ? "cycle" : "month";
+    var cycle = periodLabel(monthKey())+' '+periodWord;
     var poolActive = state.restAmount > 0 && state.restFrom;
     if(p){
       var diff = Math.round((p.amt - c.amount)*100)/100;
-      return '<div class="field"><div class="micro">Paid in this '+periodWord+'</div>' +
-        '<div class="flow-row" style="padding:6px 0"><span class="lbl">'+
-        new Date(p.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+
-        (diff? ' · '+fmt(Math.abs(diff))+(diff>0? ' more' : ' less')+' than the usual '+fmt(c.amount) : ' · the usual amount')+
-        '</span><span class="val money" style="color:var(--bad)">−'+fmt(p.amt)+'</span></div>' +
-        '<div class="hint">'+(poolActive
+      return '<div class="payment-status paid" aria-label="Paid in this '+periodWord+'"><div class="payment-status-head">' +
+        '<span class="payment-status-icon">'+IC.check+'</span><span class="payment-status-title"><b>Paid in this '+periodWord+'</b><span>'+esc(cycle)+' · '+new Date(p.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"})+'</span></span>'+
+        '<span class="payment-status-value">−'+fmt(p.amt)+'</span></div>' +
+        '<p class="payment-status-copy">'+(diff
+          ? fmt(Math.abs(diff))+(diff>0? ' more' : ' less')+' than the usual '+fmt(c.amount)+'. '
+          : 'The usual amount was paid. ')+(poolActive
           ? 'This payment is recorded for history and debt tracking. Your manual spending pool is separate, so logging it does not change that pool.'
-          : 'This payment is already included in your salary plan. Logging it confirms the payment; it is not subtracted a second time.')+'</div>' +
-        '<button class="btn ghost" id="c-unpay" style="color:var(--ink2)">Undo this payment</button></div>';
+          : 'This payment is already included in your salary plan. Logging it confirms the payment; it is not subtracted a second time.')+'</p>' +
+        '<button class="btn ghost" id="c-unpay" style="color:var(--ink2)">Undo payment</button></div>';
     }
-    return '<div class="field"><label class="micro" for="c-paid">Paid in this '+periodWord+'? (optional)</label>' +
-      '<input id="c-paid" type="text" inputmode="decimal" placeholder="'+c.amount+'" value="">' +
-      '<button class="btn" id="c-pay" style="margin-top:8px">Log this '+periodWord+'\'s payment</button>' +
+    return '<div class="payment-status pending" aria-label="Not paid in this '+periodWord+'"><div class="payment-status-head">' +
+      '<span class="payment-status-icon">'+IC.banknote+'</span><span class="payment-status-title"><b>Not paid in this '+periodWord+'</b><span>'+esc(cycle)+' · usual amount '+fmt(c.amount)+'</span></span>'+
+      '</div><p class="payment-status-copy">Log what you actually paid. The usual amount is already reserved in your salary plan, so only paying more or less changes Left to spend.</p>'+
+      '<div class="field"><label class="micro" for="c-paid">Actual amount paid</label>' +
+      '<input id="c-paid" type="text" inputmode="decimal" placeholder="'+c.amount+'" value=""></div>' +
+      '<button class="btn primary" id="c-pay">Log payment</button>' +
       '<div class="hint">'+(poolActive
         ? 'Your manual spending pool is separate. This records the payment for history and debt tracking; adjust the pool if the cash came from it.'
         : state.salary > 0
@@ -3427,7 +3496,7 @@
       '<option value="gemini"'+(state.scanProvider==="gemini"?" selected":"")+'>Gemini (Google AI Studio)</option>' +
       '<option value="claude"'+(state.scanProvider==="claude"?" selected":"")+'>Claude (Anthropic)</option>' +
       '</select></div>' +
-      
+
       '<div class="field" id="s-agentrouter-container" style="'+(state.scanProvider==="agentrouter"?"":"display:none")+'">' +
       '<label class="micro" for="s-agentrouter-key">AgentRouter API key</label>' +
       '<input id="s-agentrouter-key" type="password" placeholder="Paste your rotated token" autocomplete="off" value="'+esc(state.agentRouterApiKey)+'">' +
@@ -3438,14 +3507,14 @@
       '<div class="field" id="s-gemini-key-container" style="'+(state.scanProvider==="gemini"?"":"display:none")+'">' +
       '<label class="micro" for="s-gemini-key">Gemini API Key</label>' +
       '<input id="s-gemini-key" type="password" placeholder="AIzaSy…" autocomplete="off" value="'+esc(state.geminiApiKey)+'"></div>' +
-      
+
       '<div class="field" id="s-claude-key-container" style="'+(state.scanProvider==="claude"?"":"display:none")+'">' +
       '<label class="micro" for="s-claude-key">Claude API key</label>' +
       '<input id="s-claude-key" type="password" placeholder="sk-ant-…" autocomplete="off" value="'+esc(state.apiKey)+'"></div>' +
-      
+
       '<div class="field" id="s-claude-model-container" style="'+(state.scanProvider==="claude"?"":"display:none")+'">' +
       '<label class="micro" for="s-model">Claude Model</label><select id="s-model">'+modelOpts+'</select></div>' +
-      
+
       '<button class="btn" id="s-scan-save">Save scanning settings</button>' +
       '<div class="hint">Keys are stored only on this phone and sent directly to the selected AI provider when you scan a receipt. Never put a key in GitHub.</div></div>' +
 
