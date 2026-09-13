@@ -175,7 +175,8 @@ exports.run = async function (t, env) {
     }), { now: NOW });
     t.has("next year's expense leaves this month's pool alone", await app.poolLine(),
       "MAD 1,000 left of your MAD 1,000");
-    t.eq("and today's budget survives", await app.todayLeft(), "MAD 50 left today");
+    /* flat split: 1,000 over the 14 days left */
+    t.eq("and today's budget survives", await app.todayLeft(), "MAD 71 left today");
     await app.close();
   }
   {

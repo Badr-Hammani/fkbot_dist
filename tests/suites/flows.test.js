@@ -107,7 +107,8 @@ exports.run = async function (t, env) {
     t.eq("and records what was taken", (st.commitments[0].draws || []).map(d => d.amount).join(), "2850");
     await app.tab("plan");
     t.has("months-to-go follows the bigger balance", await app.page.evaluate(() => {
-      const r = document.querySelector('[data-cm="dad"] .hl'); return r ? r.textContent : "";
+      /* the row now carries several .hl lines; take them all */
+      const r = document.querySelector('[data-cm="dad"]'); return r ? r.textContent : "";
     }), "MAD 14,850 left");
     await app.close();
   }

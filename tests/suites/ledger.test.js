@@ -148,14 +148,14 @@ exports.run = async function (t, env) {
     }), "over budget");
     const poolBefore = norm(await app.poolLine());
 
-    await app.page.click("#h-borrow"); await app.page.waitForTimeout(400);
+    await app.page.click("#h-funding"); await app.page.waitForTimeout(400);
     const st = await app.stored();
     t.eq("one tap adds it to what you owe them", st.debts[0].balance, 4350);
     t.eq("recorded as a real ledger entry", st.debts[0].log.length, 2);
     t.eq("labelled so you know why", st.debts[0].log[1].note, "covered my overspend");
     t.eq("and borrowing does not hand the money back to the budget",
       norm(await app.poolLine()), poolBefore);
-    t.no("the offer is gone once logged", await app.page.evaluate(() => !!document.querySelector("#h-borrow")));
+    t.no("the offer is gone once logged", await app.page.evaluate(() => !!document.querySelector("#h-funding")));
 
     /* and it is undoable straight from the toast */
     await app.page.click("#toast button"); await app.page.waitForTimeout(400);
@@ -177,13 +177,13 @@ exports.run = async function (t, env) {
       const s = document.querySelector(".suggest"); return s ? s.textContent : "";
     }));
     t.has("the red line shows the full overspend", red, "MAD 2,850 past your MAD 3,000");
-    t.has("and the offer leads with the same figure", txt, "You're MAD 2,850 past your money");
-    t.has("it says what is already borrowed", txt, "MAD 1,800 is already borrowed");
-    t.has("and asks only for the rest, naming where it goes", txt, "add the other MAD 1,050 to Dad?");
-    t.has("the button names the amount it will add", await app.page.evaluate(() => {
-      const b = document.querySelector("#h-borrow"); return b ? b.textContent : "";
-    }), "Add MAD 1,050");
-    await app.page.click("#h-borrow"); await app.page.waitForTimeout(400);
+    t.has("and the offer leads with the same figure", txt, "You're MAD 2,850 over budget");
+    t.has("it says what is already borrowed", txt, "MAD 1,800 borrowed from people");
+    t.has("and asks only for the rest", txt, "MAD 1,050 has no funding source recorded");
+    t.has("the button names where it goes", await app.page.evaluate(() => {
+      const b = document.querySelector("#h-funding"); return b ? b.textContent : "";
+    }), "Add to Dad");
+    await app.page.click("#h-funding"); await app.page.waitForTimeout(400);
     t.eq("and adds exactly that", (await app.stored()).debts[0].balance, 2850);
     await app.close();
   }
@@ -222,8 +222,8 @@ exports.run = async function (t, env) {
     const txt = norm(await app.page.evaluate(() => {
       const s = document.querySelector(".suggest"); return s ? s.textContent : "NONE";
     }));
-    t.no("repayments are not called borrowing", txt.includes("already borrowed"), txt);
-    t.has("and the offer still appears for the real overspend", txt, "You're MAD 1,050 past your money");
+    t.no("repayments are not called borrowing", txt.includes("borrowed from people"), txt);
+    t.has("and the offer still appears for the real overspend", txt, "You're MAD 1,050 over budget");
     await app.close();
   }
   {
@@ -238,7 +238,7 @@ exports.run = async function (t, env) {
     }), { now: NOW });
     t.has("genuine borrowing counts", await app.page.evaluate(() => {
       const s = document.querySelector(".suggest"); return s ? s.textContent : "";
-    }), "MAD 1,800 is already borrowed");
+    }), "MAD 1,800 borrowed from people");
     await app.close();
   }
   {
@@ -254,7 +254,7 @@ exports.run = async function (t, env) {
     }), { now: NOW });
     t.has("only the loan half of a mixed payment counts", await app.page.evaluate(() => {
       const s = document.querySelector(".suggest"); return s ? s.textContent : "";
-    }), "MAD 1,500 is already borrowed");
+    }), "MAD 1,500 borrowed from people");
     await app.close();
   }
   {
@@ -264,14 +264,14 @@ exports.run = async function (t, env) {
       expenses: [expense({ amount: 2000, date: "2026-08-10" })]
     }), { now: NOW });
     t.has("with no lender known it stays generic", await app.page.evaluate(() => {
-      const b = document.querySelector("#h-borrow"); return b ? b.textContent : "";
-    }), "Log it");
+      const b = document.querySelector("#h-funding"); return b ? b.textContent : "";
+    }), "Track it");
     await app.close();
   }
   {
     /* and it never nags when you are inside your money */
     const app = await boot(browser, baseState({ restAmount: 1000, restFrom: "2026-08-01", restTs: 1 }), { now: NOW });
-    t.no("no offer when you are not over", await app.page.evaluate(() => !!document.querySelector("#h-borrow")));
+    t.no("no offer when you are not over", await app.page.evaluate(() => !!document.querySelector("#h-funding")));
     await app.close();
   }
 

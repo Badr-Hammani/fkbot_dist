@@ -701,13 +701,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=7.8"></script>
+<script src="scan.js?v=7.9"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "7.8";
+  var APP_VERSION = "7.9";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -2709,9 +2709,26 @@
      used to live inside the salary branch and key off the monthly plan, so
      running on a rest-of-month pool — the state you are in when you have
      actually run out — offered nothing at all. */
+  /* The person you actually borrow from — most borrowed from across your
+     history. Lets the card say "Add to Dad" instead of making you type his
+     name every time you go over. */
+  function usualLender(){
+    var best = null, bestAmt = 0;
+    state.debts.forEach(function(d){
+      var sum = 0;
+      (d.log||[]).forEach(function(l){ if(l.dir === "b") sum += l.amt; });
+      if(sum > bestAmt){ bestAmt = sum; best = d; }
+    });
+    return best;
+  }
+  /* Answer for the ONE budget the user is looking at. Falling through to the
+     salary plan while a healthy pool was on screen let the app say "MAD 3,000
+     left for the rest of the month" and "you're MAD 1,500 over budget" at the
+     same time — and tapping it moved real money onto a real loan. A pool, once
+     set, is the budget; the plan only answers when there is no pool. */
   function overspendAmount(){
     var rr = restRemaining();
-    if(rr !== null && rr < 0) return Math.round(-rr * 100) / 100;
+    if(rr !== null) return rr < 0 ? Math.round(-rr * 100) / 100 : 0;
     if(state.salary > 0){
       var left = monthLeftOfPlan();
       if(left < 0) return Math.round(-left * 100) / 100;
@@ -2729,12 +2746,15 @@
     if(loanFunding > 0) bits.push('<b class="money">'+fmt(loanFunding)+'</b> added to loans');
     if(peopleFunding > 0) bits.push('<b class="money">'+fmt(peopleFunding)+'</b> borrowed from people');
     var loan = shortfallLoan();
+    var person = loan ? null : usualLender();      /* who you actually borrow from */
+    var target = loan ? loan.name : (person ? person.name : "");
     fundingCard.shown = true;
     return '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(over)+'</b> over budget' +
       (bits.length ? ' · '+bits.join(' · ') : '') +
       (uncovered >= 1 ? ' · <b class="money">'+fmt(uncovered)+'</b> has no funding source recorded.' : ' · funding fully tracked.') +
       '</span>'+(uncovered >= 1
-        ? '<button id="h-funding" data-amt="'+uncovered+'">'+(loan ? 'Add to '+esc(loan.name) : 'Track it')+'</button>'
+        ? '<button id="h-funding" data-amt="'+uncovered+'"'+(person ? ' data-person="'+esc(person.id)+'"' : '')+'>'+
+          (target ? 'Add to '+esc(target) : 'Track it')+'</button>'
         : '')+'</div>';
   }
   function loanById(id){
@@ -4712,8 +4732,17 @@
     if(fundingBtn) fundingBtn.addEventListener("click", function(){
       var amt = parseFloat(this.getAttribute("data-amt")) || 0;
       var loan = shortfallLoan();
-      if(loan) openLoanDrawSheet(loan, amt, true);   /* new borrowing, not a backfill */
-      else openBorrowSheet(amt);
+      if(loan){ openLoanDrawSheet(loan, amt, true); return; }   /* new borrowing, not a backfill */
+      var pid = this.getAttribute("data-person"), d = null;
+      state.debts.forEach(function(x){ if(x.id === pid) d = x; });
+      if(!d || !(amt > 0)){ openBorrowSheet(amt); return; }
+      ledgerAdd(d, "b", amt, "covered my overspend");
+      save(); render();
+      toastAction("Added "+fmt(amt)+" to "+d.name+" — you owe "+fmt(d.balance), "Undo", function(){
+        var last = d.log.pop();
+        if(last) d.balance = Math.round((d.balance - last.amt) * 100) / 100;
+        save(); render(); toast("Removed");
+      }, 7000);
     });
     var oweBtn = $("#h-owe");
     if(oweBtn) oweBtn.addEventListener("click", function(){ tab = "plan"; render(); window.scrollTo(0,0); });
