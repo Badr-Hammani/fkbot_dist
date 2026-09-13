@@ -701,13 +701,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=7.6"></script>
+<script src="scan.js?v=7.7"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "7.6";
+  var APP_VERSION = "7.7";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1504,7 +1504,7 @@
     if(state.salary > 0){
       var spendable = pm.left;
       var mFlow = ledgerFlowSince(monthStartIso());
-      var mLeft = spendable - mSpent;
+      var mLeft = monthLeftOfPlan();
       var flowNote = "";
       if(mFlow.out > 0 || mFlow.inn > 0 || mFlow.borrowed > 0){
         var parts = [];
@@ -1575,8 +1575,12 @@
     }
 
     /* today card — everyday budget */
+    /* Shown whenever there is a budget at all, including when the rate has
+       fallen to zero. Hiding the card once you run out removed the one line
+       that says how far past you are — exactly when you need to see it. */
     var tb = todayBudget();
-    if(tb > 0){
+    var rrNow = restRemaining();
+    if(tb > 0 || rrNow !== null || state.salary > 0){
       var dLeft = tb - tSpent;
       h += '<div class="sec"><span class="micro">Today</span>' +
         '<span class="micro">'+daysLeftInMonth()+' days left this '+periodWord+'</span></div>';
@@ -1599,12 +1603,15 @@
       }
       h += '<section class="goal secondary-card today-card"><div class="goal-top"><span class="goal-name">'+
         new Date().toLocaleDateString(undefined,{weekday:"long"})+'</span>' +
-        '<span class="goal-amt money">'+(dLeft<0
+        '<span class="goal-amt money">'+(tb <= 0
+          ? '<b style="color:var(--bad)">nothing left</b> today'
+          : dLeft<0
           ? '<b style="color:var(--bad)">'+fmt(Math.abs(dLeft))+'</b> over'
           : '<b>'+fmt(dLeft)+'</b> left today')+'</span></div>' +
-        meterHtml(tSpent, tb) +
-        '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(tSpent)+' of '+fmt(tb)+
-        ' · rebalances daily</span></div>' + weightNote() + poolLine + '</section>';
+        meterHtml(tSpent, Math.max(tb, tSpent, 1)) +
+        '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">'+(tb <= 0
+          ? 'spent '+fmt(tSpent)+' today · your money for the '+periodWord+' is used up'
+          : 'spent '+fmt(tSpent)+' of '+fmt(tb)+' · rebalances daily')+'</span></div>' + weightNote() + poolLine + '</section>';
     }
 
     /* weekend card — the same pool, seen over Fri-Sun instead of one day */
@@ -1925,6 +1932,10 @@
       '<input id="sp-total" type="text" inputmode="decimal" min="0" step="0.01" placeholder="0"></div>' +
       '<div><label class="micro" for="sp-note" style="display:block; margin-bottom:6px">What for</label>' +
       '<input id="sp-note" type="text" placeholder="Dinner, taxi…" maxlength="40"></div></div>' +
+      /* bills get split on Friday and logged on Sunday — the date has to be
+         changeable or the spend lands on the wrong day and the wrong weekend */
+      '<div class="field"><label class="micro" for="sp-date">When was it?</label>' +
+      '<input id="sp-date" type="date" max="'+todayIso()+'" value="'+todayIso()+'"></div>' +
       '<div class="micro" style="margin-bottom:8px">Split between</div>' +
       '<div class="chips" id="sp-people">'+chipRow("who")+'</div>' +
       '<div class="row2" style="margin-top:-4px">' +
@@ -2095,8 +2106,9 @@
         ledgerAdd(findOrCreatePerson(payer), "b", sh["Me"], note); // they covered my share
       }
       if(selected["Me"] && sh["Me"] > 0){
+        var spDate = $("#sp-date") && ISO_RE.test($("#sp-date").value) ? $("#sp-date").value : todayIso();
         state.expenses.push({ id: uid(), ts: Date.now(), amount: sh["Me"], cat: spCat,
-                              note: note, date: todayIso(), photo: null });
+                              note: note, date: spDate, photo: null });
       }
       save(); closeSheet(); render();
       toast(payer === "Me"
@@ -2287,12 +2299,18 @@
     if(!groups.length){
       return emptyBox(IC.history, 'Every day you log shows up here —<br>weekday or weekend, all the way back.');
     }
-    var spent = groups.reduce(function(s,g){ return s + Math.max(g.out,0); }, 0);
+    /* This averaged only the days money went out but divided by every day,
+       including days money came in — so it was neither a true average nor an
+       average of spending days. Count what left your pocket across the days
+       you actually spent on, and say so. */
+    var spendDays = groups.filter(function(g){ return g.out > 0; });
+    var spent = spendDays.reduce(function(s,g){ return s + g.out; }, 0);
+    var avg = spendDays.length ? spent / spendDays.length : 0;
     var h = '<div class="stat-row">' +
-      '<div class="stat"><span class="micro">Days</span><div class="v money">'+groups.length+'</div></div>' +
-      '<div class="stat"><span class="micro">Avg net out/day</span><div class="v money">'+fmt(spent/groups.length)+'</div></div>' +
-      '<div class="stat"><span class="micro">Biggest net out</span><div class="v money">'+
-        fmt(Math.max.apply(null, groups.map(function(g){ return Math.max(g.out, 0); })))+'</div></div></div>';
+      '<div class="stat"><span class="micro">Days logged</span><div class="v money">'+groups.length+'</div></div>' +
+      '<div class="stat"><span class="micro">Avg on a spending day</span><div class="v money">'+fmt(avg)+'</div></div>' +
+      '<div class="stat"><span class="micro">Biggest day</span><div class="v money">'+
+        fmt(Math.max.apply(null, groups.map(function(g){ return Math.max(g.out, 0); }).concat([0])))+'</div></div></div>';
     var mk = "";
     groups.forEach(function(g){
       var m = g.date.slice(0,7);
@@ -2315,6 +2333,14 @@
   /* what a month really cost you: what you spent, plus money you handed to
      people, minus what came back. Same arithmetic as the Home screen — these
      two must never disagree. */
+  /* The single answer to "what is left of this month's plan". Home and
+     History > Months each used to work it out their own way and disagreed by
+     the amount borrowed: planMath().left already adds borrowing back in, and
+     the month card then subtracted a figure that netted it off a second time.
+     Every screen that shows a "left this month" number calls this. */
+  function monthLeftOfPlan(){
+    return Math.round((planMath().left - monthSpent()) * 100) / 100;
+  }
   function monthOut(mk){
     var net = 0;
     ledgerItems().forEach(function(it){ if(dateInPeriod(it.date, mk)) net += -it.cash; });
@@ -2368,7 +2394,9 @@
         '<div class="wk-sub">'+bits.join(' · ')+'</div>';
 
       if(now && spendable > 0){
-        var left = Math.round((spendable - out)*100)/100;
+        /* the current month is the one the plan describes, so it must give
+           the same answer as Home */
+        var left = now ? monthLeftOfPlan() : Math.round((spendable - out)*100)/100;
         h += meterHtml(out, spendable) +
           '<div class="wk-sub">'+(left < 0
             ? '<span style="color:var(--bad); font-weight:700">'+fmt(-left)+' over</span> your '+fmt(spendable)+' plan'
@@ -2789,9 +2817,18 @@
     if(!state.restFrom) return 0;
     return state.restTs > 0 ? state.restTs : fromIso(state.restFrom).getTime();
   }
+  function periodEndIso(){
+    var b = periodBounds(monthKey());
+    var d = fromIso(b.endExclusive); d.setDate(d.getDate()-1);
+    return iso(d);
+  }
+  /* The pool is money for the rest of THIS period, so it is bounded at both
+     ends. Without the upper bound a single mistyped year — 2126 for 2026 —
+     was subtracted from today's budget and silently zeroed it. */
   function spentFromPool(){
-    var t = poolStartTs();
+    var t = poolStartTs(), end = periodEndIso();
     return total(state.expenses.filter(function(e){
+      if(e.date > end) return false;
       if(e.date > state.restFrom) return true;
       return e.date === state.restFrom && (e.ts || 0) >= t;
     }));
@@ -3257,8 +3294,13 @@
     $("#draw-edit-cancel").addEventListener("click", closeSheet);
   }
 
-  function openLoanDrawSheet(c, prefillAmt){
+  function openLoanDrawSheet(c, prefillAmt, isNew){
     if(!c || c.kind !== "loan") return;
+    /* Reached from "Track it" on Home, this is money just borrowed to cover a
+       shortfall — by definition not yet in the balance. Defaulting the box to
+       checked there meant the app said "added to Dad loan" and then left the
+       balance untouched. */
+    var preIncluded = isNew ? "" : " checked";
     var manual = (c.draws||[]).slice().sort(function(a,b){
       return a.date === b.date ? (b.ts||0)-(a.ts||0) : (a.date < b.date ? 1 : -1);
     });
@@ -3276,11 +3318,11 @@
       '<div class="field"><label class="micro" for="draw-amount">Amount borrowed</label>'+
       '<input id="draw-amount" type="text" inputmode="decimal" min="0" value="'+(prefillAmt>0?prefillAmt:"")+'" placeholder="0"></div>'+
       '<div class="row2"><div><label class="micro" for="draw-date" style="display:block; margin-bottom:6px">Date</label>'+
-      '<input id="draw-date" type="date" value="'+todayIso()+'"></div>'+
+      '<input id="draw-date" type="date" max="'+todayIso()+'" value="'+todayIso()+'"></div>'+
       '<div><label class="micro" for="draw-note" style="display:block; margin-bottom:6px">What was it for?</label>'+
       '<input id="draw-note" type="text" maxlength="50" placeholder="e.g. PC" value=""></div></div>'+
-      '<label class="checkrow" for="draw-included"><input type="checkbox" id="draw-included" checked>'+
-      '<span><b>Already included in the current loan balance</b><br><span class="hint" style="display:block; margin-top:3px">Keep this checked for older borrowing so Dad’s balance is not increased twice.</span></span></label>'+
+      '<label class="checkrow" for="draw-included"><input type="checkbox" id="draw-included"'+preIncluded+'>'+
+      '<span><b>I already added this to the balance myself</b><br><span class="hint" style="display:block; margin-top:3px">Leave this off and the app raises what you owe '+esc(c.name)+'. Tick it only if you already typed the bigger balance in yourself, so it is not counted twice.</span></span></label>'+
       '<button class="btn primary" id="draw-save" style="margin-top:12px">Save borrowing record</button>'+
       (rows? '<div class="sec" style="margin-top:22px"><span class="micro">Manual history</span></div><div class="row-list">'+rows+'</div>' : '')+
       '<button class="btn ghost" id="draw-back" style="margin-top:12px">Back to '+esc(c.name)+'</button>'
@@ -3297,7 +3339,9 @@
                      note:note, balanceApplied:!alreadyIncluded });
       if(!alreadyIncluded) c.remaining = Math.round((+c.remaining+amount)*100)/100;
       save(); render(); openCommitmentSheet(c.id);
-      toast(fmt(amount)+" added to "+c.name+" borrowing history");
+      toast(alreadyIncluded
+        ? fmt(amount)+" recorded — "+c.name+" balance left at "+fmt(c.remaining)
+        : fmt(amount)+" added — you now owe "+c.name+" "+fmt(c.remaining));
     });
     $("#draw-back").addEventListener("click", function(){ openCommitmentSheet(c.id); });
     sheet.querySelectorAll("[data-draw-edit]").forEach(function(b){
@@ -4243,7 +4287,7 @@
       '<datalist id="note-suggestions">' +
       noteSuggestions().map(function(n){ return '<option value="'+esc(n)+'">'; }).join("")+'</datalist></div>' +
       '<div><label class="micro" for="f-date" style="display:block; margin-bottom:6px">Date</label>' +
-      '<input id="f-date" type="date" value="'+esc(draft.date)+'"></div></div>' +
+      '<input id="f-date" type="date" max="'+todayIso()+'" value="'+esc(draft.date)+'"></div></div>' +
       '<button class="btn primary" id="f-save">'+(editing? "Save changes" : "Save expense")+'</button>'
     );
     setPhotoUi(draft.photo? "done" : "idle");
@@ -4376,9 +4420,28 @@
     });
   }
 
+  /* A year typo files an expense somewhere it will never be seen again and
+     skews whichever period it lands in. Catch it where it is typed. */
+  function dateLooksWrong(d){
+    if(!ISO_RE.test(d)) return "";
+    var end = periodEndIso();
+    if(d > end){
+      var n = new Date(), nextEnd = iso(new Date(n.getFullYear(), n.getMonth()+2, 0));
+      if(d > nextEnd) return "That date is " + fromIso(d).toLocaleDateString(undefined,{month:"long", year:"numeric"}) + " — check the year";
+    }
+    if(d < "2015-01-01") return "That date looks too far back — check the year";
+    return "";
+  }
   function saveDraft(){
     var amt = num($("#f-amount").value);
     if(!(amt > 0)){ toast("Enter the amount first"); $("#f-amount").focus(); return; }
+    var dWarn = dateLooksWrong($("#f-date") ? $("#f-date").value : "");
+    if(dWarn && !saveDraft.dateOk){
+      saveDraft.dateOk = true;               /* one warning, then take them at their word */
+      toast(dWarn + " · tap Save again to keep it");
+      return;
+    }
+    saveDraft.dateOk = false;
     var existing = null;
     if(draft.editId) state.expenses.forEach(function(x){ if(x.id===draft.editId) existing = x; });
     var e = {
@@ -4558,7 +4621,7 @@
     if(fundingBtn) fundingBtn.addEventListener("click", function(){
       var amt = parseFloat(this.getAttribute("data-amt")) || 0;
       var loan = shortfallLoan();
-      if(loan) openLoanDrawSheet(loan, amt);
+      if(loan) openLoanDrawSheet(loan, amt, true);   /* new borrowing, not a backfill */
       else openBorrowSheet(amt);
     });
     var oweBtn = $("#h-owe");
@@ -4751,27 +4814,46 @@
 
   render();
 
-  /* ---------- auto-update check ---------- */
-  var lastUpdateCheck = 0;
-  function checkForUpdate(){
+  /* ---------- auto-update check ----------
+     This checked only on load and on returning to the app, behind a five
+     minute limiter, so an app left open never noticed a new version and
+     backgrounding it briefly did nothing. It polls while on screen now, and
+     stops the timer when hidden so it costs nothing in the background. */
+  var UPDATE_POLL_MS = (window.__UPDATE_POLL_MS || 2*60*1000);   /* test hook */
+  var UPDATE_MIN_GAP = (window.__UPDATE_MIN_GAP || 30*1000);
+  var lastUpdateCheck = 0, updateTimer = null, updateFound = false;
+
+  function checkForUpdate(force){
+    if(updateFound) return;
     var now = Date.now();
-    if(now - lastUpdateCheck < 5*60*1000) return;
+    if(!force && now - lastUpdateCheck < UPDATE_MIN_GAP) return;
     lastUpdateCheck = now;
     fetch("version.json?t=" + now, { cache: "no-store" })
       .then(function(r){ return r.json(); })
       .then(function(j){
         if(j && j.version && j.version !== APP_VERSION){
+          updateFound = true;
+          stopUpdatePolling();
           document.getElementById("updatebar").classList.add("show");
         }
       })
       .catch(function(){});
   }
+  function startUpdatePolling(){
+    stopUpdatePolling();
+    updateTimer = setInterval(function(){ checkForUpdate(true); }, UPDATE_POLL_MS);
+  }
+  function stopUpdatePolling(){
+    if(updateTimer){ clearInterval(updateTimer); updateTimer = null; }
+  }
   document.getElementById("updatebar-go").addEventListener("click", function(){
     location.replace(location.pathname + "?u=" + Date.now());
   });
-  checkForUpdate();
+  checkForUpdate(true);
+  startUpdatePolling();
   document.addEventListener("visibilitychange", function(){
-    if(document.visibilityState === "visible") checkForUpdate();
+    if(document.visibilityState === "visible"){ checkForUpdate(true); startUpdatePolling(); }
+    else stopUpdatePolling();
   });
 
   /* register service worker for offline PWA support */

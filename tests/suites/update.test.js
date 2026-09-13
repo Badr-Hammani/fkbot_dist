@@ -8,11 +8,21 @@ const fs = require("fs");
 const path = require("path");
 const { APP_DIR, launch } = require("../harness");
 
-function serve() {
+/* The page registers a service worker, and a fetch it handles never reaches
+   Playwright's page.route — so version.json checks have to be counted here,
+   at the origin, or the test sees zero and reports a bug that is not real. */
+function serve(state) {
   const types = { ".html": "text/html", ".js": "application/javascript", ".json": "application/json",
                   ".png": "image/png", ".webmanifest": "application/manifest+json" };
   const server = http.createServer((req, res) => {
-    const file = path.join(APP_DIR, (req.url.split("?")[0] || "/").replace(/^\/+/, "") || "index.html");
+    const rel = (req.url.split("?")[0] || "/").replace(/^\/+/, "") || "index.html";
+    if (rel.endsWith("version.json")) {
+      state.hits++;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ version: state.served }));
+      return;
+    }
+    const file = path.join(APP_DIR, rel);
     fs.readFile(file, (err, buf) => {
       if (err) { res.writeHead(404); res.end("no"); return; }
       res.writeHead(200, { "content-type": types[path.extname(file)] || "text/plain" });
@@ -24,26 +34,20 @@ function serve() {
 
 exports.name = "update · new-version banner";
 exports.run = async function (t, env) {
-  const server = await serve();
+  const shared = { served: "0", hits: 0 };
+  const server = await serve(shared);
   const port = server.address().port;
   const browser = await (env.getBrowser ? env.getBrowser() : launch());
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
 
-  let served = null;          /* what version.json reports; null = the real file */
-  let hits = 0;
-  await page.route("**/version.json*", route => {
-    hits++;
-    if (served === null) return route.continue();
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ version: served }) });
-  });
   /* shrink the timers so the test doesn't wait two real minutes */
   await page.addInitScript(() => { window.__UPDATE_POLL_MS = 800; window.__UPDATE_MIN_GAP = 50; });
 
   const bar = () => page.evaluate(() => document.getElementById("updatebar").className);
 
   try {
-    served = "4.7";
+    shared.served = "4.7";
     await page.goto("http://127.0.0.1:" + port + "/index.html");
     await page.evaluate(() => localStorage.setItem("weekend-wallet-v1", JSON.stringify({
       setup: true, budget: 0, currency: "MAD", expenses: [], salary: 0, payday: 0, swept: {},
@@ -51,7 +55,7 @@ exports.run = async function (t, env) {
       scanModel: "claude-opus-4-8", restAmount: 0, restFrom: "", restTs: 0, cashTs: 0, wkPlan: {}, wkWeight: 2
     })));
     /* report whatever the app actually is, so "same version" really is the same */
-    served = await page.evaluate(() => {
+    shared.served = await page.evaluate(() => {
       const m = document.body.innerHTML.match(/var APP_VERSION = "([^"]+)"/);
       return m ? m[1] : "0";
     });
@@ -60,26 +64,29 @@ exports.run = async function (t, env) {
 
     t.no("no banner while the versions match", (await bar()).includes("show"));
 
-    hits = 0;
+    shared.hits = 0;
     await page.waitForTimeout(2600);
-    t.ok("the app keeps checking while it is open", hits >= 2, hits + " checks in 2.6s");
+    t.ok("the app keeps checking while it is open", shared.hits >= 2, shared.hits + " checks in 2.6s");
     t.no("and still shows nothing when there is nothing new", (await bar()).includes("show"));
 
     /* a deploy lands while the app is sitting open */
-    served = "99.0";
+    shared.served = "99.0";
     await page.waitForTimeout(1400);
     t.ok("a new version raises the banner", (await bar()).includes("show"));
 
-    hits = 0;
+    shared.hits = 0;
     await page.waitForTimeout(1800);
-    t.eq("polling stops once it has been found", hits, 0);
+    t.eq("polling stops once it has been found", shared.hits, 0);
 
     /* returning to the app checks immediately, without waiting out a limiter */
-    served = null;
+    shared.served = await page.evaluate(() => {
+      const m = document.body.innerHTML.match(/var APP_VERSION = "([^"]+)"/);
+      return m ? m[1] : "0";
+    });
     await page.goto("http://127.0.0.1:" + port + "/index.html");
-    await page.waitForTimeout(400);
-    served = "99.0";
-    hits = 0;
+    await page.waitForTimeout(500);
+    shared.served = "99.0";
+    shared.hits = 0;
     await page.evaluate(() => {
       Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
       document.dispatchEvent(new Event("visibilitychange"));
@@ -87,7 +94,7 @@ exports.run = async function (t, env) {
       document.dispatchEvent(new Event("visibilitychange"));
     });
     await page.waitForTimeout(500);
-    t.ok("coming back to the app re-checks straight away", hits >= 1, hits + " checks");
+    t.ok("coming back to the app re-checks straight away", shared.hits >= 1, shared.hits + " checks");
     t.ok("and the banner appears", (await bar()).includes("show"));
 
     /* the button reloads with a cache-busting query */
