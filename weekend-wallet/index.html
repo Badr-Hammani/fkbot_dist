@@ -701,13 +701,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=7.7"></script>
+<script src="scan.js?v=7.8"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "7.7";
+  var APP_VERSION = "7.8";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -932,6 +932,48 @@
     if(s.restFrom && poolKey !== currentKey){
       s.restAmount = 0; s.restFrom = ""; s.restTs = 0; s.restAsk = currentKey;
     }
+  }
+
+  /* ---------- data safety ----------
+     Everything lives in one localStorage key: no server, no second copy. The
+     two operations that replace everything — restoring a backup and erasing —
+     take a snapshot into a separate key first, so a wrong file or a mistap is
+     recoverable. Same browser, so it does not survive a cleared profile; it
+     does survive the failures people actually hit. */
+  var SNAP_KEY = KEY + "-snapshot";
+  function snapshot(reason){
+    try{
+      var raw = localStorage.getItem(KEY);
+      if(!raw) return false;
+      localStorage.setItem(SNAP_KEY, JSON.stringify({ ts: Date.now(), reason: reason || "", data: raw }));
+      return true;
+    }catch(e){ return false; }
+  }
+  function snapshotInfo(){
+    try{
+      var s = JSON.parse(localStorage.getItem(SNAP_KEY) || "null");
+      if(!s || typeof s.data !== "string") return null;
+      var d = JSON.parse(s.data);
+      if(!d || !Array.isArray(d.expenses)) return null;
+      return { ts: s.ts || 0, reason: s.reason || "", count: d.expenses.length, data: d };
+    }catch(e){ return null; }
+  }
+  /* Swap what is live with the safety copy in one step. Taking a fresh
+     snapshot first would overwrite the copy being restored — the exact loss
+     this exists to prevent. */
+  function restoreSnapshot(reason){
+    var info = snapshotInfo();
+    if(!info) return false;
+    var current = null;
+    try{ current = localStorage.getItem(KEY); }catch(e){}
+    state = info.data;
+    cleanRows();
+    state.expenses = cleanExpenses(state.expenses);
+    if(!save()) return false;
+    if(current){
+      try{ localStorage.setItem(SNAP_KEY, JSON.stringify({ ts: Date.now(), reason: reason || "", data: current })); }catch(e){}
+    }
+    return true;
   }
 
   function save(opts){
@@ -1524,19 +1566,8 @@
         (pm.extra ? (pm.extra > 0 ? ' · '+fmt(pm.extra)+' more than usual' : ' · '+fmt(-pm.extra)+' less than usual') : "") +
         '</span>'+paydayChip()+'</div></div>' +
         '</section>';
-      var over = Math.abs(Math.min(mLeft, 0));
-      var peopleFunding = borrowedThisMonth();
-      var loanFunding = trackedLoanFunding(monthKey());
-      var uncovered = Math.max(Math.round((over - peopleFunding - loanFunding)*100)/100, 0);
-      if(mLeft < 0){
-        var fundingBits = [];
-        if(loanFunding > 0) fundingBits.push('<b class="money">'+fmt(loanFunding)+'</b> added to loans');
-        if(peopleFunding > 0) fundingBits.push('<b class="money">'+fmt(peopleFunding)+'</b> borrowed from people');
-        h += '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(over)+'</b> over budget' +
-          (fundingBits.length ? ' · '+fundingBits.join(' · ') : '') +
-          (uncovered >= 1 ? ' · <b class="money">'+fmt(uncovered)+'</b> has no funding source recorded.' : ' · funding fully tracked.') +
-          '</span>'+(uncovered >= 1 ? '<button id="h-funding" data-amt="'+Math.round(uncovered)+'">Track it</button>' : '')+'</div>';
-      }else if(iOweTotal() > 0 || owedToMeTotal() > 0){
+      h += fundingCard();
+      if(!fundingCard.shown && (iOweTotal() > 0 || owedToMeTotal() > 0)){
         var bits = [];
         if(iOweTotal() > 0) bits.push('you owe <b class="money">'+fmt(iOweTotal())+'</b> ('+
           state.debts.filter(function(d){return d.balance>0;}).map(function(d){return esc(d.name);}).join(", ")+')');
@@ -1565,6 +1596,7 @@
         '<div class="hero-caption">'+(gone<0? "came in this "+periodWord : "out of your pocket this "+periodWord)+nNote+
         ' · add your salary in <strong>Plan</strong> to see what\'s left</div>' +
         '</section>';
+      h += fundingCard();          /* a blown pool needs the same offer */
     }
 
     /* new month, and last month you were running on a set-aside pool —
@@ -2658,13 +2690,52 @@
     });
     return Math.round(sum*100)/100;
   }
+  /* Which loan covers a shortfall. An explicit opt-in wins; otherwise, if
+     there is exactly one loan, that is obviously the one — requiring a hidden
+     per-loan checkbox meant a loan called "Papa" or "Bank loan" silently sent
+     the money to a duplicate person in the friends ledger instead. */
   function shortfallLoan(){
     var found = null;
     state.commitments.some(function(c){
       if(c.kind === "loan" && c.coverShortfall){ found = c; return true; }
       return false;
     });
-    return found;
+    if(found) return found;
+    var loans = state.commitments.filter(function(c){ return c.kind === "loan"; });
+    return loans.length === 1 ? loans[0] : null;
+  }
+
+  /* How far past your money you are, whichever budget you run on. The card
+     used to live inside the salary branch and key off the monthly plan, so
+     running on a rest-of-month pool — the state you are in when you have
+     actually run out — offered nothing at all. */
+  function overspendAmount(){
+    var rr = restRemaining();
+    if(rr !== null && rr < 0) return Math.round(-rr * 100) / 100;
+    if(state.salary > 0){
+      var left = monthLeftOfPlan();
+      if(left < 0) return Math.round(-left * 100) / 100;
+    }
+    return 0;
+  }
+  function fundingCard(){
+    fundingCard.shown = false;
+    var over = overspendAmount();
+    if(over < 1) return "";
+    var peopleFunding = borrowedThisMonth();
+    var loanFunding = trackedLoanFunding(monthKey());
+    var uncovered = Math.max(Math.round((over - peopleFunding - loanFunding)*100)/100, 0);
+    var bits = [];
+    if(loanFunding > 0) bits.push('<b class="money">'+fmt(loanFunding)+'</b> added to loans');
+    if(peopleFunding > 0) bits.push('<b class="money">'+fmt(peopleFunding)+'</b> borrowed from people');
+    var loan = shortfallLoan();
+    fundingCard.shown = true;
+    return '<div class="suggest"><span class="txt">You\'re <b class="money">'+fmt(over)+'</b> over budget' +
+      (bits.length ? ' · '+bits.join(' · ') : '') +
+      (uncovered >= 1 ? ' · <b class="money">'+fmt(uncovered)+'</b> has no funding source recorded.' : ' · funding fully tracked.') +
+      '</span>'+(uncovered >= 1
+        ? '<button id="h-funding" data-amt="'+uncovered+'">'+(loan ? 'Add to '+esc(loan.name) : 'Track it')+'</button>'
+        : '')+'</div>';
   }
   function loanById(id){
     var found = null;
@@ -3338,10 +3409,19 @@
       c.draws.push({ id:uid(), ts:Date.now(), date:date, amount:Math.round(amount*100)/100,
                      note:note, balanceApplied:!alreadyIncluded });
       if(!alreadyIncluded) c.remaining = Math.round((+c.remaining+amount)*100)/100;
-      save(); render(); openCommitmentSheet(c.id);
-      toast(alreadyIncluded
+      var addedId = c.draws[c.draws.length-1].id;
+      save(); closeSheet(); render();
+      toastAction(alreadyIncluded
         ? fmt(amount)+" recorded — "+c.name+" balance left at "+fmt(c.remaining)
-        : fmt(amount)+" added — you now owe "+c.name+" "+fmt(c.remaining));
+        : fmt(amount)+" added — you now owe "+c.name+" "+fmt(c.remaining), "Undo", function(){
+          var keep = [], undone = null;
+          (c.draws||[]).forEach(function(d){ if(d.id === addedId) undone = d; else keep.push(d); });
+          if(!undone) return;
+          c.draws = keep;
+          if(undone.balanceApplied) c.remaining = Math.max(Math.round((+c.remaining - undone.amount)*100)/100, 0);
+          save(); render();
+          toast("Removed — you owe "+c.name+" "+fmt(c.remaining));
+        }, 7000);
     });
     $("#draw-back").addEventListener("click", function(){ openCommitmentSheet(c.id); });
     sheet.querySelectorAll("[data-draw-edit]").forEach(function(b){
@@ -3596,7 +3676,17 @@
       '<button class="btn" id="s-export">Download backup file</button>' +
       '<div style="height:10px"></div>' +
       '<button class="btn" id="s-import">Restore from backup</button>' +
-      '<input type="file" accept=".json,application/json" id="s-import-file" hidden></div>' +
+      '<input type="file" accept=".json,application/json" id="s-import-file" hidden>' +
+      (function(){
+        var snap = snapshotInfo();
+        if(!snap) return "";
+        var when = new Date(snap.ts).toLocaleDateString(undefined,{month:"short", day:"numeric"});
+        return '<div style="height:14px"></div><div class="hint" style="margin:0 0 8px">' +
+          'Safety copy from ' + esc(when) + ' — ' + snap.count + ' expense' + (snap.count===1?"":"s") +
+          (snap.reason ? ', taken ' + esc(snap.reason) : '') + '.</div>' +
+          '<button class="btn ghost" id="s-undo-restore" style="color:var(--ink2)">Put that copy back</button>';
+      })() +
+      '</div>' +
 
       '<div class="panel"><h3>'+IC.trash+'Start fresh</h3><p>Deletes every expense and receipt photo. This can\'t be undone.</p>' +
       '<button class="btn danger" id="s-wipe">Erase all data</button></div>' +
@@ -4347,8 +4437,9 @@
       '<div class="funding-screen">' +
       '<h2>This expense needs funding</h2>' +
       '<div class="funding-expense"><span class="funding-expense-icon">'+fundingExpenseIcon(candidate)+'</span><span class="funding-expense-copy"><span class="micro">Expense</span><b>'+esc(candidate.note || cat(candidate.cat).name)+'</b></span><strong class="money">'+fmt(candidate.amount)+'</strong></div>' +
-      '<div class="funding-math"><div><span>Available</span><b class="money">'+signedMoney(proposal.available)+'</b></div><div class="funding-minus" aria-hidden="true">−</div>' +
-      '<div><span>Shortfall</span><b class="money funding-shortfall">'+fmt(proposal.shortfall)+'</b></div></div>' +
+      '<div class="funding-math"><div><span>This expense</span><b class="money">'+fmt(candidate.amount)+'</b></div><div class="funding-minus" aria-hidden="true">−</div>' +
+      '<div><span>Available</span><b class="money">'+signedMoney(proposal.available)+'</b></div></div>' +
+      '<div class="funding-preview-copy" style="text-align:center; margin:-8px 8px 18px"><span>Short by</span><b class="money funding-shortfall">'+fmt(proposal.shortfall)+'</b></div>' +
       '<div class="funding-question">How do you want to fund this?</div>' +
       '<div class="funding-options" id="funding-options">'+options+'</div>' +
       '<div id="funding-detail"></div>' +
@@ -4513,7 +4604,7 @@
       '<dt>Amount</dt><dd class="money">'+fmt(e.amount)+'</dd>' +
       '<dt>Category</dt><dd><span style="color:var('+c.v+'); display:inline-flex; width:15px; height:15px; vertical-align:-2px; margin-right:5px">'+catIcon(c.id)+'</span>'+c.name+'</dd>' +
       '<dt>Date</dt><dd>'+fromIso(e.date).toLocaleDateString(undefined,{weekday:"short", day:"numeric", month:"short", year:"numeric"})+'</dd>' +
-      '<dt>Weekend</dt><dd>'+weekendLabel(weekendOf(e.date), true)+'</dd>' +
+      (weekendKeyOf(e.date) ? '<dt>Weekend</dt><dd>'+weekendLabel(weekendOf(e.date), true)+'</dd>' : "") +
       (e.loanAdded > 0 ? '<dt>Loan added</dt><dd>'+fmt(e.loanAdded)+' to '+esc((function(){ var x=loanById(e.loanId); return x?x.name:"the loan"; })())+'</dd>' : '') +
       (e.fundingType === "person" && e.fundingAmount > 0 ? '<dt>Funded by</dt><dd>'+fmt(e.fundingAmount)+' borrowed from '+esc(e.fundingPersonName)+'</dd>' : '') +
       '</dl>' +
@@ -4750,6 +4841,21 @@
         toast("Backup downloaded");
       });
       $("#s-import").addEventListener("click", function(){ $("#s-import-file").click(); });
+      var undoRestore = $("#s-undo-restore");
+      if(undoRestore){
+        var undoArmed = false;
+        undoRestore.addEventListener("click", function(){
+          var snap = snapshotInfo();
+          if(!snap){ toast("No safety copy to put back"); return; }
+          if(!undoArmed){
+            undoArmed = true;
+            this.textContent = "Tap again — replaces what's here now with " + snap.count + " expenses";
+            return;
+          }
+          if(restoreSnapshot("before putting the safety copy back")){ render(); toast("Safety copy restored"); }
+          else toast("That safety copy couldn't be read");
+        });
+      }
       $("#s-import-file").addEventListener("change", function(){
         var f = this.files && this.files[0]; this.value = "";
         if(!f) return;
@@ -4760,7 +4866,11 @@
             var d = JSON.parse(r.result);
             if(!d || !Array.isArray(d.expenses)) throw 0;
             var hasData = state.expenses.length || state.commitments.length || state.goals.length || state.debts.length;
-            if(hasData && !window.confirm("Restore this backup and replace the current money data on this device?")) return;
+            if(hasData && !window.confirm("Restore this backup and replace the current money data on this device?")){
+              toast("Restore cancelled — nothing changed");
+              return;
+            }
+            snapshot("before restoring a backup");
             prev = state;
             var importPayday = +d.payday||0;
             var importPaydayEnd = +d.paydayEnd||importPayday;
@@ -4804,6 +4914,7 @@
         if(!window.confirm("Erase every expense, receipt photo, loan, goal, and setting from this device?")){
           wipeArmed = false; this.textContent = "Erase all data"; return;
         }
+        snapshot("before erasing everything");
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", agentRouterApiKey:"", agentRouterModel:"gpt-5.5", scanProvider:"free", scanModel:"claude-opus-4-8",
                   salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:1 };
         try{ localStorage.removeItem(KEY); }catch(e){}

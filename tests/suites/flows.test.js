@@ -82,14 +82,15 @@ exports.run = async function (t, env) {
 
     t.has("the offer names the loan, not a separate person", await app.page.evaluate(() => {
       const s = document.querySelector(".suggest"); return s ? s.textContent : "";
-    }), "Add it to Dad?");
-    await app.page.click("#h-borrow"); await app.page.waitForTimeout(400);
+    }), "over budget");
+    await app.page.click("#h-funding"); await app.page.waitForTimeout(450);
+    await app.page.click("#draw-save"); await app.page.waitForTimeout(450);
 
     let st = await app.stored();
     t.eq("it goes onto what you owe on that loan", st.commitments[0].remaining, 14850);
     t.eq("the monthly payment is untouched", st.commitments[0].amount, 1000);
     t.eq("no stray ledger person is created", st.debts.length, 0);
-    t.has("and it says the new balance", await app.toast(), "you owe MAD 14,850");
+    t.has("and it says the new balance", await app.toast(), "you now owe Dad MAD 14,850");
 
     await app.page.click("#toast button"); await app.page.waitForTimeout(400);
     t.eq("undo takes it back off", (await app.stored()).commitments[0].remaining, 12000);
@@ -97,11 +98,13 @@ exports.run = async function (t, env) {
     /* the same thing from the loan's own sheet */
     await app.tab("plan");
     await app.page.click('[data-cm="dad"]'); await app.page.waitForTimeout(400);
-    await app.page.fill("#c-borrow", "2850");
-    await app.page.click("#c-borrow-go"); await app.page.waitForTimeout(400);
+    await app.page.click("#c-add-draw"); await app.page.waitForTimeout(450);
+    await app.page.fill("#draw-amount", "2850");
+    await app.page.uncheck("#draw-included").catch(() => {});
+    await app.page.click("#draw-save"); await app.page.waitForTimeout(450);
     st = await app.stored();
     t.eq("Plan offers the same action", st.commitments[0].remaining, 14850);
-    t.eq("and records what was taken", st.commitments[0].borrowLog.map(l => l.amt).join(), "2850");
+    t.eq("and records what was taken", (st.commitments[0].draws || []).map(d => d.amount).join(), "2850");
     await app.tab("plan");
     t.has("months-to-go follows the bigger balance", await app.page.evaluate(() => {
       const r = document.querySelector('[data-cm="dad"] .hl'); return r ? r.textContent : "";
@@ -116,7 +119,7 @@ exports.run = async function (t, env) {
     }), { now: NOW });
     await app.tab("plan");
     await app.page.click('[data-cm="n"]'); await app.page.waitForTimeout(400);
-    t.no("subscriptions get no borrow field", await app.page.evaluate(() => !!document.querySelector("#c-borrow")));
+    t.no("subscriptions get no borrow action", await app.page.evaluate(() => !!document.querySelector("#c-add-draw")));
     await app.close();
   }
 
