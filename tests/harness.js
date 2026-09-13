@@ -81,7 +81,8 @@ function baseState(over) {
     nudgedAt: 0,
     lastCat: "",
     wkPlan: {},
-    wkWeight: 2
+    wkWeight: 1,
+    wkWeightFlat: 1
   }, over || {});
 }
 

@@ -701,13 +701,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=7.5.1"></script>
+<script src="scan.js?v=7.6"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "7.5.1";
+  var APP_VERSION = "7.6";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -797,12 +797,17 @@
         if(typeof s.restTs !== "number") s.restTs = 0;
         if(typeof s.cashTs !== "number") s.cashTs = 0;
         if(!s.wkPlan || typeof s.wkPlan !== "object") s.wkPlan = {};
-        if(typeof s.wkWeight !== "number" || !(s.wkWeight > 0)) s.wkWeight = 2;
+        if(typeof s.wkWeight !== "number" || !(s.wkWeight > 0)) s.wkWeight = 1;
+        /* The weekend multiplier used to default to 2 without saying so, which
+           made the daily number look like bad arithmetic on a Saturday. Reset
+           it once to a flat split; anyone who genuinely wants weighting can
+           pick it again in Settings, and that choice sticks. */
+        if(!s.wkWeightFlat){ s.wkWeight = 1; s.wkWeightFlat = 1; }
         return s;
       }
     }catch(e){}
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", geminiApiKey:"", agentRouterApiKey:"", agentRouterModel:"gpt-5.5", scanProvider:"free", scanModel:"claude-opus-4-8",
-             salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
+             salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:1 };
   }
   function isPaydayDay(n){
     return typeof n === "number" && isFinite(n) && Math.floor(n) === n && n >= 1 && n <= 31;
@@ -1599,7 +1604,7 @@
           : '<b>'+fmt(dLeft)+'</b> left today')+'</span></div>' +
         meterHtml(tSpent, tb) +
         '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">spent '+fmt(tSpent)+' of '+fmt(tb)+
-        ' · rebalances daily</span></div>' + poolLine + '</section>';
+        ' · rebalances daily</span></div>' + weightNote() + poolLine + '</section>';
     }
 
     /* weekend card — the same pool, seen over Fri-Sun instead of one day */
@@ -2863,8 +2868,12 @@
      heavier than weekdays. Every number on Home — today, this weekend, the
      month — comes out of this single function, so they cannot contradict
      each other the way a fixed weekend budget always eventually did. */
+  /* Flat by default. A hidden weekend multiplier made the headline number
+     disagree with the arithmetic anyone would do in their head — 750 over 18
+     days showing 60 a day — which reads as the app being unable to divide.
+     Weighting is still available, but you have to ask for it. */
   function wkWeight(){
-    var k = state.wkWeight > 0 ? state.wkWeight : 2;
+    var k = (typeof state.wkWeight === "number" && state.wkWeight > 0) ? state.wkWeight : 1;
     return Math.min(Math.max(k, 1), 3);
   }
   function isWeekendDay(dIso){ return weekendKeyOf(dIso) !== null; }
@@ -2898,6 +2907,18 @@
     return { R:R, days:days, we:we, wd:wd, k:k,
              weekday: Math.max(Math.floor(R/u), 0),
              weekend: Math.max(Math.floor(k*R/u), 0) };
+  }
+  /* If a weekend day is being given more than a weekday, say so on the card.
+     An unexplained bigger number on a Saturday is indistinguishable from a
+     bug. */
+  function weightNote(){
+    var r = rateSplit();
+    if(!r || r.k <= 1 || r.weekend === r.weekday) return "";
+    var onWeekend = isWeekendDay(todayIso());
+    return '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink3)">' +
+      (onWeekend ? "today is a weekend day — " : "") +
+      fmt(r.weekend) + ' a weekend day · ' + fmt(r.weekday) + ' a weekday' +
+      '</span></div>';
   }
   function autoDailyBudget(){
     var s = rateSplit();
@@ -3478,12 +3499,18 @@
     }).join("");
     return '' +
       '<div class="sec"><span class="micro">Settings</span></div>' +
-      '<div class="panel"><h3>Weekends</h3><p>Your weekend number is worked out from the money you actually have left — it is not a fixed amount. This says how much heavier a weekend day is than a weekday.</p>' +
+      '<div class="panel"><h3>Weekends</h3><p>By default every day gets the same share of your money: what is left divided by the days left. You can give weekend days a bigger share — weekdays then get less, and the total stays the same.</p>' +
       '<div class="chips" id="s-wkw">' +
-      [[1,'Same as a weekday'],[1.5,'A bit more'],[2,'Twice a weekday'],[3,'Three times']].map(function(o){
+      [[1,'Same every day'],[1.5,'A bit more'],[2,'Twice a weekday'],[3,'Three times']].map(function(o){
         return '<button class="chip'+(wkWeight()===o[0]?" sel":"")+'" data-wkw="'+o[0]+'">'+o[1]+'</button>';
       }).join("") + '</div>' +
-      (rateSplit()? '<div class="hint">Right now that is about <b class="money">'+fmt(rateSplit().weekday)+'</b> a weekday and <b class="money">'+fmt(rateSplit().weekend)+'</b> a weekend day.</div>' : '') +
+      (function(){
+        var r = rateSplit();
+        if(!r) return '';
+        return '<div class="hint">Right now that is ' + (r.k <= 1
+          ? '<b class="money">' + fmt(r.weekday) + '</b> every day.'
+          : '<b class="money">' + fmt(r.weekday) + '</b> a weekday and <b class="money">' + fmt(r.weekend) + '</b> a weekend day.') + '</div>';
+      })() +
       '<div class="field" style="margin-top:12px"><label class="micro" for="s-currency">Currency</label><select id="s-currency">'+curOpts+'</select></div>' +
       '<button class="btn primary" id="s-save">Save changes</button></div>' +
 
@@ -4692,7 +4719,7 @@
                       restAmount:+d.restAmount||0,
                       restFrom:(typeof d.restFrom==="string")? d.restFrom : "", restTs:+d.restTs||0, cashTs:+d.cashTs||0,
                       wkPlan:(d.wkPlan && typeof d.wkPlan==="object")? d.wkPlan : {},
-                      wkWeight:+d.wkWeight||2 };
+                      wkWeight:+d.wkWeight||1 };
             cleanRows();
             retireStalePool(state);
             /* draw BEFORE writing: a backup with one bad row used to be saved
@@ -4715,7 +4742,7 @@
           wipeArmed = false; this.textContent = "Erase all data"; return;
         }
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", agentRouterApiKey:"", agentRouterModel:"gpt-5.5", scanProvider:"free", scanModel:"claude-opus-4-8",
-                  salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:2 };
+                  salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:1 };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
       });

@@ -43,8 +43,8 @@ exports.run = async function (t, env) {
     const app = await boot(browser, baseState({
       restAmount: 1000, restFrom: "2026-08-18", restTs: 1
     }), { now: NOW });
-    /* 14 days left; 6 are weekend days; weight 2 → 8 + 12 = 20 units */
-    t.eq("weekday rate = pool / weighted days", await app.todayLeft(), "MAD 50 left today");
+    /* flat by default: 1000 over the 14 days left */
+    t.eq("daily rate = money / days left", await app.todayLeft(), "MAD 71 left today");
     t.has("pool line shows what's left", await app.poolLine(), "MAD 1,000 left of your MAD 1,000");
     await app.close();
   }
@@ -55,7 +55,7 @@ exports.run = async function (t, env) {
       restAmount: 1000, restFrom: "2026-08-17", restTs: 1,
       expenses: [expense({ amount: 450, date: "2026-08-17", cat: "out" })]
     }), { now: NOW });
-    t.eq("rate drops after overspending", await app.todayLeft(), "MAD 27 left today");
+    t.eq("rate drops after overspending", await app.todayLeft(), "MAD 39 left today");
     await app.close();
   }
 
@@ -65,7 +65,7 @@ exports.run = async function (t, env) {
       restAmount: 1000, restFrom: "2026-08-18", restTs: 1,
       expenses: [expense({ amount: 200, date: "2026-08-18", ts: Date.parse("2026-08-18T08:00:00") })]
     }), { now: NOW });
-    t.has("today's target is fixed at midnight", await app.footLines().then(l => l.join(" ")), "of MAD 50");
+    t.has("today's target is fixed at midnight", await app.footLines().then(l => l.join(" ")), "of MAD 71");
     await app.close();
   }
 
@@ -210,6 +210,44 @@ exports.run = async function (t, env) {
     t.has("and it says why", await app.toast(), "check the year");
     await app.page.click("#f-save"); await app.page.waitForTimeout(350);
     t.eq("but a second tap accepts it", (await app.stored()).expenses.length, 1);
+    await app.close();
+  }
+
+  /* ---------- the daily number must match the obvious arithmetic ---------- */
+  {
+    /* 750 for the rest of September, seen on a Sunday. A hidden weekend
+       multiplier used to show 60 here, which reads as the app being unable to
+       divide 750 by 18. */
+    const app = await boot(browser, baseState({
+      restAmount: 750, restFrom: "2026-09-13", restTs: 1
+    }), { now: "2026-09-13T14:00:00" });
+    t.eq("money divided by days left, flat by default", await app.todayLeft(), "MAD 41 left today");
+    t.no("and no weekday/weekend split is mentioned",
+      (await app.footLines()).some(l => /a weekday/.test(l)));
+    await app.close();
+  }
+  {
+    /* someone who deliberately asks for weighting keeps it — and the card says
+       why today's number is bigger */
+    const app = await boot(browser, baseState({
+      restAmount: 750, restFrom: "2026-09-13", restTs: 1, wkWeight: 2, wkWeightFlat: 1
+    }), { now: "2026-09-13T14:00:00" });
+    t.eq("weighting still works when chosen", await app.todayLeft(), "MAD 60 left today");
+    t.has("and the bigger number explains itself",
+      (await app.footLines()).join(" "), "today is a weekend day — MAD 60 a weekend day · MAD 30 a weekday");
+    await app.close();
+  }
+  {
+    /* the old silent default is reset once, so nobody is left on a setting
+       they never chose */
+    const legacy = baseState({ restAmount: 750, restFrom: "2026-09-13", restTs: 1 });
+    legacy.wkWeight = 2;
+    delete legacy.wkWeightFlat;
+    const app = await boot(browser, legacy, { now: "2026-09-13T14:00:00" });
+    const st = await app.stored();
+    t.eq("legacy weighting is reset to flat", st.wkWeight, 1);
+    t.eq("and marked so it only happens once", st.wkWeightFlat, 1);
+    t.eq("giving the arithmetic the user expects", await app.todayLeft(), "MAD 41 left today");
     await app.close();
   }
 
