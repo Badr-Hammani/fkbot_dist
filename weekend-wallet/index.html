@@ -289,7 +289,13 @@
     font-size:13px; font-weight:700; padding:8px 14px; border-radius:999px;
     background:var(--card2); border:1px solid var(--line); white-space:nowrap;
   }
-  .goal-pct{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  /* Clipping is right for a percentage sitting beside a button, but several of
+     these are whole sentences -- and the one stating your pool got cut at
+     "for the re..." on a 390px phone, which is the line the app exists to
+     show. A sentence wraps; a short stat still gets one clean line. */
+  .goal-pct{min-width:0; overflow-wrap:anywhere}
+  .goal-foot{align-items:flex-start}
+  .goal-pct.one-line{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .mini-btn.primary{background:var(--accent); border-color:transparent; color:var(--on-accent)}
   .secondary-card{
     position:relative; overflow:hidden; background:linear-gradient(145deg, color-mix(in srgb, var(--card2) 42%, var(--card)), var(--card));
@@ -511,7 +517,10 @@
   .safe-card-foot{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:13px}
   .safe-status{color:var(--good); font-size:11.5px; font-weight:800}
   .safe-status.bad{color:var(--bad)}
-  .safe-card-foot button{background:var(--accent); color:var(--on-accent); border-radius:999px; padding:9px 13px; font-size:12px; font-weight:800; white-space:nowrap}
+  /* a thumb needs 44px; this measured 35 tall. The padding keeps the pill
+     looking the same size -- the touch area is what grows. */
+  .safe-card-foot button{background:var(--accent); color:var(--on-accent); border-radius:999px; padding:9px 13px; font-size:12px; font-weight:800; white-space:nowrap;
+    min-height:44px}
   .debt-card{background:linear-gradient(145deg, color-mix(in srgb, var(--bad) 9%, var(--card)), var(--card)); border:1px solid color-mix(in srgb, var(--bad) 25%, var(--line))}
   .debt-card h2{margin:6px 0 0; font-size:20px; letter-spacing:-.02em}
   .debt-cycle-label{display:block; margin-top:6px; color:var(--ink3); font-size:10.5px; font-weight:750; letter-spacing:.07em; text-transform:uppercase}
@@ -729,13 +738,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=8.1"></script>
+<script src="scan.js?v=8.2"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "8.1";
+  var APP_VERSION = "8.2";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -949,6 +958,7 @@
           return { id: l.id || uid(), ts: +l.ts || 0, amt: +l.amt, dir: l.dir, note: String(l.note || ""),
                    bumped: +l.bumped || 0 };
         }) : [];
+        log.sort(function(a,b){ return (a.ts||0) - (b.ts||0); });   /* repair logs written out of order by older builds */
         return { id: d.id || uid(), name: String(d.name || "Someone"),
                  balance: +d.balance || 0, log: log };
       });
@@ -1090,10 +1100,11 @@
     next.setHours(reference.getHours(), reference.getMinutes(), reference.getSeconds(), reference.getMilliseconds());
     return next.getTime();
   }
-  function setLedgerLogDate(log, date){
+  function setLedgerLogDate(log, date, owner){
     var next = datedTimestamp(date, log && log.ts);
     if(!log || !next) return false;
     log.ts = next;
+    sortLedger(owner);               /* moving an entry in time moves it in the log */
     return true;
   }
   function setLoanDrawDate(draw, date){
@@ -1212,7 +1223,18 @@
     d.balance = Math.round((d.balance + (dir==="b" ? amt : -amt))*100)/100;
     var log = { id:uid(), ts: atTs || Date.now(), amt: amt, dir: dir, note: note || "" };
     d.log.push(log);
+    sortLedger(d);
     return log;
+  }
+  /* Readers replay this log from the top to work out, entry by entry, what was
+     a repayment and what was fresh borrowing. That replay is only true if the
+     log is in the order the money actually moved -- and entries can be dated
+     into the past (a forgotten loan, a backdated split). Logging "Ahmed paid me
+     back" before "I lent Ahmed 500" would otherwise read the repayment as new
+     borrowing and quietly take 500 off the budget. So the log is kept in
+     chronological order at every insertion point, not at any one reader. */
+  function sortLedger(d){
+    if(d && d.log) d.log.sort(function(a,b){ return (a.ts||0) - (b.ts||0); });
   }
   function balanceLabel(d){
     if(d.balance > 0) return 'you owe <b class="money" style="color:var(--bad)">'+fmt(d.balance)+'</b>';
@@ -1581,6 +1603,11 @@
       var spendable = onPool ? state.restAmount : pm.left;
       var mFlow = ledgerFlowSince(monthStartIso());
       var mLeft = onPool ? poolNow : monthLeftOfPlan();
+      /* The bar has to draw the same two numbers the caption states, or the
+         screen argues with itself: a full red track under "1,500 left". In
+         plan mode the money you handed to people is already taken off
+         pm.left, so adding it to the spent side again counts it twice. */
+      var spentShown = onPool ? spentFromPool() : mSpent;
       var flowNote = "";
       if(mFlow.out > 0 || mFlow.inn > 0 || mFlow.borrowed > 0){
         var parts = [];
@@ -1596,10 +1623,13 @@
         '<div class="hero-caption">'+(mLeft<0
           ? (onPool ? "past your money" : "over this "+periodWord)
           : (onPool ? "left for the rest of the "+periodWord : "left this "+periodWord)) +
-        ' · spent <strong class="money">'+fmt(onPool ? spentFromPool() : mSpent)+'</strong> of <strong class="money">'+fmt(Math.max(spendable,0))+'</strong>'+flowNote+'</div>' +
-        '<div class="meter">'+meterHtml(mSpent + Math.max(mFlow.net,0), Math.max(spendable,0))+
-        '<div class="meter-row"><span>after your loan, subscriptions, savings & people paid' +
-        (pm.extra ? (pm.extra > 0 ? ' · '+fmt(pm.extra)+' more than usual' : ' · '+fmt(-pm.extra)+' less than usual') : "") +
+        ' · spent <strong class="money">'+fmt(spentShown)+'</strong> of <strong class="money">'+fmt(Math.max(spendable,0))+'</strong>'+flowNote+'</div>' +
+        '<div class="meter">'+meterHtml(spentShown, Math.max(spendable,0))+
+        '<div class="meter-row"><span>'+(onPool
+          ? 'the cash you counted '+(state.restFrom === todayIso() ? 'today' : 'on '+dayName(state.restFrom))+
+            ' · your plan leaves '+fmt(monthLeftOfPlan())
+          : 'after your loan, subscriptions, savings & people paid' +
+            (pm.extra ? (pm.extra > 0 ? ' · '+fmt(pm.extra)+' more than usual' : ' · '+fmt(-pm.extra)+' less than usual') : "")) +
         '</span>'+paydayChip()+'</div></div>' +
         '</section>';
       h += fundingCard();
@@ -1849,9 +1879,9 @@
     );
     $("#ledger-date-save").addEventListener("click", function(){
       var date = $("#ledger-date").value;
-      if(!setLedgerLogDate(log, date)){ toast("Choose today or an earlier valid date"); return; }
+      if(!setLedgerLogDate(log, date, d)){ toast("Choose today or an earlier valid date"); return; }
       if(!save()){
-        log.ts = beforeTs;
+        log.ts = beforeTs; sortLedger(d);      /* put it back where it was, in time and in order */
         toast("Could not save — the date was not changed");
         return;
       }
@@ -2164,17 +2194,20 @@
       }
       this.disabled = true;
       var owedToMe = 0;
+      /* the whole split happened on one day -- the money you fronted left your
+         pocket then, not when you got round to typing it in */
+      var spDate = $("#sp-date") && ISO_RE.test($("#sp-date").value) ? $("#sp-date").value : todayIso();
+      var spTs = datedTimestamp(spDate) || Date.now();
       if(payer === "Me"){
         parts.forEach(function(n){
           if(n === "Me" || !(sh[n] > 0)) return;
-          ledgerAdd(findOrCreatePerson(n), "r", sh[n], note);   // I covered their share
+          ledgerAdd(findOrCreatePerson(n), "r", sh[n], note, spTs);   // I covered their share
           owedToMe += sh[n];
         });
       }else if(sh["Me"] > 0){
-        ledgerAdd(findOrCreatePerson(payer), "b", sh["Me"], note); // they covered my share
+        ledgerAdd(findOrCreatePerson(payer), "b", sh["Me"], note, spTs); // they covered my share
       }
       if(selected["Me"] && sh["Me"] > 0){
-        var spDate = $("#sp-date") && ISO_RE.test($("#sp-date").value) ? $("#sp-date").value : todayIso();
         state.expenses.push({ id: uid(), ts: Date.now(), amount: sh["Me"], cat: spCat,
                               note: note, date: spDate, photo: null });
       }
@@ -2196,6 +2229,7 @@
     openSheet(
       '<h2>Save '+fmt(sw.amount)+'</h2>' +
       '<p style="color:var(--ink2); font-size:13.5px; margin:0 0 14px">Money you didn\'t spend over the '+weekendLabel(sw.fri)+' weekend. Pick a goal:</p>' +
+      '<div class="hint" style="margin-bottom:12px">This records progress toward the goal. The money stays spendable until you move it yourself.</div>' +
       '<div class="row-list">'+rows+'</div>'
     );
     sheet.querySelectorAll("[data-sweep-goal]").forEach(function(b){
@@ -2206,7 +2240,7 @@
         g.saved = Math.round((g.saved + sw.amount)*100)/100;
         state.swept[sw.fri] = sw.amount;
         save(); closeSheet(); render();
-        toast(fmt(sw.amount)+" saved to "+g.name+(g.saved>=g.target? " — goal reached!" : ""));
+        toast(fmt(sw.amount)+" tracked toward "+g.name+(g.saved>=g.target? " — goal reached!" : "")+" — move the cash yourself");
       });
     });
   }
@@ -2462,14 +2496,22 @@
         '<div class="wk-sub">'+bits.join(' · ')+'</div>';
 
       if(now && spendable > 0){
-        /* the current month is the one the plan describes, so it must give
-           the same answer as Home */
-        var left = now ? monthLeftOfPlan() : Math.round((spendable - out)*100)/100;
-        h += meterHtml(out, spendable) +
+        /* Home and this card describe the same month in the same second, so
+           they must name the same budget. Once you have counted your cash,
+           that count IS the budget -- answering from the salary plan here put
+           "4,500 left of your 10,000 plan" opposite Home's "1,500 left". */
+        var mPool = restRemaining();
+        var onPoolNow = mPool !== null;
+        var base = onPoolNow ? state.restAmount : spendable;
+        var left = onPoolNow ? mPool : monthLeftOfPlan();
+        var tail = onPoolNow
+          ? ' — <b>the cash you counted</b>'
+          : ' — <b>if you logged everything</b>';
+        h += meterHtml(onPoolNow ? spentFromPool() : out, base) +
           '<div class="wk-sub">'+(left < 0
-            ? '<span style="color:var(--bad); font-weight:700">'+fmt(-left)+' over</span> your '+fmt(spendable)+' plan'
-            : '<b class="money">'+fmt(left)+'</b> left of your '+fmt(spendable)+' plan')+
-          ' — <b>if you logged everything</b></div>' +
+            ? '<span style="color:var(--bad); font-weight:700">'+fmt(-left)+' over</span> your '+fmt(base)+(onPoolNow?'':' plan')
+            : '<b class="money">'+fmt(left)+'</b> left of your '+fmt(base)+(onPoolNow?'':' plan'))+
+          tail+'</div>' +
           '<button class="btn" id="m-cash" style="margin-top:10px">'+IC.wallet+'Not what\'s in your pocket? Check my cash</button>';
       }
       h += '</div>';
@@ -2625,17 +2667,27 @@
     var p = paidRec(c, mk);
     return p && p.amt > 0 ? p.amt : c.amount;
   }
+  /* Paying 1,000 against a 800 balance only clears 800 -- the balance stops at
+     zero. So undoing that payment has to give back 800, not the 1,000 that was
+     typed, or a tap and an undo would conjure 200 of debt out of nothing.
+     Each payment records what it actually took off the balance. */
+  function appliedOf(rec){
+    if(!rec) return 0;
+    return typeof rec.applied === "number" ? rec.applied : (+rec.amt || 0);
+  }
   function payCommitment(c, amt){
     if(!c.paid) c.paid = {};
     var prev = paidRec(c);
-    if(prev && c.kind === "loan") c.remaining = Math.round((c.remaining + prev.amt)*100)/100;
-    c.paid[monthKey()] = { amt: Math.round(amt*100)/100, ts: Date.now() };
-    if(c.kind === "loan") c.remaining = Math.max(Math.round((c.remaining - amt)*100)/100, 0);
+    if(prev && c.kind === "loan") c.remaining = Math.round((c.remaining + appliedOf(prev))*100)/100;
+    amt = Math.round(amt*100)/100;
+    var applied = c.kind === "loan" ? Math.min(amt, Math.max(c.remaining, 0)) : 0;
+    c.paid[monthKey()] = { amt: amt, ts: Date.now(), applied: applied };
+    if(c.kind === "loan") c.remaining = Math.round((c.remaining - applied)*100)/100;
   }
   function unpayCommitment(c){
     var p = paidRec(c);
     if(!p) return;
-    if(c.kind === "loan") c.remaining = Math.round((c.remaining + p.amt)*100)/100;
+    if(c.kind === "loan") c.remaining = Math.round((c.remaining + appliedOf(p))*100)/100;
     delete c.paid[monthKey()];
   }
   function planMath(){
@@ -3166,8 +3218,11 @@
         '<div class="flow-row flow-left"><span class="lbl">'+(m.left<0?"Over-committed":"Left to spend")+'</span>' +
         '<span class="val money'+(m.left<0?" neg":"")+'">'+fmt(Math.abs(m.left))+'</span></div>' +
         (m.left > 0 ?
-          '<div class="suggest"><span class="txt">'+nWk+' weekends in this '+periodWord+' — that\'s about <b class="money">'+fmt(perWk)+'</b> each if you split it evenly.</span>' +
-          '<button id="p-apply" data-amt="'+perWk+'">Use as budget</button></div>'
+          /* this used to offer "Use as budget", which set a state.budget field
+             that no longer exists anywhere -- the button did nothing at all.
+             The daily rate comes from the pool now, so the sentence stands on
+             its own as what it always really was: a figure to know. */
+          '<div class="suggest"><span class="txt">'+nWk+' weekends in this '+periodWord+' — that\'s about <b class="money">'+fmt(perWk)+'</b> each if you split it evenly.</span></div>'
         : (m.left < 0 ?
           '<div class="suggest"><span class="txt">Your loan, subscriptions and savings add up to more than your salary. Trim something below.</span></div>' : "")) +
         '</div>';
@@ -3648,7 +3703,11 @@
       '<p style="color:var(--ink2); font-size:13.5px; margin:0 0 14px">Saved so far: <b class="money">'+fmt(g.saved)+'</b>' +
       (remaining>0? ' · '+fmt(remaining)+' to go' : "")+'</p>' +
       '<div class="field"><input id="gm-amount" type="text" inputmode="decimal" min="0" step="0.01" placeholder="0" style="font-size:28px; font-weight:800; padding:14px 16px"></div>' +
-      '<button class="btn primary" id="gm-save">Add to goal</button>'
+      /* This records progress -- it does not move money. Saying "added to
+         Trip" while the same money stayed fully spendable was the one place
+         the app stated something about your cash that was not true. */
+      '<div class="hint">This tracks the goal only. Your money to spend does not change, so move the cash somewhere you will not touch it.</div>' +
+      '<button class="btn primary" id="gm-save">Track it</button>'
     );
     $("#gm-save").addEventListener("click", function(){
       var amt = num($("#gm-amount").value);
@@ -3665,7 +3724,7 @@
       }
       g.saved = Math.round((g.saved + amt)*100)/100;
       save(); closeSheet(); render();
-      toast(g.saved >= g.target ? "Goal reached — well done!" : fmt(amt)+" added to "+g.name);
+      toast(g.saved >= g.target ? "Goal reached — well done!" : fmt(amt)+" tracked toward "+g.name+" — your spendable money is unchanged");
     });
     setTimeout(function(){ var el = $("#gm-amount"); if(el) el.focus(); }, 350);
   }
@@ -4020,7 +4079,12 @@
         filled.push("amount");
       }
       if(r.merchant && noteEl && !noteEl.value){ noteEl.value = r.merchant; filled.push("store"); }
-      if(r.date && dateEl){ dateEl.value = r.date; filled.push("date"); }
+      /* the amount and the note only fill when you left them empty; the date
+         used to be overwritten whatever you had typed. A date you changed on
+         purpose now survives the scan. */
+      if(r.date && dateEl && (!dateEl.value || dateEl.value === todayIso())){
+        dateEl.value = r.date; filled.push("date");
+      }
       if(r.category && !draft.catManual){ selectChip(r.category); }
       setPhotoUi("done");
       if(filled.length){
@@ -4118,15 +4182,18 @@
      out, and counting it would tell a broke user to log thousands as
      "missing". Savings count too — nothing here moves that money for you. */
   function setAside(){
-    var today = new Date().getDate(), bills = 0;
+    var bills = 0;
+    /* An unpaid bill does not stop needing money the day after it was due --
+       it needs it more. Skipping overdue ones told you the leftover was
+       "Extra" while rent was still outstanding. */
     state.commitments.forEach(function(c){
-      if(paidRec(c) || !c.due || c.due < today) return;
+      if(paidRec(c) || !c.due) return;
       bills += billFor(c);
     });
     var savings = state.goals.reduce(function(t,g){ return t + (g.monthly||0); }, 0);
     bills = Math.round(bills*100)/100; savings = Math.round(savings*100)/100;
     var parts = [];
-    if(bills > 0) parts.push(fmt(bills)+' of bills not due yet');
+    if(bills > 0) parts.push(fmt(bills)+' of bills still to pay');
     if(savings > 0) parts.push(fmt(savings)+' you plan to save');
     return { bills: bills, savings: savings, parts: parts,
              total: Math.round((bills + savings)*100)/100 };
@@ -4642,13 +4709,17 @@
   function saveDraft(){
     var amt = num($("#f-amount").value);
     if(!(amt > 0)){ toast("Enter the amount first"); $("#f-amount").focus(); return; }
-    var dWarn = dateLooksWrong($("#f-date") ? $("#f-date").value : "");
-    if(dWarn && !saveDraft.dateOk){
-      saveDraft.dateOk = true;               /* one warning, then take them at their word */
+    var dVal = $("#f-date") ? $("#f-date").value : "";
+    var dWarn = dateLooksWrong(dVal);
+    /* Remember which date was waved through, not merely that something was.
+       A single flag stayed true after the sheet closed, so the second
+       mistyped year of a session saved silently with no warning at all. */
+    if(dWarn && saveDraft.warnedDate !== dVal){
+      saveDraft.warnedDate = dVal;           /* one warning per date, then take them at their word */
       toast(dWarn + " · tap Save again to keep it");
       return;
     }
-    saveDraft.dateOk = false;
+    saveDraft.warnedDate = "";
     var existing = null;
     if(draft.editId) state.expenses.forEach(function(x){ if(x.id===draft.editId) existing = x; });
     var e = {
@@ -4954,7 +5025,8 @@
                      scanProvider:state.scanProvider, scanModel:state.scanModel, expenses:state.expenses,
                      salary:state.salary, commitments:state.commitments, goals:state.goals,
                      swept:state.swept, payday:state.payday, paydayEnd:state.paydayEnd, salaryReceived:state.salaryReceived, debts:state.debts,
-                     restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs, wkPlan:state.wkPlan, wkWeight:state.wkWeight };  // keys deliberately excluded
+                     restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs, wkPlan:state.wkPlan, wkWeight:state.wkWeight,
+                     wkWeightFlat:state.wkWeightFlat };  // keys deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -5017,7 +5089,11 @@
                       restAmount:+d.restAmount||0,
                       restFrom:(typeof d.restFrom==="string")? d.restFrom : "", restTs:+d.restTs||0, cashTs:+d.cashTs||0,
                       wkPlan:(d.wkPlan && typeof d.wkPlan==="object")? d.wkPlan : {},
-                      wkWeight:+d.wkWeight||1 };
+                      wkWeight:+d.wkWeight||1,
+                      /* without this the one-time "reset to flat" migration
+                         re-fires on every restore and quietly undoes a
+                         weighting you chose on purpose */
+                      wkWeightFlat:d.wkWeightFlat ? 1 : 0 };
             cleanRows();
             retireStalePool(state);
             /* draw BEFORE writing: a backup with one bad row used to be saved
@@ -5087,8 +5163,29 @@
   });
   checkForUpdate(true);
   startUpdatePolling();
+  /* An installed app on a phone is not reloaded -- it is left open for days.
+     Everything dated is worked out once, at load: which period we are in,
+     which day is "today", whether the cash you counted still belongs to this
+     month. Sitting open past midnight on the 31st left last month's pool
+     running, spreading its leftover over a whole new month at a fraction of
+     the real rate. So the day is re-checked whenever you come back to the
+     app, and once a minute while it is in front of you. */
+  var lastSeenDay = todayIso();
+  function refreshForNewDay(){
+    var today = todayIso();
+    if(today === lastSeenDay) return;
+    lastSeenDay = today;
+    var hadPool = state.restFrom;
+    retireStalePool(state);
+    if(state.restFrom !== hadPool) save();
+    render();
+  }
+  setInterval(refreshForNewDay, 60000);
   document.addEventListener("visibilitychange", function(){
-    if(document.visibilityState === "visible"){ checkForUpdate(true); startUpdatePolling(); }
+    if(document.visibilityState === "visible"){
+      refreshForNewDay();
+      checkForUpdate(true); startUpdatePolling();
+    }
     else stopUpdatePolling();
   });
 
