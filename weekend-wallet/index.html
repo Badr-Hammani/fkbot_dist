@@ -44,7 +44,16 @@
   }
 
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
-  html,body{margin:0; padding:0}
+  /* No double-tap-to-zoom delay on anything tappable, and no text selection
+     on chrome — long-pressing a button and getting a selection handle is the
+     clearest tell that something is a web page rather than an app. */
+  a,button,label,.chip,.tab,.row-item,.exp,.qa-tile,.wk,.task,.stat{
+    touch-action:manipulation;
+    -webkit-user-select:none; user-select:none;
+  }
+  /* amounts and notes stay selectable — people copy those */
+  .money,.exp-title,.ttl,input,textarea{-webkit-user-select:text; user-select:text}
+  html,body{margin:0; padding:0; overscroll-behavior-y:none}
   body{
     background:
       radial-gradient(circle at 92% -8%, color-mix(in srgb, var(--accent) 10%, transparent) 0, transparent 29rem),
@@ -582,12 +591,30 @@
     padding:14px 20px calc(22px + env(safe-area-inset-bottom));
     transform:translateY(105%); transition:transform .3s cubic-bezier(.32,.72,.24,1);
     max-height:92dvh; overflow-y:auto;
+    will-change:transform; overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
   }
   .sheet.show{transform:translateY(0)}
   .sheet[aria-hidden="true"]{visibility:hidden; pointer-events:none}
   .sheet[aria-hidden="false"]{visibility:visible}
-  @media (prefers-reduced-motion: reduce){ .sheet{transition:none} .backdrop{transition:none} }
-  .grab{width:40px; height:5px; border-radius:3px; background:var(--line); margin:0 auto 14px}
+  /* the small give under a finger that every native control has */
+  button,.row-item,.exp,.qa-tile,.chip,.wk,.task{
+    transition:transform .12s cubic-bezier(.2,.8,.3,1), opacity .12s ease;
+  }
+  button:active,.row-item:active,.exp:active,.qa-tile:active,.chip:active,.wk:active,.task:active{
+    transform:scale(.975);
+  }
+  .tab:active{transform:none}          /* tabs shift, they do not squash */
+  @media (prefers-reduced-motion: reduce){
+    .sheet{transition:none} .backdrop{transition:none}
+    button,.row-item,.exp,.qa-tile,.chip,.wk,.task{transition:none}
+    button:active,.row-item:active,.exp:active,.qa-tile:active,.chip:active,.wk:active,.task:active{transform:none}
+  }
+  .grab{width:40px; height:5px; border-radius:3px; background:var(--line); margin:0 auto 14px;
+    position:relative; cursor:grab}
+  /* a wider invisible target so the drag starts where a thumb actually lands */
+  .grab::after{content:""; position:absolute; left:-70px; right:-70px; top:-12px; bottom:-14px}
+  .sheet.dragging{transition:none}
   .sheet-x{
     position:absolute; top:14px; right:16px; width:34px; height:34px; border-radius:50%;
     background:var(--card2); color:var(--ink2); display:grid; place-items:center;
@@ -701,13 +728,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=7.9"></script>
+<script src="scan.js?v=8.0"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "7.9";
+  var APP_VERSION = "8.0";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -4281,6 +4308,7 @@
     document.body.style.overflow = "hidden";
     syncToggleSemantics(sheet);
     sheet.querySelector(".sheet-x").addEventListener("click", closeSheet);
+    attachSheetDrag();
     backdrop.classList.add("show");
     requestAnimationFrame(function(){
       sheet.classList.add("show");
@@ -4288,7 +4316,55 @@
       if(first) first.focus();
     });
   }
+  /* Drag the sheet down to dismiss, the way every iOS sheet works. Pulling
+     past a third of its height, or flicking, lets go; anything less springs
+     back. Only starts from the grabber or the sheet's own top area, so it
+     never fights a scrolling list inside. */
+  function attachSheetDrag(){
+    var startY = 0, lastY = 0, lastT = 0, dy = 0, dragging = false;
+    var grab = sheet.querySelector(".grab");
+    if(!grab) return;
+
+    function down(e){
+      var t = e.touches ? e.touches[0] : e;
+      if(sheet.scrollTop > 0) return;
+      dragging = true; dy = 0;
+      startY = lastY = t.clientY; lastT = Date.now();
+      sheet.classList.add("dragging");
+    }
+    function move(e){
+      if(!dragging) return;
+      var t = e.touches ? e.touches[0] : e;
+      dy = Math.max(t.clientY - startY, 0);
+      lastY = t.clientY; lastT = Date.now();
+      sheet.style.transform = "translateY(" + dy + "px)";
+      if(e.cancelable) e.preventDefault();
+    }
+    function up(e){
+      if(!dragging) return;
+      dragging = false;
+      sheet.classList.remove("dragging");
+      sheet.style.transform = "";
+      var t = e.changedTouches ? e.changedTouches[0] : e;
+      var speed = (t.clientY - lastY) / Math.max(Date.now() - lastT, 1);
+      if(dy > sheet.offsetHeight / 3 || speed > 0.5) closeSheet();
+    }
+
+    grab.addEventListener("touchstart", down, { passive: true });
+    grab.addEventListener("touchmove", move, { passive: false });
+    grab.addEventListener("touchend", up);
+    grab.addEventListener("touchcancel", up);
+    grab.addEventListener("mousedown", function(e){
+      down(e);
+      var mm = function(ev){ move(ev); }, mu = function(ev){ up(ev);
+        document.removeEventListener("mousemove", mm); document.removeEventListener("mouseup", mu); };
+      document.addEventListener("mousemove", mm); document.addEventListener("mouseup", mu);
+    });
+  }
+
   function closeSheet(){
+    sheet.style.transform = "";
+    sheet.classList.remove("dragging");
     sheet.classList.remove("show");
     backdrop.classList.remove("show");
     sheet.setAttribute("aria-hidden", "true");
