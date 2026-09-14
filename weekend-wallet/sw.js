@@ -1,5 +1,5 @@
 ﻿// Weekend Wallet Service Worker — Offline Caching
-const CACHE_NAME = 'weekend-wallet-v8.0';
+const CACHE_NAME = 'weekend-wallet-v8.1';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

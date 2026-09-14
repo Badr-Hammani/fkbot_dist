@@ -608,6 +608,7 @@
   @media (prefers-reduced-motion: reduce){
     .sheet{transition:none} .backdrop{transition:none}
     button,.row-item,.exp,.qa-tile,.chip,.wk,.task{transition:none}
+    .meter-fill,.meter i{transition:none}
     button:active,.row-item:active,.exp:active,.qa-tile:active,.chip:active,.wk:active,.task:active{transform:none}
   }
   .grab{width:40px; height:5px; border-radius:3px; background:var(--line); margin:0 auto 14px;
@@ -616,7 +617,7 @@
   .grab::after{content:""; position:absolute; left:-70px; right:-70px; top:-12px; bottom:-14px}
   .sheet.dragging{transition:none}
   .sheet-x{
-    position:absolute; top:14px; right:16px; width:34px; height:34px; border-radius:50%;
+    position:absolute; top:10px; right:12px; width:44px; height:44px; border-radius:50%;
     background:var(--card2); color:var(--ink2); display:grid; place-items:center;
     font-size:17px; font-weight:700; line-height:1; z-index:5;
   }
@@ -728,13 +729,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=8.0"></script>
+<script src="scan.js?v=8.1"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "8.0";
+  var APP_VERSION = "8.1";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1571,9 +1572,15 @@
 
     /* month hero */
     if(state.salary > 0){
-      var spendable = pm.left;
+      /* One number, one budget — the rule overspendAmount() already follows.
+         A pool, once set, IS the budget, so the headline must be the pool.
+         Showing the salary plan here put "MAD 6,000 left this month" directly
+         above "MAD 1,000 past your MAD 2,000". */
+      var poolNow = restRemaining();
+      var onPool = poolNow !== null;
+      var spendable = onPool ? state.restAmount : pm.left;
       var mFlow = ledgerFlowSince(monthStartIso());
-      var mLeft = monthLeftOfPlan();
+      var mLeft = onPool ? poolNow : monthLeftOfPlan();
       var flowNote = "";
       if(mFlow.out > 0 || mFlow.inn > 0 || mFlow.borrowed > 0){
         var parts = [];
@@ -1586,8 +1593,10 @@
         '<div class="hero-top"><span class="hero-when">'+monthName+'</span>' +
         '<span class="hero-live" style="color:var(--ink2)">Today: <b class="money" style="color:var(--ink)">'+fmt(tSpent)+'</b></span></div>' +
         '<div class="hero-amount money'+(mLeft<0?" over":"")+'">'+fmt(Math.abs(mLeft))+'</div>' +
-        '<div class="hero-caption">'+(mLeft<0? "over this "+periodWord : "left this "+periodWord) +
-        ' · spent <strong class="money">'+fmt(mSpent)+'</strong> of <strong class="money">'+fmt(Math.max(spendable,0))+'</strong>'+flowNote+'</div>' +
+        '<div class="hero-caption">'+(mLeft<0
+          ? (onPool ? "past your money" : "over this "+periodWord)
+          : (onPool ? "left for the rest of the "+periodWord : "left this "+periodWord)) +
+        ' · spent <strong class="money">'+fmt(onPool ? spentFromPool() : mSpent)+'</strong> of <strong class="money">'+fmt(Math.max(spendable,0))+'</strong>'+flowNote+'</div>' +
         '<div class="meter">'+meterHtml(mSpent + Math.max(mFlow.net,0), Math.max(spendable,0))+
         '<div class="meter-row"><span>after your loan, subscriptions, savings & people paid' +
         (pm.extra ? (pm.extra > 0 ? ' · '+fmt(pm.extra)+' more than usual' : ' · '+fmt(-pm.extra)+' less than usual') : "") +
@@ -4312,7 +4321,12 @@
     backdrop.classList.add("show");
     requestAnimationFrame(function(){
       sheet.classList.add("show");
-      var first = sheet.querySelector('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+      /* land on the field the sheet exists for — an amount box that needs one
+         extra tap to raise the keypad is the most-repeated cost in the app.
+         Fall back to any control, but never the close button. */
+      var first = sheet.querySelector('input:not([disabled]):not([type="checkbox"]):not([type="radio"]), textarea:not([disabled]), select:not([disabled])')
+        || sheet.querySelector('button:not([disabled]):not(.sheet-x), [tabindex]:not([tabindex="-1"])')
+        || sheet.querySelector('.sheet-x');
       if(first) first.focus();
     });
   }
@@ -4321,7 +4335,7 @@
      back. Only starts from the grabber or the sheet's own top area, so it
      never fights a scrolling list inside. */
   function attachSheetDrag(){
-    var startY = 0, lastY = 0, lastT = 0, dy = 0, dragging = false;
+    var startY = 0, lastY = 0, lastT = 0, prevY = 0, prevT = 0, dy = 0, dragging = false;
     var grab = sheet.querySelector(".grab");
     if(!grab) return;
 
@@ -4329,13 +4343,16 @@
       var t = e.touches ? e.touches[0] : e;
       if(sheet.scrollTop > 0) return;
       dragging = true; dy = 0;
-      startY = lastY = t.clientY; lastT = Date.now();
+      startY = lastY = prevY = t.clientY; lastT = prevT = Date.now();
       sheet.classList.add("dragging");
     }
     function move(e){
       if(!dragging) return;
       var t = e.touches ? e.touches[0] : e;
       dy = Math.max(t.clientY - startY, 0);
+      /* keep the previous sample: measuring against lastY after updating it
+         makes the velocity identically zero, so a flick never registered */
+      prevY = lastY; prevT = lastT;
       lastY = t.clientY; lastT = Date.now();
       sheet.style.transform = "translateY(" + dy + "px)";
       if(e.cancelable) e.preventDefault();
@@ -4345,9 +4362,12 @@
       dragging = false;
       sheet.classList.remove("dragging");
       sheet.style.transform = "";
-      var t = e.changedTouches ? e.changedTouches[0] : e;
-      var speed = (t.clientY - lastY) / Math.max(Date.now() - lastT, 1);
-      if(dy > sheet.offsetHeight / 3 || speed > 0.5) closeSheet();
+      /* px per ms, downward. Guard the elapsed time: dividing by a clamped
+         1ms when no time has actually passed turns any small movement into an
+         apparent flick, which dismisses sheets people were only nudging. */
+      var dt = lastT - prevT;
+      var speed = dt > 0 ? (lastY - prevY) / dt : 0;
+      if(dy > sheet.offsetHeight / 3 || (speed > 0.4 && dy > 24)) closeSheet();
     }
 
     grab.addEventListener("touchstart", down, { passive: true });
