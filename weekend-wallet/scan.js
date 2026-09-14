@@ -132,11 +132,44 @@
     { cat: "food", re: /caf[eé]|coffee|kahwa|9ahwa|restaurant|\bresto\b|pizz|burger|tacos|kebab|shawarma|panini|sandwich|sushi|pasta|couscous|taji?ne|tagine|snack|grill|food|breakfast|brunch|lunch|dinner|d[eé]jeuner|d[iî]ner|petit\s*dej|boulangerie|patisserie|p[aâ]tisserie|glovo|mcdo|mcdonald|kfc|dominos|marjane|carrefour|acima|aswak|\bbim\b|hanout|market|supermarch|grocer|[eé]picerie|fruit|l[eé]gume/i }
   ];
 
+  /* Merchants whose name alone settles the category. A grocery run at Marjane
+     is food even though the receipt lists Coca; "ACIMA STORE" is a supermarket,
+     not a clothes shop, whatever the word "store" suggests. */
+  var CATEGORY_BRANDS = {
+    food: /marjane|carrefour|acima|aswak|\bbim\b|hanout|glovo|mcdo|mcdonald|\bkfc\b|dominos|boulangerie|p[aâ]tisserie|patisserie/i,
+    shop: /zara|bershka|pull\s*&?\s*bear|kiabi|decathlon|amazon|aliexpress|jumia/i,
+    transport: /afriquia|winxo|petromin|oncf|\bctm\b|uber|careem|indrive|bolt\b/i,
+    out: /megarama|billetterie|playstation|ps5/i,
+    health: /pharmacie|pharmacy/i
+  };
+
+  /* Scoring beats first-match-wins: the old loop tested rules in a fixed order
+     with drinks first and food last, so every receipt mentioning Coca -- a
+     grocery run, a tajine at a restaurant -- was logged as drinks, and "ACIMA
+     STORE" was a clothes shop because shop's generic \bstore\b was tested
+     before food's acima. Now every rule is scored and the strongest wins. */
   function guessCategory(text) {
+    text = String(text || "");
+    var head = text.split(/\n/)[0] || "";       // the merchant's own name
+    var best = null, bestScore = 0;
     for (var i = 0; i < CATEGORY_RULES.length; i++) {
-      if (CATEGORY_RULES[i].re.test(text)) return CATEGORY_RULES[i].cat;
+      var r = CATEGORY_RULES[i];
+      var hits = text.match(new RegExp(r.re.source, "gi"));
+      if (!hits) continue;
+      /* distinct terms only, so one word repeated down a long receipt cannot
+         outvote the name at the top */
+      var seen = {}, n = 0;
+      for (var j = 0; j < hits.length; j++) {
+        var k = hits[j].toLowerCase();
+        if (!seen[k]) { seen[k] = 1; n++; }
+      }
+      var score = n;
+      if (r.re.test(head)) score += 3;                       // what the shop is
+      var brand = CATEGORY_BRANDS[r.cat];
+      if (brand && brand.test(text)) score += 5;             // a name that settles it
+      if (score > bestScore) { bestScore = score; best = r.cat; }
     }
-    return null;
+    return best;
   }
 
   function parseReceiptText(text, now) {

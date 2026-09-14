@@ -207,7 +207,11 @@
   }
   .empty b{color:var(--ink)}
 
-  .stat-row{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:12px}
+  /* 1fr does not mean "will fit" -- a grid item's automatic minimum is its
+     content, so three stats forced the row to 406px on a 390px phone and
+     History > Weekends scrolled sideways. minmax(0,1fr) lets them shrink. */
+  .stat-row{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:12px}
+  .stat .v{overflow-wrap:anywhere}
   .stat{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:12px 14px}
   .stat .v{font-weight:800; font-size:19px; letter-spacing:-.02em; margin-top:2px}
   .wk{
@@ -247,7 +251,7 @@
   .suggest .txt b{color:var(--ink)}
   .suggest button{
     flex:none; background:var(--accent); color:var(--on-accent); font-weight:700;
-    font-size:13px; padding:9px 14px; border-radius:999px;
+    font-size:13px; padding:9px 14px; border-radius:999px; min-height:44px;
   }
   .row-item{
     display:flex; align-items:center; gap:12px; width:100%; text-align:left;
@@ -288,6 +292,7 @@
   .mini-btn{
     font-size:13px; font-weight:700; padding:8px 14px; border-radius:999px;
     background:var(--card2); border:1px solid var(--line); white-space:nowrap;
+    min-height:44px;                 /* Edit / Add money sit on every goal row */
   }
   /* Clipping is right for a percentage sitting beside a button, but several of
      these are whole sentences -- and the one stating your pool got cut at
@@ -649,6 +654,7 @@
     font-size:13.5px; font-weight:600; color:var(--ink);
   }
   .chip .cat-dot{width:9px; height:9px}
+  .chip[data-hist],.chip[data-mode]{min-height:44px}   /* view switchers, tapped constantly */
   .chip.sel{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 16%, var(--card))}
   /* Expense categories are primary actions on a phone: give each one a real
      touch target and enough visual weight that "Other" is not the default. */
@@ -738,13 +744,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=8.2"></script>
+<script src="scan.js?v=8.3"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "8.2";
+  var APP_VERSION = "8.3";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1151,7 +1157,17 @@
     }
     var d = fromIso(mk+"-01"), next = new Date(d);
     next.setMonth(next.getMonth()+1);
-    return {start:iso(d), endExclusive:iso(next), salary:false};
+    var start = iso(d), end = iso(next);
+    /* Once a salary cycle starts mid-month, the calendar-month bucket has to
+       stop there or the two overlap and the same expense is counted twice --
+       History > Months printed a total that contradicted the expense count on
+       its own line. A legacy month ends at the next cycle, whichever is
+       sooner. */
+    salaryReceiptEntries().some(function(item){
+      if(item.date > start && item.date < end){ end = item.date; return true; }
+      return false;
+    });
+    return {start:start, endExclusive:end, salary:false};
   }
   function dateInPeriod(dateStr, mk){
     var b = periodBounds(mk);
@@ -1607,7 +1623,12 @@
          screen argues with itself: a full red track under "1,500 left". In
          plan mode the money you handed to people is already taken off
          pm.left, so adding it to the spent side again counts it twice. */
-      var spentShown = onPool ? spentFromPool() : mSpent;
+      /* Define it as whatever the budget lost, so the headline, the caption
+         and the bar cannot disagree: spendable - spentShown IS the headline,
+         by construction. Using spentFromPool() here left "spent 0 of 3,000"
+         and an empty meter under a headline of 2,500 whenever money moved
+         through the ledger rather than through an expense. */
+      var spentShown = Math.round((Math.max(spendable, 0) - mLeft)*100)/100;
       var flowNote = "";
       if(mFlow.out > 0 || mFlow.inn > 0 || mFlow.borrowed > 0){
         var parts = [];
@@ -2476,7 +2497,11 @@
     var thisMk = monthKey();
     /* the plan only describes THIS month — applying it to old months would
        invent a "saving" out of months you barely logged */
+    /* A pool is a budget in its own right -- gating the budget line on the
+       salary plan meant someone running purely on counted cash, or whose plan
+       had gone to zero, saw no budget here at all. */
     var spendable = state.salary > 0 ? Math.max(planMath().left, 0) : 0;
+    var poolLive = restRemaining() !== null;
     var h = "";
     keys.forEach(function(k){
       var out = monthOut(k), now = k === thisMk;
@@ -2495,7 +2520,7 @@
         '<span class="wk-amt money">'+dayTotalText(out)+'</span></div>' +
         '<div class="wk-sub">'+bits.join(' · ')+'</div>';
 
-      if(now && spendable > 0){
+      if(now && (spendable > 0 || poolLive)){
         /* Home and this card describe the same month in the same second, so
            they must name the same budget. Once you have counted your cash,
            that count IS the budget -- answering from the salary plan here put
@@ -2904,9 +2929,21 @@
     state.debts.forEach(function(d){ if(d.id === id) found = d; });
     return found;
   }
+  /* Taking funding off a loan stops at zero -- a 300 draw against a balance
+     already paid down to 0 removes nothing. Putting it back added the full
+     300 regardless, so deleting an expense and immediately undoing it created
+     debt that had never existed. The removal now reports what it actually
+     took, and the restore gives back exactly that. */
   function removeExpenseFunding(e){
-    if(!e) return;
-    if(e.loanAdded > 0) adjustLoanRemaining(e.loanId, -e.loanAdded);
+    if(!e) return null;
+    var receipt = { loanApplied:0 };
+    if(e.loanAdded > 0){
+      var loan = null;
+      state.commitments.forEach(function(c){ if(c.id === e.loanId && c.kind === "loan") loan = c; });
+      var before = loan ? loan.remaining : 0;
+      adjustLoanRemaining(e.loanId, -e.loanAdded);
+      receipt.loanApplied = loan ? Math.round((before - loan.remaining)*100)/100 : 0;
+    }
     if(e.fundingType === "person" && e.fundingPersonId && e.fundingAmount > 0){
       var d = findPersonById(e.fundingPersonId), logIndex = -1;
       if(d){
@@ -2920,16 +2957,31 @@
     e.loanId = ""; e.loanAdded = 0;
     e.fundingType = ""; e.fundingPersonId = ""; e.fundingPersonName = "";
     e.fundingAmount = 0; e.fundingLogId = "";
+    return receipt;
   }
-  function restoreExpenseFunding(e){
+  function restoreExpenseFunding(e, receipt){
     if(!e) return;
-    if(e.loanAdded > 0) adjustLoanRemaining(e.loanId, e.loanAdded);
+    /* give back what the removal actually took, not what was originally asked
+       for -- otherwise a delete-and-undo invents debt */
+    var give = receipt && typeof receipt.loanApplied === "number" ? receipt.loanApplied : e.loanAdded;
+    if(give > 0) adjustLoanRemaining(e.loanId, give);
     if(e.fundingType === "person" && e.fundingAmount > 0){
       var d = findPersonById(e.fundingPersonId) || findOrCreatePerson(e.fundingPersonName || "Family");
       var log = ledgerAdd(d, "b", e.fundingAmount,
         "Funding: "+(e.note || cat(e.cat).name), expenseDateTs(e.date));
       e.fundingPersonId = d.id; e.fundingPersonName = d.name; e.fundingLogId = log.id;
     }
+  }
+  /* the funding an existing expense already carries, in the shape
+     applyExpenseFunding expects, so an edit can put back exactly what it took */
+  function carriedFunding(e){
+    if(!e) return null;
+    if(e.loanAdded > 0 && e.loanId) return { type:"loan", amount:e.loanAdded, loanId:e.loanId };
+    if(e.fundingType === "person" && e.fundingAmount > 0){
+      return { type:"person", amount:e.fundingAmount,
+               personId:e.fundingPersonId, personName:e.fundingPersonName };
+    }
+    return null;
   }
   function applyExpenseFunding(e, funding){
     if(!funding || funding.type === "none") return { type:"none", amount:0 };
@@ -3176,12 +3228,21 @@
     }
     if(previous && !window.confirm("Update the salary receipt for "+salaryReceiptDateLabel(previous)+"?")) return;
     state.salaryReceived[key] = {amount:amount, date:date, ts:Date.now()};
+    /* Logging a receipt starts a new salary cycle, so the cash counted during
+       the old one stops describing anything. It was only retired at load, and
+       an installed app is not reloaded -- so on payday itself Home kept
+       showing last cycle's leftover and hid the salary that had just landed. */
+    var poolBefore = { amount:state.restAmount, from:state.restFrom, ts:state.restTs, ask:state.restAsk };
+    retireStalePool(state);
     if(!save()){
       if(previous) state.salaryReceived[key] = previous;
       else delete state.salaryReceived[key];
+      state.restAmount = poolBefore.amount; state.restFrom = poolBefore.from;
+      state.restTs = poolBefore.ts; state.restAsk = poolBefore.ask;
       toast("Could not save — your money data was not changed");
       return;
     }
+    lastSeenDay = todayIso();
     render();
     toast("Salary received logged · "+fmt(amount));
   }
@@ -4182,20 +4243,27 @@
      out, and counting it would tell a broke user to log thousands as
      "missing". Savings count too — nothing here moves that money for you. */
   function setAside(){
-    var bills = 0;
+    var today = new Date().getDate(), bills = 0, overdue = 0;
     /* An unpaid bill does not stop needing money the day after it was due --
-       it needs it more. Skipping overdue ones told you the leftover was
-       "Extra" while rent was still outstanding. */
+       it needs it more. But a bill whose day has long passed is usually one
+       that was paid and never logged, so it is counted and reported
+       separately rather than assumed still owing. */
     state.commitments.forEach(function(c){
       if(paidRec(c) || !c.due) return;
-      bills += billFor(c);
+      var amt = billFor(c);
+      bills += amt;
+      if(c.due < today) overdue += amt;
     });
     var savings = state.goals.reduce(function(t,g){ return t + (g.monthly||0); }, 0);
     bills = Math.round(bills*100)/100; savings = Math.round(savings*100)/100;
+    overdue = Math.round(overdue*100)/100;
     var parts = [];
-    if(bills > 0) parts.push(fmt(bills)+' of bills still to pay');
+    if(bills > 0){
+      parts.push(fmt(bills)+' of bills still to pay'+
+        (overdue > 0 ? ' (incl. '+fmt(overdue)+' past its day)' : ''));
+    }
     if(savings > 0) parts.push(fmt(savings)+' you plan to save');
-    return { bills: bills, savings: savings, parts: parts,
+    return { bills: bills, savings: savings, overdue: overdue, parts: parts,
              total: Math.round((bills + savings)*100)/100 };
   }
   /* what the app believes you can still spend */
@@ -4239,9 +4307,19 @@
       '<div class="field"><label class="micro" for="cash-have">How much do you have?</label>' +
       '<input id="cash-have" type="text" inputmode="decimal" placeholder="e.g. '+Math.max(Math.round(expected),0)+'" autofocus></div>' +
       (pend > 0
-        ? '<label class="checkrow" for="cash-pend"><input type="checkbox" id="cash-pend" checked>' +
+        /* Ticked only when every bill is still ahead of its day. With one
+           already past, the likeliest story is that it was paid and never
+           logged -- and a wrong default here writes a phantom expense for the
+           whole amount in two taps. */
+        ? '<label class="checkrow" for="cash-pend"><input type="checkbox" id="cash-pend"'+
+          (aside.overdue > 0 ? '' : ' checked')+'>' +
           '<span>That money is still in my account — <b class="money">'+fmt(pend)+'</b> ('+
-          aside.parts.join(' + ')+')</span></label>'
+          aside.parts.join(' + ')+')</span></label>' +
+          (aside.overdue > 0
+            ? '<div class="hint" style="margin-top:-4px">'+fmt(aside.overdue)+
+              ' of that was due earlier this '+(salaryReceiptEntries().length > 0 ? "cycle" : "month")+
+              '. Tick this only if you really have not paid it yet.</div>'
+            : "")
         : "") +
       '<div class="flow" id="cash-math" style="margin-top:14px"></div>' +
       '<button class="btn primary" id="cash-go" disabled>Enter an amount</button>' +
@@ -4730,7 +4808,13 @@
     };
     var proposal = expenseFundingProposal(e.amount, existing, e.date);
     if(proposal.shortfall > 0){ openFundingSheet(e, existing, proposal); return; }
-    var result = commitExpense(e, existing, {type:"none", amount:0});
+    /* Editing a note or a date used to silently delete the funding record --
+       the friend's debt or the loan draw that paid for this expense -- because
+       the rebuilt candidate carries no funding and commitExpense applies
+       whatever it is handed. Nothing on the Edit screen even mentioned the
+       funding, so there was no warning and nothing to undo. Money you did not
+       touch is carried through unchanged. */
+    var result = commitExpense(e, existing, carriedFunding(existing) || {type:"none", amount:0});
     closeSheet(); render();
     if(!result.ok){ toast("Could not save — your money data was not changed"); return; }
     var wk = weekendKeyOf(e.date);
@@ -4817,18 +4901,18 @@
       this.disabled = true;
       var deleted = Object.assign({}, e);
       var beforeExpenses = state.expenses.slice();
-      removeExpenseFunding(e);
+      var receipt = removeExpenseFunding(e);
       state.expenses = state.expenses.filter(function(x){ return x.id!==e.id; });
       if(!save()){
         state.expenses = beforeExpenses;
-        restoreExpenseFunding(deleted);
+        restoreExpenseFunding(deleted, receipt);
         this.disabled = false;
         toast("Could not delete — your money data was not changed");
         return;
       }
       closeSheet(); render();
       toastAction("Deleted "+fmt(e.amount), "Undo", function(){
-        restoreExpenseFunding(deleted);
+        restoreExpenseFunding(deleted, receipt);
         state.expenses.push(deleted);
         if(save()){ render(); toast("Restored"); }
         else { removeExpenseFunding(deleted); state.expenses = state.expenses.filter(function(x){ return x.id!==deleted.id; }); toast("Could not restore — try again"); }
