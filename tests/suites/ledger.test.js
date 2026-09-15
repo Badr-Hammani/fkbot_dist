@@ -74,25 +74,63 @@ exports.run = async function (t, env) {
     await app.close();
   }
 
-  /* ---------- undo reverses balance AND any budget bump ---------- */
+  /* ---------- borrowing raises the budget ONCE, and undo takes it back ----
+     There used to be a toast offering "add it to this month?". Once borrowed
+     cash started counting on arrival (v8.4) that button credited it a second
+     time -- a 500 loan bought 1,000 of room -- so the offer is gone and the
+     money is simply counted. */
   {
     const app = await boot(browser, baseState({
-      restAmount: 3000, restFrom: "2026-08-01", restTs: 1, debts: [person({ name: "Dad" })]
+      restAmount: 3000, restFrom: "2026-08-01", restTs: Date.parse("2026-08-01T00:00:00"),
+      debts: [person({ name: "Dad" })]
     }), { now: NOW });
     await openPerson(app, "d1");
     await app.page.fill("#d2-amt", "500");
     await app.page.click("#d2-theygave");
     await app.page.waitForTimeout(400);
-    await app.page.click("#toast button");            /* accept the budget bump */
-    await app.page.waitForTimeout(400);
-    t.eq("bump applied", (await app.stored()).restAmount, 3500);
+
+    await app.tab("home");
+    t.has("borrowing 500 raises the pool by 500", await app.poolLine(), "MAD 3,500 left of your MAD 3,500");
+    t.eq("and the counted amount itself is never rewritten", (await app.stored()).restAmount, 3000);
+    t.no("no second offer to count it again", await app.page.evaluate(
+      () => { const b = document.querySelector("#toast button"); return !!b && /add/i.test(b.textContent); }));
+
     await openPerson(app, "d1");
     await app.page.click("#d2-undo");
     await app.page.waitForTimeout(400);
     const st = await app.stored();
-    t.eq("undo reverses the bump too", st.restAmount, 3000);
+    await app.tab("home");
+    t.has("undo takes the money back out of the pool", await app.poolLine(), "MAD 3,000 left of your MAD 3,000");
     t.eq("undo reverses the balance", st.debts[0].balance, 0);
     t.eq("undo removes the log entry", st.debts[0].log.length, 0);
+    await app.close();
+  }
+
+  /* ---------- "undo last entry" means the one you wrote last ---------- */
+  {
+    /* the log is kept in date order so repay-vs-borrow is right, which means
+       the end of the list is not the entry you just typed */
+    const app = await boot(browser, baseState({
+      restAmount: 3000, restFrom: "2026-08-01", restTs: Date.parse("2026-08-01T00:00:00"),
+      debts: [person({ name: "Dad", balance: 500, log: [
+        { id: "old", ts: Date.parse("2026-08-17T10:00:00"), at: Date.parse("2026-08-17T10:00:00"),
+          amt: 500, dir: "b", note: "" }] })]
+    }), { now: NOW });
+
+    /* now add an entry BACKDATED before the existing one */
+    await openPerson(app, "d1");
+    await app.page.fill("#d2-amt", "100");
+    await app.page.fill("#d2-date", "2026-08-12");
+    await app.page.click("#d2-theygave");
+    await app.page.waitForTimeout(400);
+
+    await openPerson(app, "d1");
+    await app.page.click("#d2-undo");
+    await app.page.waitForTimeout(400);
+    const st = await app.stored();
+    t.eq("the backdated 100 is the one removed", st.debts[0].log.length, 1);
+    t.eq("and the older 500 survives", st.debts[0].log[0].id, "old");
+    t.eq("leaving the balance at 500", st.debts[0].balance, 500);
     await app.close();
   }
 

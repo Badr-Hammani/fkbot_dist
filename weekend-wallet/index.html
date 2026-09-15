@@ -744,13 +744,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=8.4"></script>
+<script src="scan.js?v=8.5"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "8.4";
+  var APP_VERSION = "8.5";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -968,7 +968,8 @@
         var log = Array.isArray(d.log) ? d.log.filter(function(l){
           return l && isFinite(+l.amt) && (l.dir === "b" || l.dir === "r");
         }).map(function(l){
-          return { id: l.id || uid(), ts: +l.ts || 0, amt: +l.amt, dir: l.dir, note: String(l.note || ""),
+          return { id: l.id || uid(), ts: +l.ts || 0, at: +l.at || +l.ts || 0,
+                   amt: +l.amt, dir: l.dir, note: String(l.note || ""),
                    bumped: +l.bumped || 0 };
         }) : [];
         log.sort(function(a,b){ return (a.ts||0) - (b.ts||0); });   /* repair logs written out of order by older builds */
@@ -1244,7 +1245,11 @@
   /* dir 'b' = they gave me money (my debt grows), 'r' = I gave them money */
   function ledgerAdd(d, dir, amt, note, atTs){
     d.balance = Math.round((d.balance + (dir==="b" ? amt : -amt))*100)/100;
-    var log = { id:uid(), ts: atTs || Date.now(), amt: amt, dir: dir, note: note || "" };
+    /* ts is when the money moved; at is when you typed it. Sorting by ts is
+       what makes repay-vs-borrow correct, but it also means the end of the
+       array is no longer the entry you just added -- so "undo last entry" has
+       to ask which was written last, not which sits last. */
+    var log = { id:uid(), ts: atTs || Date.now(), at: Date.now(), amt: amt, dir: dir, note: note || "" };
     d.log.push(log);
     sortLedger(d);
     return log;
@@ -1258,6 +1263,23 @@
      chronological order at every insertion point, not at any one reader. */
   function sortLedger(d){
     if(d && d.log) d.log.sort(function(a,b){ return (a.ts||0) - (b.ts||0); });
+  }
+  function lastWrittenLog(d){
+    var best = null;
+    (d && d.log ? d.log : []).forEach(function(l){
+      if(!best || (l.at || l.ts || 0) >= (best.at || best.ts || 0)) best = l;
+    });
+    return best;
+  }
+  function removeLedgerLog(d, id){
+    if(!d || !d.log) return null;
+    var at = -1;
+    d.log.forEach(function(l, i){ if(l.id === id) at = i; });
+    if(at < 0) return null;
+    var l = d.log[at];
+    d.balance = Math.round((d.balance + (l.dir === "b" ? -l.amt : l.amt))*100)/100;
+    d.log.splice(at, 1);
+    return l;
   }
   function balanceLabel(d){
     if(d.balance > 0) return 'you owe <b class="money" style="color:var(--bad)">'+fmt(d.balance)+'</b>';
@@ -1608,7 +1630,13 @@
     var periodWord = salaryReceiptEntries().length > 0 ? "cycle" : "month";
     var pm = planMath();
     var mSpent = monthSpent();
-    var tSpent = spentOn(todayIso());
+    /* What you have spent today AGAINST the current budget. On the day you
+       count your cash, money that left before you counted is already missing
+       from the figure you typed -- charging it to today as well showed
+       "MAD 300 over" on a pool that had just been counted as whole. */
+    var tSpent = (state.restAmount > 0 && state.restFrom)
+      ? spentFromPoolToday()
+      : spentOn(todayIso());
     var h = "";
 
     h += setupChecklist();
@@ -1872,15 +1900,17 @@
   function dayRow(r){ return r.exp ? expRow(r.exp) : r.led ? ledgerRow(r.led) : salaryRow(r.salary); }
 
   /* borrowing doesn't silently change your budget — you decide */
+  /* This used to offer "Borrowed 1,000 — add it to this month? [Add]", from
+     when borrowing did not move the budget on its own. Since borrowed cash now
+     counts as cash the moment it arrives, tapping Add credited it a second
+     time: a 1,000 loan bought 2,000 of headroom, in the one mode that
+     overrides the plan. The money is already counted, so the toast now says
+     so instead of offering to count it again. */
   function offerBudgetBump(d, newBorrow){
     if(newBorrow > 0 && state.restAmount > 0){
-      toastAction("Borrowed "+fmt(newBorrow)+" — add it to this month?", "Add", function(){
-        state.restAmount = Math.round((state.restAmount + newBorrow)*100)/100;
-        var last = d.log && d.log.length ? d.log[d.log.length-1] : null;
-        if(last) last.bumped = newBorrow;      // so "Undo last entry" can reverse it
-        save(); render();
-        toast("Budget now "+fmt(state.restAmount)+" · "+fmt(autoDailyBudget())+"/day");
-      }, 7000);
+      toast("Borrowed "+fmt(newBorrow)+" — it's in your money for the rest of the "+
+            (salaryReceiptEntries().length > 0 ? "cycle" : "month")+
+            " · you owe "+d.name+" "+fmt(d.balance));
       return;
     }
     toastBalance(d);
@@ -1957,8 +1987,11 @@
       var d = findOrCreatePerson(name);
       amt = Math.round(amt*100)/100;
       var newBorrow = dir === "b" ? classifyIncoming(d.balance, amt).borrow : 0;
-      ledgerAdd(d, dir, amt, "", atTs);
-      save(); closeSheet(); render();
+      var entry = ledgerAdd(d, dir, amt, "", atTs);
+      /* save() explains a full quota itself; announcing the entry over that
+         message left the screen showing money the next reload would not have */
+      if(!save()){ removeLedgerLog(d, entry.id); btn.disabled = false; render(); return; }
+      closeSheet(); render();
       offerBudgetBump(d, newBorrow);
     }
     $("#b-igave").addEventListener("click", function(){ submit("r", this); });
@@ -1996,9 +2029,12 @@
     });
     var undoBtn = $("#d2-undo");
     if(undoBtn) undoBtn.addEventListener("click", function(){
-      var last = d.log.pop();
+      /* the entry you wrote most recently -- which after backdating is very
+         often not the one at the end of the list */
+      var target = lastWrittenLog(d);
+      if(!target) return;
+      var last = removeLedgerLog(d, target.id);
       if(!last) return;
-      d.balance = Math.round((d.balance + (last.dir==="b" ? -last.amt : last.amt))*100)/100;
       /* if this entry raised the month's money, take that back too — otherwise
          undoing a borrow left the budget permanently inflated */
       if(last.bumped > 0 && state.restAmount > 0){
@@ -2015,8 +2051,9 @@
       btn.disabled = true;
       a = Math.round(a*100)/100;
       var newBorrow = dir === "b" ? classifyIncoming(d.balance, a).borrow : 0;
-      ledgerAdd(d, dir, a, "", atTs);
-      save(); closeSheet(); render();
+      var entry = ledgerAdd(d, dir, a, "", atTs);
+      if(!save()){ removeLedgerLog(d, entry.id); btn.disabled = false; render(); return; }
+      closeSheet(); render();
       offerBudgetBump(d, newBorrow);
     }
     $("#d2-igave").addEventListener("click", function(){ submit("r", this); });
@@ -2460,11 +2497,18 @@
       '<div class="stat"><span class="micro">Biggest day</span><div class="v money">'+
         fmt(Math.max.apply(null, groups.map(function(g){ return Math.max(g.out, 0); }).concat([0])))+'</div></div></div>';
     var mk = "";
+    /* The total beside this heading is clamped to the period; the rows under
+       it were grouped by calendar month. Where a salary cycle started
+       mid-month the two disagreed -- "AUGUST · SPENT 300" above three rows
+       adding to 600, with one day counted under no heading at all. Both now
+       use the same buckets the rest of the app does. */
+    var dayCycles = salaryReceiptEntries().length > 0;
+    var bucketOf = function(date){ return dayCycles ? periodKeyForDate(date) : date.slice(0,7); };
     groups.forEach(function(g){
-      var m = g.date.slice(0,7);
+      var m = bucketOf(g.date);
       if(m !== mk){
         mk = m;
-        h += '<div class="sec"><span class="micro">'+fromIso(m+"-01").toLocaleDateString(undefined,{month:"long", year:"numeric"})+'</span>' +
+        h += '<div class="sec"><span class="micro">'+periodLabel(m)+'</span>' +
           '<span class="micro money">Spent '+fmt(monthSpent(m))+'</span></div>';
       }
       var open = openDay === g.date;
@@ -3041,17 +3085,44 @@
     var beforeLastCat = state.lastCat;
     var pos = existing ? state.expenses.indexOf(existing) : -1;
     try{
-      if(existing) removeExpenseFunding(existing);
+      /* "keep" means the funding is not being changed -- a note or a date
+         edit. Tearing it down and rebuilding it looked equivalent but was
+         not: removal stops at zero on a loan already paid down, while the
+         rebuild re-applied the full original draw, so editing a note on a
+         300 expense against a loan at 100 pushed it back to 300. Leaving
+         untouched money untouched cannot do that. */
+      var keep = funding && funding.type === "keep";
+      var oldDate = existing ? existing.date : "";
+      if(existing && !keep) removeExpenseFunding(existing);
       var e = existing || candidate;
       e.amount = candidate.amount; e.cat = candidate.cat; e.note = candidate.note;
       e.date = candidate.date; e.photo = candidate.photo;
-      e.loanId = ""; e.loanAdded = 0; e.fundingType = ""; e.fundingPersonId = "";
-      e.fundingPersonName = ""; e.fundingAmount = 0; e.fundingLogId = "";
+      if(!keep){
+        e.loanId = ""; e.loanAdded = 0; e.fundingType = ""; e.fundingPersonId = "";
+        e.fundingPersonName = ""; e.fundingAmount = 0; e.fundingLogId = "";
+      }
       if(existing){
         if(pos > -1) state.expenses.splice(pos, 1, e);
       }else state.expenses.push(e);
       state.lastCat = e.cat;
-      var applied = applyExpenseFunding(e, funding);
+      var applied;
+      if(keep){
+        /* the money is unchanged; only move the friend's entry if the expense
+           moved in time, so the ledger keeps matching the day it happened */
+        if(e.fundingType === "person" && e.fundingLogId && e.date !== oldDate){
+          var person = findPersonById(e.fundingPersonId);
+          if(person){
+            (person.log||[]).forEach(function(l){
+              if(l.id === e.fundingLogId) l.ts = expenseDateTs(e.date);
+            });
+            sortLedger(person);
+          }
+        }
+        applied = { type: e.loanAdded > 0 ? "loan" : (e.fundingType || "none"),
+                    amount: e.loanAdded > 0 ? e.loanAdded : (e.fundingAmount || 0) };
+      }else{
+        applied = applyExpenseFunding(e, funding);
+      }
       if(!applied) throw new Error("funding source disappeared");
       if(!save({retryWithoutPhoto:e})) throw new Error("storage unavailable");
       return { ok:true, expense:e, funding:applied };
@@ -3170,7 +3241,12 @@
      figure the plan reserves -- not the one you intended */
   function savingFor(g, mk){
     var actual = goalSavedInPeriod(g, mk);
-    return actual > 0 ? actual : (+g.monthly || 0);
+    /* Whichever is larger, never "the latest one". Returning the actual figure
+       as soon as anything went in meant putting 100 into a goal you had
+       planned 500 for RELEASED 400: the sheet said the money was leaving your
+       pocket while Left to spend went up. The plan keeps reserving what you
+       intended until you have actually put more away than that. */
+    return Math.max(actual, +g.monthly || 0);
   }
   function monthStartIso(){
     return periodBounds(monthKey()).start;
@@ -3249,9 +3325,24 @@
   }
   /* money still to spend, ignoring today's own spending — today's number is
      fixed at midnight so it can't shrink under you as you use it */
+  function spentFromPoolToday(){
+    var t = poolStartTs(), today = todayIso();
+    if(today > periodEndIso()) return 0;
+    return total(state.expenses.filter(function(e){
+      if(e.date !== today) return false;
+      if(e.date > state.restFrom) return true;
+      return e.date === state.restFrom && (e.ts || 0) >= t;
+    }));
+  }
   function poolLeftForRates(){
     if(state.restAmount > 0 && state.restFrom){
-      return state.restAmount - (spentFromPool() - spentOn(todayIso())) - poolFlow().cashNet
+      /* Today's spending is added back so that spending now does not shrink
+         today's own allowance. It has to be the part the pool actually
+         counted: spentFromPool() excludes what you spent BEFORE counting on
+         the day you counted, so adding all of today back put that money in
+         twice -- spend 400 in the morning, count 1,400 at six, and the day's
+         rate was worked out from 1,800. */
+      return state.restAmount - (spentFromPool() - spentFromPoolToday()) - poolFlow().cashNet
              - goalOutSince(state.restFrom, poolStartTs());
     }
     if(state.salary > 0){
@@ -4381,8 +4472,10 @@
     return null;
   }
   function logMissing(amt){
-    state.expenses.push({ id: uid(), ts: Date.now(), amount: Math.round(amt*100)/100,
-                          cat: "missing", note: "Not logged", date: todayIso(), photo: null });
+    var e = { id: uid(), ts: Date.now(), amount: Math.round(amt*100)/100,
+              cat: "missing", note: "Not logged", date: todayIso(), photo: null };
+    state.expenses.push(e);
+    return e;        /* so a failed save can take it back out again */
   }
   function missingThisMonth(){
     var mk = monthKey();
@@ -4514,27 +4607,41 @@
                                  : "Tap again to add " + fmt(d);
         return;
       }
+      var cashBefore = state.cashTs;
       state.cashTs = Date.now();
       if(Math.abs(d) < 1){
-        save(); closeSheet(); render();
+        if(!save()){ state.cashTs = cashBefore; return; }
+        closeSheet(); render();
         toast("Nice — the app matches your pocket");
         return;
       }
       if(d < 0){
-        logMissing(-d);
-        save(); closeSheet(); render();
+        var wrote = logMissing(-d);
+        if(!save()){
+          state.cashTs = cashBefore;
+          state.expenses = state.expenses.filter(function(x){ return x.id !== wrote.id; });
+          return;
+        }
+        closeSheet(); render();
         toast(fmt(-d)+" logged as “Not logged”");
         return;
       }
       /* more than the app thought: add just the surplus to whatever pool we
          have, or start a fresh pool with the amount they typed */
+      var poolBefore = { amount:state.restAmount, from:state.restFrom, ts:state.restTs, ask:state.restAsk };
+      function undoCash(){
+        state.cashTs = cashBefore;
+        state.restAmount = poolBefore.amount; state.restFrom = poolBefore.from;
+        state.restTs = poolBefore.ts; state.restAsk = poolBefore.ask;
+      }
       if(state.restAmount > 0 && state.restFrom){
         /* already in pool mode — just top it up by the difference */
         state.restAmount = Math.round((state.restAmount + d)*100)/100;
       }else if(state.salary > 0){
         /* salary mode: don't switch to pool mode; extra cash probably means
            a different account or cash-in-hand not tracked. Just tell them. */
-        save(); closeSheet(); render();
+        if(!save()){ undoCash(); return; }
+        closeSheet(); render();
         toast(fmt(d)+" more than expected — make sure it\u2019s not from another account");
         return;
       }else{
@@ -4542,7 +4649,8 @@
         state.restAmount = Math.round((num(inp.value))*100)/100;
         state.restFrom = todayIso(); state.restTs = Date.now(); state.restAsk = "";
       }
-      save(); closeSheet(); render();
+      if(!save()){ undoCash(); return; }
+      closeSheet(); render();
       toast(fmt(d)+" more than expected · "+fmt(autoDailyBudget())+"/day");
     });
   }
@@ -4918,7 +5026,19 @@
        whatever it is handed. Nothing on the Edit screen even mentioned the
        funding, so there was no warning and nothing to undo. Money you did not
        touch is carried through unchanged. */
-    var result = commitExpense(e, existing, carriedFunding(existing) || {type:"none", amount:0});
+    /* Funding can never exceed the expense it paid for. Editing a 1,200 down
+       to 400 while it still carried 700 of Dad's money left the detail sheet
+       reading "Amount 400 -- funded by 700 borrowed", and 300 of debt with
+       nothing behind it. When it no longer fits, it is rebuilt at a size that
+       does; when it fits, it is left completely alone. */
+    var carried = carriedFunding(existing);
+    var plan = {type:"none", amount:0};
+    if(carried){
+      plan = carried.amount > e.amount
+        ? Object.assign({}, carried, { amount: e.amount })
+        : { type:"keep" };
+    }
+    var result = commitExpense(e, existing, plan);
     closeSheet(); render();
     if(!result.ok){ toast("Could not save — your money data was not changed"); return; }
     var wk = weekendKeyOf(e.date);
@@ -5091,11 +5211,11 @@
       var pid = this.getAttribute("data-person"), d = null;
       state.debts.forEach(function(x){ if(x.id === pid) d = x; });
       if(!d || !(amt > 0)){ openBorrowSheet(amt); return; }
-      ledgerAdd(d, "b", amt, "covered my overspend");
-      save(); render();
+      var added = ledgerAdd(d, "b", amt, "covered my overspend");
+      if(!save()){ removeLedgerLog(d, added.id); render(); return; }
+      render();
       toastAction("Added "+fmt(amt)+" to "+d.name+" — you owe "+fmt(d.balance), "Undo", function(){
-        var last = d.log.pop();
-        if(last) d.balance = Math.round((d.balance - last.amt) * 100) / 100;
+        removeLedgerLog(d, added.id);     /* by id: the list is date-ordered */
         save(); render(); toast("Removed");
       }, 7000);
     });
@@ -5147,11 +5267,20 @@
 
       var pRest = $("#p-rest-save");
       if(pRest) pRest.addEventListener("click", function(){
+        var before = { amount:state.restAmount, from:state.restFrom, ts:state.restTs, ask:state.restAsk };
         var v = num($("#p-rest").value);
         if(v > 0){ state.restAmount = Math.round(v*100)/100; state.restFrom = todayIso(); state.restTs = Date.now(); }
         else { state.restAmount = 0; state.restFrom = ""; state.restTs = 0; }
         state.restAsk = "";
-        save(); render();
+        /* never report a budget that was not written -- a full storage quota
+           used to leave the screen showing a pool the reload would not have */
+        if(!save()){
+          state.restAmount = before.amount; state.restFrom = before.from;
+          state.restTs = before.ts; state.restAsk = before.ask;
+          render();
+          return;
+        }
+        render();
         toast(state.restAmount>0 ? "Daily budget: "+fmt(autoDailyBudget())+"/day" : "Daily budget cleared");
       });
       var pCash = $("#p-cash");
@@ -5159,10 +5288,25 @@
       var pRestReset = $("#p-rest-reset");
       if(pRestReset) pRestReset.addEventListener("click", function(){
         var left = restRemaining();
-        if(left !== null && left > 0){ state.restAmount = left; }
-        state.restFrom = todayIso(); state.restTs = Date.now();
-        save(); render();
-        toast("Counting fresh from today");
+        /* Restarting carried the OLD amount forward whenever nothing was left,
+           while moving the start date past the spending that emptied it: being
+           200 over turned into a full 3,000 to spend, on one tap, with no
+           confirm. You cannot restart with money you have already spent -- so
+           when there is nothing left, count what is really in your pocket. */
+        if(left === null || left <= 0){
+          toast(left === null ? "Set a money pool first" : "Nothing left of that money — count what you have now");
+          if(left !== null) openCashSheet();
+          return;
+        }
+        var before = { amount:state.restAmount, from:state.restFrom, ts:state.restTs };
+        state.restAmount = left; state.restFrom = todayIso(); state.restTs = Date.now();
+        if(!save()){
+          state.restAmount = before.amount; state.restFrom = before.from; state.restTs = before.ts;
+          render();
+          return;
+        }
+        render();
+        toast("Counting fresh from today — "+fmt(left)+" left");
       });
       $("#p-add-cm").addEventListener("click", function(){ openCommitmentSheet(null); });
       $("#p-add-goal").addEventListener("click", function(){ openGoalSheet(null); });

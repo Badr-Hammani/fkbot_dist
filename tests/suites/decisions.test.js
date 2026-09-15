@@ -132,4 +132,106 @@ exports.run = async function (t, env) {
     t.no("not the planned figure as well", /MAD 7,500/.test(shell), shell.slice(0, 300));
     await app.close();
   }
+
+  {
+    /* putting money away must never RELEASE money: returning the actual
+       figure the moment anything went in meant 100 into a goal planned at
+       500 handed back the other 400 */
+    const app = await boot(browser, baseState({
+      salary: 8000, payday: 1,
+      goals: [{ id: "g1", name: "Trip", target: 5000, saved: 0, monthly: 500, contributions: [] }]
+    }), { now: NOW });
+    const before = norm(await app.hero());
+    await app.tab("plan");
+    await app.page.evaluate(() => {
+      const b = [...document.querySelectorAll("button")].find(x => /add money/i.test(x.textContent));
+      if (b) b.click();
+    });
+    await app.page.waitForTimeout(350);
+    await app.page.fill("#gm-amount", "100");
+    await app.page.click("#gm-save");
+    await app.page.waitForTimeout(450);
+    await app.tab("home");
+    t.eq("saving part of what you planned changes nothing", norm(await app.hero()), before);
+    await app.close();
+  }
+
+  {
+    /* the pool is the money you counted; spending that happened BEFORE you
+       counted is already missing from it and must not be charged again */
+    const app = await boot(browser, baseState({
+      restAmount: 1400, restFrom: "2026-08-18",
+      restTs: Date.parse("2026-08-18T18:00:00"),
+      expenses: [expense({ amount: 400, date: "2026-08-18", ts: Date.parse("2026-08-18T08:00:00") })]
+    }), { now: "2026-08-18T19:00:00" });
+    t.has("counting at six ignores what you spent at eight", await app.poolLine(), "MAD 1,400 left of your MAD 1,400");
+    t.has("and the day starts whole, not already over", await app.todayLeft(), "MAD 100 left today");
+    await app.close();
+  }
+
+  {
+    /* you cannot restart a pool with money you have already spent */
+    const app = await boot(browser, baseState({
+      restAmount: 3000, restFrom: "2026-08-10",
+      restTs: Date.parse("2026-08-10T09:00:00"),
+      expenses: [expense({ amount: 3200, date: "2026-08-12" })]
+    }), { now: NOW });
+    await app.tab("plan");
+    await app.page.click("#p-rest-reset");
+    await app.page.waitForTimeout(400);
+    const s = await stored(app.page);
+    t.eq("restarting while over does not move the start date", s.restFrom, "2026-08-10");
+    t.has("it asks you to count what is really there", await app.toast(), "count what you have now");
+    t.ok("and opens the cash check so you can", await app.page.evaluate(
+      () => document.querySelector("#sheet").classList.contains("show")));
+    await app.page.evaluate(() => { const x = document.querySelector(".sheet-x"); if (x) x.click(); });
+    await app.page.waitForTimeout(400);
+    await app.tab("home");
+    t.has("and you are still as over as you were", await app.poolLine(), "MAD 200 past");
+    await app.close();
+  }
+
+  {
+    /* funding can never be larger than the expense it paid for */
+    const app = await boot(browser, baseState({
+      restAmount: 500, restFrom: "2026-08-01", restTs: ANCHOR,
+      commitments: [{ id: "c1", name: "Dad", kind: "loan", amount: 1000, due: 5,
+                      remaining: 2700, paid: {}, draws: [] }],
+      expenses: [expense({ id: "x1", amount: 1200, date: "2026-08-10", note: "Tyres",
+                           loanId: "c1", loanAdded: 700 })]
+    }), { now: NOW });
+    await app.page.click('[data-exp="x1"]');
+    await app.page.waitForTimeout(300);
+    await app.page.click("#d-edit");
+    await app.page.waitForTimeout(350);
+    await app.page.fill("#f-amount", "400");
+    await app.page.click("#f-save");
+    await app.page.waitForTimeout(500);
+    const s = await stored(app.page);
+    t.near("shrinking the expense shrinks its funding to fit", s.expenses[0].loanAdded, 400, 0.01);
+    t.near("and the loan gives back the difference", s.commitments[0].remaining, 2400, 0.01);
+    await app.close();
+  }
+
+  {
+    /* a note edit must not resurrect a draw the loan no longer owes */
+    const app = await boot(browser, baseState({
+      salary: 9000, payday: 1,
+      commitments: [{ id: "c1", name: "Dad", kind: "loan", amount: 1000, due: 5,
+                      remaining: 100, paid: {}, draws: [] }],
+      expenses: [expense({ id: "x1", amount: 300, date: "2026-08-18", note: "Fuel",
+                           loanId: "c1", loanAdded: 300 })]
+    }), { now: NOW });
+    await app.page.click('[data-exp="x1"]');
+    await app.page.waitForTimeout(300);
+    await app.page.click("#d-edit");
+    await app.page.waitForTimeout(350);
+    await app.page.fill("#f-note", "Fuel and oil");
+    await app.page.click("#f-save");
+    await app.page.waitForTimeout(450);
+    const s = await stored(app.page);
+    t.near("a loan paid down to 100 stays at 100", s.commitments[0].remaining, 100, 0.01);
+    t.eq("and the note still changed", s.expenses[0].note, "Fuel and oil");
+    await app.close();
+  }
 };
