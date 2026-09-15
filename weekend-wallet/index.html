@@ -744,13 +744,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=8.5"></script>
+<script src="scan.js?v=8.6"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "8.5";
+  var APP_VERSION = "8.6";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1161,6 +1161,13 @@
       rows.some(function(item){ if(item.date > mk){ end = item.date; return true; } return false; });
       end = end || addMonthsClamped(mk, 1);
       if(end <= mk) end = addMonthsClamped(mk, 1);
+      /* A cycle that assumes exactly one month runs out before a payday that
+         lands on the 28th-30th. Once it did, days-left floored at 1 and the
+         whole remaining pool was offered as ONE day's spending -- for every
+         day until the money actually arrived, which is precisely when he has
+         least room. When the payday window is known and the next salary has
+         not been logged yet, the cycle runs to that window instead. */
+      if(!rows.some(function(item){ return item.date > mk; })) end = stretchToPayday(mk, end);
       return {start:mk, endExclusive:end, salary:true};
     }
     var d = fromIso(mk+"-01"), next = new Date(d);
@@ -1203,8 +1210,16 @@
     var day = fromIso(dateStr).getDay();
     return (day===5 || day===6 || day===0) ? weekendOf(dateStr) : null;
   }
+  /* A cash check writes one "Not logged" record for everything that leaked
+     since the LAST check -- often weeks. It is dated today because that is
+     when it was discovered, which is right for the month and for the pool,
+     but it is not a day's spending and it is not a weekend's spending.
+     Counting it as either made a day he spent nothing read "1,117 over" and
+     froze a 1,500 weekend into history for good. It stays in the month, in
+     the pool and in the day list; it stays out of day and weekend figures. */
+  function isReconciliation(e){ return e && e.cat === "missing"; }
   function expensesFor(friIso){
-    return state.expenses.filter(function(e){ return weekendKeyOf(e.date)===friIso; })
+    return state.expenses.filter(function(e){ return !isReconciliation(e) && weekendKeyOf(e.date)===friIso; })
       .sort(function(a,b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.ts||0)-(b.ts||0); });
   }
   function total(list){ return list.reduce(function(s,e){ return s + e.amount; }, 0); }
@@ -1213,7 +1228,7 @@
     return total(state.expenses.filter(function(e){ return dateInPeriod(e.date, mk); }));
   }
   function spentOn(dIso){
-    return total(state.expenses.filter(function(e){ return e.date===dIso; }));
+    return total(state.expenses.filter(function(e){ return !isReconciliation(e) && e.date===dIso; }));
   }
   function upcomingBills(){
     var out = [], now = new Date(), today = now.getDate();
@@ -1305,10 +1320,24 @@
 
   /* ---------- toast ---------- */
   var toastTimer;
+  /* The toast hides with opacity and pointer-events, which stops a finger but
+     not a keyboard or VoiceOver: a faded Undo stayed in the focus order and
+     still reversed the money move behind it. Swiping to the end of the page
+     on an iPhone landed on an invisible button wired to the last transaction.
+     Clearing the content is what actually retires it. */
+  function clearToast(){
+    var t = $("#toast");
+    t.classList.remove("show","action");
+    t.setAttribute("aria-hidden", "true");
+    setTimeout(function(){
+      if(!t.classList.contains("show")) t.textContent = "";
+    }, 400);                                   /* after the fade, so it does not blink out */
+  }
   function toast(msg){
-    var t = $("#toast"); t.textContent = msg; t.classList.remove("action"); t.classList.add("show");
+    var t = $("#toast"); t.textContent = msg; t.classList.remove("action");
+    t.setAttribute("aria-hidden", "false"); t.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 2800);
+    toastTimer = setTimeout(clearToast, 2800);
   }
   function toastAction(msg, label, fn, ms){
     var t = $("#toast");
@@ -1317,14 +1346,15 @@
     var b = document.createElement("button");
     b.textContent = label;
     b.addEventListener("click", function(){
-      t.classList.remove("show","action");
       clearTimeout(toastTimer);
+      clearToast();
       fn();
     });
     t.appendChild(b);
+    t.setAttribute("aria-hidden", "false");
     t.classList.add("show","action");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function(){ t.classList.remove("show","action"); }, ms || 6000);
+    toastTimer = setTimeout(clearToast, ms || 6000);
   }
 
   /* ---------- icons ---------- */
@@ -1437,6 +1467,37 @@
     if(end < start) return null;
     return {start:start, end:end};
   }
+  /* the first day of the payday window at or after `from` */
+  function nextPaydayIso(from){
+    var range = paydayRange();
+    if(!range) return "";
+    var d = fromIso(from);
+    for(var i = 0; i < 3; i++){
+      var w = paydayWindow(d.getFullYear(), d.getMonth(), range);
+      var cand = iso(new Date(d.getFullYear(), d.getMonth(), w.start));
+      if(cand >= from) return cand;
+      d.setDate(1); d.setMonth(d.getMonth()+1);
+    }
+    return "";
+  }
+  /* A cycle is not over when a month has passed -- it is over when the next
+     salary arrives, and Badr told the app that happens on the 28th-30th. The
+     money has to last until the LAST day it might land, so the cycle runs to
+     the day after the window closes. Assuming exactly one month left him
+     four days at the end of every late month with days-left floored at 1,
+     handing him the entire remaining pool as one day's spending. */
+  function stretchToPayday(startIso, end){
+    var range = paydayRange();
+    if(!range) return end;
+    var d = fromIso(end);
+    var w = paydayWindow(d.getFullYear(), d.getMonth(), range);
+    var windowEnd = iso(new Date(d.getFullYear(), d.getMonth(), w.end));
+    var after = addDaysIso(windowEnd, 1);
+    return after > end ? after : end;
+  }
+  function addDaysIso(dIso, n){
+    var d = fromIso(dIso); d.setDate(d.getDate()+n); return iso(d);
+  }
   function paydayWindow(year, month, range){
     var dim = new Date(year, month+1, 0).getDate();
     var start = Math.min(range.start, dim);
@@ -1445,7 +1506,10 @@
     return {start:start, end:end, dim:dim};
   }
   function paydayChip(){
-    var salaryReceipt = salaryReceiptForMonth(todayIso().slice(0,7));
+    /* keyed off the calendar month while every other figure uses the cycle,
+       so the receipt confirmation vanished mid-cycle the moment the month
+       rolled over -- under a header still naming that cycle */
+    var salaryReceipt = salaryReceiptForMonth(monthKey());
     if(salaryReceipt){
       var receiptText = salaryReceipt.date === todayIso()
         ? "salary received today · "+fmt(salaryReceipt.amount)
@@ -1538,9 +1602,20 @@
     var loans = state.commitments.filter(function(c){ return c.kind === "loan"; });
     if(!loans.length) return null;
     var c = shortfallLoan() || loans[0], now = loanMonthStat(c, monthKey());
-    var recentAdded = 0;
-    for(var i=0;i<3;i++) recentAdded += loanMonthStat(c, monthOffsetKey(monthKey(), -i)).added;
-    var monthlyNet = Math.round((+c.amount - recentAdded/3)*100)/100;
+    /* This used the PLANNED payment, not what he actually pays. Paying 500
+       against a 2,000 plan reported "debt-free in 6 months" on the same card
+       that said "PAID BACK MAD 500" -- the truth was 24. It also always
+       divided borrowing by three even with one month of history, diluting
+       recent borrowing threefold. Both now use the months that actually have
+       a record, and the plan is only a fallback for a loan never paid yet. */
+    var months = 0, paidSum = 0, addedSum = 0;
+    for(var i=0;i<3;i++){
+      var st = loanMonthStat(c, monthOffsetKey(monthKey(), -i));
+      if(st.paid > 0 || st.added > 0){ months++; paidSum += st.paid; addedSum += st.added; }
+    }
+    var basis = (months && paidSum > 0) ? paidSum/months : (+c.amount || 0);
+    var recentAdded = months ? addedSum/months : 0;
+    var monthlyNet = Math.round((basis - recentAdded)*100)/100;
     var latest = null;
     loanAdditionItems(c).forEach(function(it){ if(!latest || it.date > latest) latest = it.date; });
     var noBorrowDays = null;
@@ -1613,7 +1688,7 @@
       var label = periodShortLabel(r.mk, r.mk === monthKey());
       return '<div class="debt-chart-col"><div class="debt-bars"><i style="height:'+Math.max(r.added/max*100, r.added>0?5:0)+'%" title="Borrowed '+fmt(r.added)+'"></i><b style="height:'+Math.max(r.paid/max*100, r.paid>0?5:0)+'%" title="Paid '+fmt(r.paid)+'"></b></div><span>'+label+'</span></div>';
     }).join("");
-    var usual = s.monthlyNet > 0 ? 'At the recent pace, your usual payment shrinks debt by about '+fmt(s.monthlyNet)+' per month.' : 'Recent extra borrowing is cancelling out the usual payment — stop new shortfalls first.';
+    var usual = s.monthlyNet > 0 ? 'At what you have actually been paying, this shrinks by about '+fmt(s.monthlyNet)+' per month.' : 'Recent extra borrowing is cancelling out the usual payment — stop new shortfalls first.';
     var fast = s.monthlyNet > 0 ? Math.max(Math.ceil(s.remaining/(s.monthlyNet+100)),1) : null;
     openSheet('<h2>Debt escape plan · '+esc(s.loan.name)+'</h2>'+
       '<div class="debt-hero"><span class="micro">Balance left</span><strong class="money">'+fmt(s.remaining)+'</strong><span>'+debtFreeLabel(s)+'</span></div>'+
@@ -1737,7 +1812,7 @@
     if(tb > 0 || rrNow !== null || state.salary > 0){
       var dLeft = tb - tSpent;
       h += '<div class="sec"><span class="micro">Today</span>' +
-        '<span class="micro">'+daysLeftInMonth()+' days left this '+periodWord+'</span></div>';
+        '<span class="micro">'+daysLeftInMonth()+' day'+(daysLeftInMonth()===1?"":"s")+' left this '+periodWord+'</span></div>';
       var poolLine = "";
       var rr = restRemaining();
       if(rr !== null){
@@ -1880,7 +1955,15 @@
       var out = days[d].reduce(function(s,r){
         return s + (r.exp ? r.exp.amount : r.led ? -r.led.cash : -r.salary.amount);
       }, 0);
-      return { date:d, items:days[d], out: Math.round(out*100)/100 };
+      /* the same figure without the cash-check reconciliation, for statistics
+         that describe a typical day -- weeks of drift landing on one date
+         would otherwise be "Biggest day" forever */
+      var spentOut = days[d].reduce(function(s,r){
+        if(r.exp) return s + (isReconciliation(r.exp) ? 0 : r.exp.amount);
+        return s + (r.led ? -r.led.cash : -r.salary.amount);
+      }, 0);
+      return { date:d, items:days[d], out: Math.round(out*100)/100,
+               spentOut: Math.round(spentOut*100)/100 };
     });
   }
   function dayCount(){
@@ -2488,14 +2571,14 @@
        including days money came in — so it was neither a true average nor an
        average of spending days. Count what left your pocket across the days
        you actually spent on, and say so. */
-    var spendDays = groups.filter(function(g){ return g.out > 0; });
-    var spent = spendDays.reduce(function(s,g){ return s + g.out; }, 0);
+    var spendDays = groups.filter(function(g){ return g.spentOut > 0; });
+    var spent = spendDays.reduce(function(s,g){ return s + g.spentOut; }, 0);
     var avg = spendDays.length ? spent / spendDays.length : 0;
     var h = '<div class="stat-row">' +
       '<div class="stat"><span class="micro">Days logged</span><div class="v money">'+groups.length+'</div></div>' +
       '<div class="stat"><span class="micro">Avg on a spending day</span><div class="v money">'+fmt(avg)+'</div></div>' +
       '<div class="stat"><span class="micro">Biggest day</span><div class="v money">'+
-        fmt(Math.max.apply(null, groups.map(function(g){ return Math.max(g.out, 0); }).concat([0])))+'</div></div></div>';
+        fmt(Math.max.apply(null, groups.map(function(g){ return Math.max(g.spentOut, 0); }).concat([0])))+'</div></div></div>';
     var mk = "";
     /* The total beside this heading is clamped to the period; the rows under
        it were grouped by calendar month. Where a salary cycle started
@@ -2679,6 +2762,7 @@
   function historyWeekends(){
     var groups = {};
     state.expenses.forEach(function(e){
+      if(isReconciliation(e)) return;        /* a period's drift is not a weekend's spending */
       var k = weekendKeyOf(e.date);
       if(!k) return;
       (groups[k] = groups[k]||[]).push(e);
@@ -3285,10 +3369,31 @@
        only repayments on the way in while counting everything on the way out
        meant borrowing 500 and giving it straight back left you 500 poorer on
        screen, and made every later cash check disagree with your real notes. */
-    return Math.round((state.restAmount - spentFromPool() - f.cashNet
+    return Math.round((state.restAmount - spentFromPool() - f.cashNet + poolCashIn()
                        - goalOutSince(state.restFrom, poolStartTs())) * 100) / 100;
   }
   function poolFlow(){ return ledgerFlowSince(state.restFrom, poolStartTs()); }
+  /* Cash borrowed against a loan is cash too. The pool only ever looked at the
+     friends ledger, so covering a 1,500 expense with 500 from Dad's loan read
+     "500 past your 1,000" while covering it from a person read "0 left of your
+     1,500" -- the same money, two answers, and the loan one told him he was in
+     the red when he was level. Draws marked history-only are excluded: those
+     record borrowing that was already counted. */
+  function loanCashSince(dIso, fromTs){
+    var t = fromTs > 0 ? fromTs : fromIso(dIso).getTime();
+    var sum = 0;
+    state.expenses.forEach(function(e){
+      if(e.loanAdded > 0 && e.loanId && expenseDateTs(e.date) >= t) sum += e.loanAdded;
+    });
+    state.commitments.forEach(function(c){
+      if(c.kind !== "loan") return;
+      (c.draws||[]).forEach(function(d){
+        if(d.balanceApplied && +d.amount > 0 && expenseDateTs(d.date) >= t) sum += +d.amount;
+      });
+    });
+    return Math.round(sum*100)/100;
+  }
+  function poolCashIn(){ return loanCashSince(state.restFrom, poolStartTs()); }
   /* What the pool has had available since you counted: the cash in your hand
      that day, plus anything that came in after it, less anything handed over
      or put into a goal. Showing the raw count as the denominator while the
@@ -3297,7 +3402,7 @@
      remaining = available - spent true. */
   function poolBase(){
     if(!(state.restAmount > 0) || !state.restFrom) return null;
-    return Math.round((state.restAmount - poolFlow().cashNet
+    return Math.round((state.restAmount - poolFlow().cashNet + poolCashIn()
                        - goalOutSince(state.restFrom, poolStartTs())) * 100) / 100;
   }
   /* money left ÷ days left. Spending today doesn't move today's number
@@ -3329,6 +3434,10 @@
     var t = poolStartTs(), today = todayIso();
     if(today > periodEndIso()) return 0;
     return total(state.expenses.filter(function(e){
+      /* the cash check's catch-up is dated today but covers weeks: leaving it
+         in made the day read "1,117 over" on a day nothing was spent, and
+         cancelled it out of the daily rate as though it had never gone */
+      if(isReconciliation(e)) return false;
       if(e.date !== today) return false;
       if(e.date > state.restFrom) return true;
       return e.date === state.restFrom && (e.ts || 0) >= t;
@@ -3343,7 +3452,7 @@
          twice -- spend 400 in the morning, count 1,400 at six, and the day's
          rate was worked out from 1,800. */
       return state.restAmount - (spentFromPool() - spentFromPoolToday()) - poolFlow().cashNet
-             - goalOutSince(state.restFrom, poolStartTs());
+             + poolCashIn() - goalOutSince(state.restFrom, poolStartTs());
     }
     if(state.salary > 0){
       return planMath().left - (monthSpent() - spentOn(todayIso()));
@@ -3383,12 +3492,35 @@
      after its Friday. A live number could never read "over" — it would just
      keep shrinking — and it would rewrite your past weekends every time you
      spent. */
+  /* how much of this weekend is still ahead, today included */
+  function weekendDaysAhead(fri){
+    var d = fromIso(fri), today = todayIso(), n = 0;
+    for(var i = 0; i < 3; i++){
+      if(iso(d) >= today) n++;
+      d.setDate(d.getDate()+1);
+    }
+    return n;
+  }
+  /* A weekend figure is frozen on the Friday so it stops shifting under him
+     mid-weekend. But it was never re-checked afterwards: lend a friend 2,200
+     on the Saturday and Home showed "MAD 400 left of your MAD 800" and "THIS
+     WEEKEND MAD 900 left" at the same time. It is now capped by what the
+     budget can actually still cover -- the clamp sweepInfo already used.
+     And the freeze was always three days' worth even when the weekend was
+     two-thirds over, so first opening the app on Sunday promised 3x the day. */
   function weekendPlan(fri, freeze){
     if(!state.wkPlan) state.wkPlan = {};
-    if(state.wkPlan[fri] > 0) return state.wkPlan[fri];
+    var spentThis = total(expensesFor(fri));
+    var left = appCash();
+    var cap = left === null ? null : Math.max(Math.round(left + spentThis), 0);
+    if(state.wkPlan[fri] > 0){
+      var frozen = state.wkPlan[fri];
+      return cap !== null && cap < frozen ? cap : frozen;
+    }
     var s = rateSplit();
     if(!s) return 0;
-    var v = Math.max(Math.round(s.weekend * 3), 0);
+    var v = Math.max(Math.round(s.weekend * (weekendDaysAhead(fri) || 1)), 0);
+    if(cap !== null && v > cap) v = cap;
     if(freeze && v > 0 && todayIso() >= fri){ state.wkPlan[fri] = v; save(); }
     return v;
   }
@@ -3401,18 +3533,32 @@
     var dateInput = $("#p-salary-date");
     var date = dateInput && ISO_RE.test(String(dateInput.value || "")) ? dateInput.value : todayIso();
     if(date > todayIso()){ toast("Salary date cannot be in the future"); return; }
-    var key = date, previous = state.salaryReceived[key] || null;
+    var key = date, previous = state.salaryReceived[key] || null, oldKey = "";
     if(!previous){
+      /* Salary lands once a month, so re-logging it for a different day of the
+         same month is a CORRECTION, not a second payday. Matching only on an
+         identical date meant fixing "the 1st" to "the 3rd" wrote a new entry
+         and kept the old one: 18,000 of salary, a phantom two-day cycle, and
+         nothing anywhere to delete it with. */
       Object.keys(state.salaryReceived||{}).some(function(k){
         var item = state.salaryReceived[k];
-        if(item && item.date === date){ key = k; previous = item; return true; }
+        if(!item) return false;
+        if(item.date === date || String(item.date).slice(0,7) === date.slice(0,7)){
+          key = k; previous = item; return true;
+        }
         return false;
       });
     }
     if(previous && previous.date === date && Math.abs(+previous.amount - amount) < 0.01){
       toast("Salary already logged for "+salaryReceiptDateLabel(previous)); return;
     }
-    if(previous && !window.confirm("Update the salary receipt for "+salaryReceiptDateLabel(previous)+"?")) return;
+    if(previous && !window.confirm(previous.date === date
+        ? "Update the salary receipt for "+salaryReceiptDateLabel(previous)+"?"
+        : "Move the salary receipt from "+salaryReceiptDateLabel(previous)+" to "+
+          fromIso(date).toLocaleDateString(undefined,{month:"short", day:"numeric"})+"?")) return;
+    /* a moved receipt changes which key it lives under, so the old one goes */
+    if(previous && previous.date !== date){ oldKey = key; key = date; }
+    if(oldKey) delete state.salaryReceived[oldKey];
     state.salaryReceived[key] = {amount:amount, date:date, ts:Date.now()};
     /* Logging a receipt starts a new salary cycle, so the cash counted during
        the old one stops describing anything. It was only retired at load, and
@@ -3421,8 +3567,8 @@
     var poolBefore = { amount:state.restAmount, from:state.restFrom, ts:state.restTs, ask:state.restAsk };
     retireStalePool(state);
     if(!save()){
-      if(previous) state.salaryReceived[key] = previous;
-      else delete state.salaryReceived[key];
+      delete state.salaryReceived[key];
+      if(previous) state.salaryReceived[oldKey || key] = previous;   /* a moved receipt goes back to its old key */
       state.restAmount = poolBefore.amount; state.restFrom = poolBefore.from;
       state.restTs = poolBefore.ts; state.restAsk = poolBefore.ask;
       toast("Could not save — your money data was not changed");
@@ -3763,6 +3909,11 @@
       var alreadyIncluded = $("#draw-included").checked;
       if(!(amount > 0)){ toast("Enter the borrowed amount"); return; }
       if(!ISO_RE.test(date)){ toast("Choose a date"); return; }
+      /* closeSheet() makes the sheet inert, which does not stop clicks already
+         queued behind a slow re-render: three quick taps wrote three draws and
+         three times the debt. The ledger sheet already guards this way. */
+      if(this.disabled) return;
+      this.disabled = true;
       if(!Array.isArray(c.draws)) c.draws = [];
       c.draws.push({ id:uid(), ts:Date.now(), date:date, amount:Math.round(amount*100)/100,
                      note:note, balanceApplied:!alreadyIncluded });
@@ -3956,6 +4107,8 @@
     $("#gm-save").addEventListener("click", function(){
       var amt = num($("#gm-amount").value);
       if(!(amt > 0)){ toast("Enter an amount"); return; }
+      if(this.disabled) return;          /* three taps used to bank it three times */
+      this.disabled = true;
       var room = Math.max(g.target - g.saved, 0);
       if(room <= 0){ toast(g.name+" is already at its target"); return; }
       /* don't quietly bank more than the goal needs -- and never take more
@@ -4997,6 +5150,7 @@
     return "";
   }
   function saveDraft(){
+    if(!draft) return;        /* a second tap after the sheet closed used to throw */
     var amt = num($("#f-amount").value);
     if(!(amt > 0)){ toast("Enter the amount first"); $("#f-amount").focus(); return; }
     var dVal = $("#f-date") ? $("#f-date").value : "";
@@ -5444,7 +5598,8 @@
       var wipeArmed = false;
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }
-        if(!window.confirm("Erase every expense, receipt photo, loan, goal, and setting from this device?")){
+        if(!window.confirm("Erase every expense, receipt photo, loan, goal, and setting?\n\n" +
+            "A safety copy stays on this device so you can undo it. You can remove that too, straight after.")){
           wipeArmed = false; this.textContent = "Erase all data"; return;
         }
         snapshot("before erasing everything");
@@ -5452,6 +5607,14 @@
                   salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:1 };
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
+        /* the confirm now says a copy remains, so there has to be a way to
+           finish the job -- otherwise "erase everything" left a complete,
+           restorable copy of everything, keys included */
+        toastAction("Erased — a safety copy is still on this device", "Remove it too", function(){
+          try{ localStorage.removeItem(SNAP_KEY); }catch(e){}
+          render();
+          toast("Safety copy removed — nothing left on this device");
+        }, 12000);
       });
     }
   }

@@ -84,8 +84,8 @@ exports.run = async function (t, env) {
     /* last day of the month: one day left, not zero */
     const app = await boot(browser, baseState({ restAmount: 300, restFrom: "2026-08-31", restTs: 1 }),
       { now: "2026-08-31T09:00:00" });
-    t.has("month end leaves exactly one day", await app.page.evaluate(() =>
-      [...document.querySelectorAll(".sec")].map(s => s.textContent).join(" ")), "1 days left this month");
+    t.has("month end leaves exactly one day, said properly", await app.page.evaluate(() =>
+      [...document.querySelectorAll(".sec")].map(s => s.textContent).join(" ")), "1 day left this month");
     await app.close();
   }
   {
