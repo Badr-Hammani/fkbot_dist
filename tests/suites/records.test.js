@@ -190,7 +190,15 @@ exports.run = async function (t, env) {
     if (m) {
       const n = x => parseFloat(x.replace(/[^\d.]/g, ""));
       const spent = n(m[1]), of = n(m[2]);
-      t.near("money lent to a friend shows as gone from the pool", spent, 500, 0.01);
+      /* Under the cash-is-cash rule the owner chose (v8.4), money handed to a
+         friend lowers what you HAVE rather than counting as something you
+         spent -- so the budget base drops to 2,500 and the foot line names
+         the 500 that went out. What must never differ is base - spent and
+         the headline, which the next two checks pin down. */
+      t.near("lending 500 lowers the money you have", of, 2500, 0.01);
+      t.near("and is not double-counted as spending", spent, 0, 0.01);
+      t.has("the line says where it went",
+        (await app.footLines()).join(" | "), "MAD 500 given out");
       t.near("headline equals budget minus what the caption says went",
         n(norm(r.hero)), of - spent, 0.01);
       t.near("and the bar agrees", r.pct, spent / of * 100, 0.2);

@@ -43,14 +43,34 @@ exports.run = async function (t, env) {
     await app.close();
   }
 
-  /* ---------- borrowing is not spendable twice ---------- */
+  /* ---------- borrowed cash is cash ----------
+     The owner decided this rule deliberately (v8.4): the pool is the money in
+     your pocket, and borrowed notes are in your pocket. These checks used to
+     assert the opposite -- that borrowing never moved the pool -- which made
+     borrowing 500 and handing it straight back leave you 500 poorer on screen.
+     They are updated to the chosen rule, not relaxed to pass. */
   {
     const app = await boot(browser, baseState({
-      restAmount: 1000, restFrom: "2026-08-01", restTs: 1,
+      restAmount: 1000, restFrom: "2026-08-01", restTs: Date.parse("2026-08-01T00:00:00"),
       debts: [person({ name: "Dad", balance: 500,
                        log: [{ ts: Date.parse("2026-08-10T10:00:00"), amt: 500, dir: "b", note: "" }] })]
     }), { now: NOW });
-    t.has("borrowed money does not inflate the pool", await app.poolLine(), "MAD 1,000 left of your MAD 1,000");
+    t.has("money borrowed after the count is money you have",
+      await app.poolLine(), "MAD 1,500 left of your MAD 1,500");
+    t.has("and it says the part you still owe",
+      (await app.footLines()).join(" | "), "MAD 500 of that is borrowed");
+    await app.close();
+  }
+  {
+    /* the case the old rule got wrong: in and straight back out */
+    const app = await boot(browser, baseState({
+      restAmount: 3000, restFrom: "2026-08-01", restTs: Date.parse("2026-08-01T00:00:00"),
+      debts: [person({ name: "Ahmed", balance: 0, log: [
+        { ts: Date.parse("2026-08-05T10:00:00"), amt: 500, dir: "b", note: "" },
+        { ts: Date.parse("2026-08-06T10:00:00"), amt: 500, dir: "r", note: "" }] })]
+    }), { now: NOW });
+    t.has("borrowing 500 and repaying it leaves the pool exactly where it was",
+      await app.poolLine(), "MAD 3,000 left of your MAD 3,000");
     await app.close();
   }
 
@@ -138,7 +158,7 @@ exports.run = async function (t, env) {
   {
     /* the pool path: this used to offer nothing at all when you went over */
     const app = await boot(browser, baseState({
-      restAmount: 3000, restFrom: "2026-08-01", restTs: 1,
+      restAmount: 3000, restFrom: "2026-08-01", restTs: Date.parse("2026-08-01T00:00:00"),
       debts: [person({ id: "dad", name: "Dad", balance: 1500,
                        log: [{ ts: Date.parse("2026-07-05"), amt: 1500, dir: "b", note: "" }] })],
       expenses: [expense({ amount: 5850, date: "2026-08-10", cat: "out" })]
@@ -153,8 +173,12 @@ exports.run = async function (t, env) {
     t.eq("one tap adds it to what you owe them", st.debts[0].balance, 4350);
     t.eq("recorded as a real ledger entry", st.debts[0].log.length, 2);
     t.eq("labelled so you know why", st.debts[0].log[1].note, "covered my overspend");
-    t.eq("and borrowing does not hand the money back to the budget",
-      norm(await app.poolLine()), poolBefore);
+    /* it SHOULD hand it back: Dad handed over real cash to cover the overspend,
+       so the pool returns to zero and the debt is what remains */
+    t.has("recording where the money came from clears the overspend",
+      await app.poolLine(), "MAD 0 left of your MAD 5,850");
+    t.ok("which is a change from before it was recorded",
+      norm(await app.poolLine()) !== poolBefore, poolBefore);
     t.no("the offer is gone once logged", await app.page.evaluate(() => !!document.querySelector("#h-funding")));
 
     /* and it is undoable straight from the toast */
@@ -167,7 +191,7 @@ exports.run = async function (t, env) {
        in red — 2,850 on screen and "you're 1,050 past your money" underneath
        reads as the app contradicting itself */
     const app = await boot(browser, baseState({
-      restAmount: 3000, restFrom: "2026-08-01", restTs: 1,
+      restAmount: 3000, restFrom: "2026-08-01", restTs: Date.parse("2026-08-01T00:00:00"),
       debts: [person({ id: "dad", name: "Dad", balance: 1800,
                        log: [{ ts: Date.parse("2026-08-06"), amt: 1800, dir: "b", note: "" }] })],
       expenses: [expense({ amount: 5850, date: "2026-08-10", cat: "out" })]
@@ -176,10 +200,13 @@ exports.run = async function (t, env) {
     const txt = norm(await app.page.evaluate(() => {
       const s = document.querySelector(".suggest"); return s ? s.textContent : "";
     }));
-    t.has("the red line shows the full overspend", red, "MAD 2,850 past your MAD 3,000");
-    t.has("and the offer leads with the same figure", txt, "You're MAD 2,850 over budget");
-    t.has("it says what is already borrowed", txt, "MAD 1,800 borrowed from people");
-    t.has("and asks only for the rest", txt, "MAD 1,050 has no funding source recorded");
+    /* 5,850 spent against 3,000 counted plus 1,800 borrowed = 1,050 short.
+       Every figure on screen has to be that one, including the denominator --
+       "1,050 past your 3,000" would fail its own arithmetic. */
+    t.has("the red line shows the gap that is really left", red, "MAD 1,050 past your MAD 4,800");
+    t.has("and the offer leads with the same figure", txt, "You're MAD 1,050 over budget");
+    t.has("it says what is already borrowed", txt, "MAD 1,800 already borrowed from people");
+    t.has("and asks for exactly the rest", txt, "MAD 1,050 has no funding source recorded");
     t.has("the button names where it goes", await app.page.evaluate(() => {
       const b = document.querySelector("#h-funding"); return b ? b.textContent : "";
     }), "Add to Dad");
@@ -238,7 +265,7 @@ exports.run = async function (t, env) {
     }), { now: NOW });
     t.has("genuine borrowing counts", await app.page.evaluate(() => {
       const s = document.querySelector(".suggest"); return s ? s.textContent : "";
-    }), "MAD 1,800 borrowed from people");
+    }), "MAD 1,800 already borrowed from people");
     await app.close();
   }
   {
@@ -254,7 +281,7 @@ exports.run = async function (t, env) {
     }), { now: NOW });
     t.has("only the loan half of a mixed payment counts", await app.page.evaluate(() => {
       const s = document.querySelector(".suggest"); return s ? s.textContent : "";
-    }), "MAD 1,500 borrowed from people");
+    }), "MAD 1,500 already borrowed from people");
     await app.close();
   }
   {

@@ -744,13 +744,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=8.3"></script>
+<script src="scan.js?v=8.4"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "8.3";
+  var APP_VERSION = "8.4";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -953,8 +953,15 @@
       });
     state.goals = (state.goals||[]).filter(function(g){ return g && typeof g === "object"; })
       .map(function(g){
+        var contribs = Array.isArray(g.contributions) ? g.contributions.filter(function(x){
+          return x && typeof x === "object" && +x.amt > 0 && ISO_RE.test(String(x.date || ""));
+        }).map(function(x){
+          return { id:x.id || uid(), ts:+x.ts || 0, date:String(x.date),
+                   amt:Math.round((+x.amt)*100)/100 };
+        }) : [];
+        contribs.sort(function(a,b){ return (a.ts||0) - (b.ts||0); });
         return { id: g.id || uid(), name: String(g.name || "Goal"), target: +g.target || 0,
-                 saved: +g.saved || 0, monthly: +g.monthly || 0 };
+                 saved: +g.saved || 0, monthly: +g.monthly || 0, contributions: contribs };
       });
     state.debts = (state.debts||[]).filter(function(d){ return d && typeof d === "object"; })
       .map(function(d){
@@ -1616,7 +1623,7 @@
          above "MAD 1,000 past your MAD 2,000". */
       var poolNow = restRemaining();
       var onPool = poolNow !== null;
-      var spendable = onPool ? state.restAmount : pm.left;
+      var spendable = onPool ? poolBase() : pm.left;
       var mFlow = ledgerFlowSince(monthStartIso());
       var mLeft = onPool ? poolNow : monthLeftOfPlan();
       /* The bar has to draw the same two numbers the caption states, or the
@@ -1707,17 +1714,22 @@
       var rr = restRemaining();
       if(rr !== null){
         poolLine = rr < 0
-          ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">'+fmt(-rr)+' past your '+fmt(state.restAmount)+' for the '+periodWord+'</span></div>'
-          : '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">'+fmt(rr)+' left of your '+fmt(state.restAmount)+' for the rest of the '+periodWord+'</span></div>';
+          ? '<div class="goal-foot"><span class="goal-pct" style="color:var(--bad); font-weight:700">'+fmt(-rr)+' past your '+fmt(poolBase())+' for the '+periodWord+'</span></div>'
+          : '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink2)">'+fmt(rr)+' left of your '+fmt(poolBase())+' for the rest of the '+periodWord+'</span></div>';
         var pf = poolFlow();
-        if(pf.out > 0 || pf.inn > 0){
+        if(pf.out > 0 || pf.inn > 0 || pf.borrowed > 0){
           var bits2 = [];
           if(pf.out > 0) bits2.push('−'+fmt(pf.out)+' given out');
           if(pf.inn > 0) bits2.push('+'+fmt(pf.inn)+' paid back to you');
+          /* Borrowed cash is in your pocket, so it is in this number. Saying
+             it was "already part of this budget" was simply untrue for money
+             that arrived after you counted -- and it is owed, so it is worth
+             naming rather than blending into the total. */
+          if(pf.borrowed > 0) bits2.push('+'+fmt(pf.borrowed)+' borrowed');
           poolLine += '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink3)">includes '+bits2.join(" · ")+'</span></div>';
         }
         if(pf.borrowed > 0){
-          poolLine += '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink3)">'+fmt(pf.borrowed)+' borrowed — already part of this budget</span></div>';
+          poolLine += '<div class="goal-foot"><span class="goal-pct" style="color:var(--ink3)">'+fmt(pf.borrowed)+' of that is borrowed — you still owe it</span></div>';
         }
       }
       h += '<section class="goal secondary-card today-card"><div class="goal-top"><span class="goal-name">'+
@@ -2250,7 +2262,7 @@
     openSheet(
       '<h2>Save '+fmt(sw.amount)+'</h2>' +
       '<p style="color:var(--ink2); font-size:13.5px; margin:0 0 14px">Money you didn\'t spend over the '+weekendLabel(sw.fri)+' weekend. Pick a goal:</p>' +
-      '<div class="hint" style="margin-bottom:12px">This records progress toward the goal. The money stays spendable until you move it yourself.</div>' +
+      '<div class="hint" style="margin-bottom:12px">This comes out of what you have left to spend — the money is set aside, not still available.</div>' +
       '<div class="row-list">'+rows+'</div>'
     );
     sheet.querySelectorAll("[data-sweep-goal]").forEach(function(b){
@@ -2258,10 +2270,23 @@
         var g = null;
         state.goals.forEach(function(x){ if(x.id===b.getAttribute("data-sweep-goal")) g = x; });
         if(!g) return;
-        g.saved = Math.round((g.saved + sw.amount)*100)/100;
+        var c = goalAdd(g, sw.amount);
+        var sweptBefore = state.swept[sw.fri];
         state.swept[sw.fri] = sw.amount;
-        save(); closeSheet(); render();
-        toast(fmt(sw.amount)+" tracked toward "+g.name+(g.saved>=g.target? " — goal reached!" : "")+" — move the cash yourself");
+        if(!save()){
+          goalRemove(g, c.id);
+          if(sweptBefore == null) delete state.swept[sw.fri]; else state.swept[sw.fri] = sweptBefore;
+          toast("Could not save — your money data was not changed");
+          return;
+        }
+        closeSheet(); render();
+        toastAction(fmt(sw.amount)+" put away for "+g.name+(g.saved>=g.target? " — goal reached!" : ""),
+          "Undo", function(){
+            goalRemove(g, c.id);
+            if(sweptBefore == null) delete state.swept[sw.fri]; else state.swept[sw.fri] = sweptBefore;
+            if(save()){ render(); toast("Put back"); }
+            else toast("Could not undo — try again");
+          });
       });
     });
   }
@@ -2527,7 +2552,7 @@
            "4,500 left of your 10,000 plan" opposite Home's "1,500 left". */
         var mPool = restRemaining();
         var onPoolNow = mPool !== null;
-        var base = onPoolNow ? state.restAmount : spendable;
+        var base = onPoolNow ? poolBase() : spendable;
         var left = onPoolNow ? mPool : monthLeftOfPlan();
         var tail = onPoolNow
           ? ' — <b>the cash you counted</b>'
@@ -2722,7 +2747,7 @@
       var p = paidRec(c);
       if(p && +p.amt > 0){ paid += +p.amt; paidCount++; }
     });
-    var savings = state.goals.reduce(function(s,g){ return s + (g.monthly||0); }, 0);
+    var savings = state.goals.reduce(function(s,g){ return s + savingFor(g); }, 0);
     var peopleFlow = ledgerFlowSince(monthStartIso());
     var peopleIn = peopleFlow.inn + peopleFlow.borrowed;
     var peopleNet = peopleFlow.out - peopleIn;
@@ -2854,10 +2879,15 @@
     if(over < 1) return "";
     var peopleFunding = borrowedThisMonth();
     var loanFunding = trackedLoanFunding(monthKey());
-    var uncovered = Math.max(Math.round((over - peopleFunding - loanFunding)*100)/100, 0);
+    /* Money borrowed from people is cash you received, so it has already
+       raised the budget -- which means `over` is the gap that remains AFTER
+       it. Subtracting it a second time here reported "funding fully tracked"
+       while 1,050 still had no source and offered no way to record it.
+       Loan draws do not add to the pool, so those are still deducted. */
+    var uncovered = Math.max(Math.round((over - loanFunding)*100)/100, 0);
     var bits = [];
     if(loanFunding > 0) bits.push('<b class="money">'+fmt(loanFunding)+'</b> added to loans');
-    if(peopleFunding > 0) bits.push('<b class="money">'+fmt(peopleFunding)+'</b> borrowed from people');
+    if(peopleFunding > 0) bits.push('<b class="money">'+fmt(peopleFunding)+'</b> already borrowed from people');
     var loan = shortfallLoan();
     var person = loan ? null : usualLender();      /* who you actually borrow from */
     var target = loan ? loan.name : (person ? person.name : "");
@@ -3096,6 +3126,52 @@
              net: Math.round((out - inn)*100)/100,
              cashNet: Math.round((out - inn - borrowed)*100)/100 };
   }
+  /* Putting money toward a goal used to change nothing but a number on the
+     goal card: the app said "800 added to Trip" and left all 800 spendable.
+     A contribution is now dated and recorded, so it leaves the pool the way
+     any other money does, and the plan reserves the real figure instead of
+     the planned one once you have actually put something in. */
+  function goalAdd(g, amt, atTs){
+    if(!g) return null;
+    if(!Array.isArray(g.contributions)) g.contributions = [];
+    var ts = atTs || Date.now();
+    var c = { id: uid(), ts: ts, date: iso(new Date(ts)), amt: Math.round(amt*100)/100 };
+    g.contributions.push(c);
+    g.contributions.sort(function(a,b){ return (a.ts||0) - (b.ts||0); });
+    g.saved = Math.round((g.saved + c.amt)*100)/100;
+    return c;
+  }
+  function goalRemove(g, id){
+    if(!g || !Array.isArray(g.contributions)) return false;
+    var at = -1;
+    g.contributions.forEach(function(c, i){ if(c.id === id) at = i; });
+    if(at < 0) return false;
+    g.saved = Math.round((g.saved - g.contributions[at].amt)*100)/100;
+    if(g.saved < 0) g.saved = 0;
+    g.contributions.splice(at, 1);
+    return true;
+  }
+  /* everything put into goals at or after a moment -- the pool's own anchor */
+  function goalOutSince(dIso, fromTs){
+    var t = fromTs > 0 ? fromTs : fromIso(dIso).getTime();
+    var out = 0;
+    (state.goals||[]).forEach(function(g){
+      (g.contributions||[]).forEach(function(c){ if(c.ts >= t) out += c.amt; });
+    });
+    return Math.round(out*100)/100;
+  }
+  function goalSavedInPeriod(g, mk){
+    mk = mk || monthKey();
+    var sum = 0;
+    (g.contributions||[]).forEach(function(c){ if(dateInPeriod(c.date, mk)) sum += c.amt; });
+    return Math.round(sum*100)/100;
+  }
+  /* same rule bills follow: once you have actually put money in, that is the
+     figure the plan reserves -- not the one you intended */
+  function savingFor(g, mk){
+    var actual = goalSavedInPeriod(g, mk);
+    return actual > 0 ? actual : (+g.monthly || 0);
+  }
   function monthStartIso(){
     return periodBounds(monthKey()).start;
   }
@@ -3127,9 +3203,27 @@
   function restRemaining(){
     if(!(state.restAmount > 0) || !state.restFrom) return null;
     var f = poolFlow();
-    return Math.round((state.restAmount - spentFromPool() - f.net) * 100) / 100;
+    /* Cash is cash. The pool is the money you counted in your pocket, so
+       money that arrives after that count -- borrowed as much as repaid -- is
+       in your pocket too and raises it; money handed over lowers it. Counting
+       only repayments on the way in while counting everything on the way out
+       meant borrowing 500 and giving it straight back left you 500 poorer on
+       screen, and made every later cash check disagree with your real notes. */
+    return Math.round((state.restAmount - spentFromPool() - f.cashNet
+                       - goalOutSince(state.restFrom, poolStartTs())) * 100) / 100;
   }
   function poolFlow(){ return ledgerFlowSince(state.restFrom, poolStartTs()); }
+  /* What the pool has had available since you counted: the cash in your hand
+     that day, plus anything that came in after it, less anything handed over
+     or put into a goal. Showing the raw count as the denominator while the
+     numerator moved with borrowing made the line fail its own arithmetic --
+     "1,050 past your 3,000" on a 5,850 spend. This is the figure that makes
+     remaining = available - spent true. */
+  function poolBase(){
+    if(!(state.restAmount > 0) || !state.restFrom) return null;
+    return Math.round((state.restAmount - poolFlow().cashNet
+                       - goalOutSince(state.restFrom, poolStartTs())) * 100) / 100;
+  }
   /* money left ÷ days left. Spending today doesn't move today's number
      (it recomputes tomorrow), but cash given or received counts right away. */
   /* ONE pool, split over the days you have left, with weekend days weighted
@@ -3157,7 +3251,8 @@
      fixed at midnight so it can't shrink under you as you use it */
   function poolLeftForRates(){
     if(state.restAmount > 0 && state.restFrom){
-      return state.restAmount - (spentFromPool() - spentOn(todayIso())) - poolFlow().net;
+      return state.restAmount - (spentFromPool() - spentOn(todayIso())) - poolFlow().cashNet
+             - goalOutSince(state.restFrom, poolStartTs());
     }
     if(state.salary > 0){
       return planMath().left - (monthSpent() - spentOn(todayIso()));
@@ -3335,7 +3430,7 @@
       '<button class="btn" id="p-cash">'+IC.wallet+'Check my cash</button></div>' +
       (rr !== null
         ? '<div class="hint">You can spend about <b class="money" style="color:var(--ink)">'+fmt(autoD)+'</b> a day — '+
-          (rr<0? '<span style="color:var(--bad)">'+fmt(-rr)+' past your '+fmt(state.restAmount)+' for the '+periodWord+'</span>' : fmt(rr)+' left of '+fmt(state.restAmount))+
+          (rr<0? '<span style="color:var(--bad)">'+fmt(-rr)+' past your '+fmt(poolBase())+' for the '+periodWord+'</span>' : fmt(rr)+' left of '+fmt(poolBase()))+
           ' over the '+daysLeftInMonth()+' days left'+(freshFrom? ', counting from '+fromIso(state.restFrom).toLocaleDateString(undefined,{month:"short",day:"numeric"}) : '')+'.'+
           (freshFrom? ' <button id="p-rest-reset" style="color:var(--accent-deep); font-weight:700; background:none; padding:0">Restart from today</button>' : '')+'</div>'
         : (autoD>0 ? '<div class="hint">Or I can spread your salary: about <b class="money">'+fmt(autoD)+'</b>/day for '+daysLeftInMonth()+' days.</div>' : '')) +
@@ -3764,28 +3859,35 @@
       '<p style="color:var(--ink2); font-size:13.5px; margin:0 0 14px">Saved so far: <b class="money">'+fmt(g.saved)+'</b>' +
       (remaining>0? ' · '+fmt(remaining)+' to go' : "")+'</p>' +
       '<div class="field"><input id="gm-amount" type="text" inputmode="decimal" min="0" step="0.01" placeholder="0" style="font-size:28px; font-weight:800; padding:14px 16px"></div>' +
-      /* This records progress -- it does not move money. Saying "added to
-         Trip" while the same money stayed fully spendable was the one place
-         the app stated something about your cash that was not true. */
-      '<div class="hint">This tracks the goal only. Your money to spend does not change, so move the cash somewhere you will not touch it.</div>' +
-      '<button class="btn primary" id="gm-save">Track it</button>'
+      '<div class="hint">This comes out of what you have left to spend, the same as any other money that leaves your pocket.</div>' +
+      '<button class="btn primary" id="gm-save">Put it away</button>'
     );
     $("#gm-save").addEventListener("click", function(){
       var amt = num($("#gm-amount").value);
       if(!(amt > 0)){ toast("Enter an amount"); return; }
       var room = Math.max(g.target - g.saved, 0);
-      if(amt > room && room >= 0){
-        /* don't quietly bank more than the goal needs */
-        var over = Math.round((amt - room)*100)/100;
-        g.saved = g.target;
-        save(); closeSheet(); render();
-        toast(room > 0 ? g.name+" is full — "+fmt(over)+" wasn't needed"
-                       : g.name+" is already at its target");
+      if(room <= 0){ toast(g.name+" is already at its target"); return; }
+      /* don't quietly bank more than the goal needs -- and never take more
+         out of the budget than actually goes in */
+      var over = Math.round((amt - room)*100)/100;
+      var put = over > 0 ? room : amt;
+      var c = goalAdd(g, put);
+      if(!save()){
+        goalRemove(g, c.id);
+        toast("Could not save — your money data was not changed");
         return;
       }
-      g.saved = Math.round((g.saved + amt)*100)/100;
-      save(); closeSheet(); render();
-      toast(g.saved >= g.target ? "Goal reached — well done!" : fmt(amt)+" tracked toward "+g.name+" — your spendable money is unchanged");
+      closeSheet(); render();
+      var done = g.saved >= g.target;
+      toastAction(
+        over > 0 ? g.name+" is full — "+fmt(put)+" put away, "+fmt(over)+" wasn't needed"
+                 : (done ? "Goal reached — "+fmt(put)+" put away" : fmt(put)+" put away for "+g.name),
+        "Undo",
+        function(){
+          goalRemove(g, c.id);
+          if(save()){ render(); toast("Put back"); }
+          else toast("Could not undo — try again");
+        });
     });
     setTimeout(function(){ var el = $("#gm-amount"); if(el) el.focus(); }, 350);
   }
@@ -4254,7 +4356,9 @@
       bills += amt;
       if(c.due < today) overdue += amt;
     });
-    var savings = state.goals.reduce(function(t,g){ return t + (g.monthly||0); }, 0);
+    /* reserve what you have actually put away this period, falling back to
+       the plan -- the same rule the Plan screen follows */
+    var savings = state.goals.reduce(function(t,g){ return t + savingFor(g); }, 0);
     bills = Math.round(bills*100)/100; savings = Math.round(savings*100)/100;
     overdue = Math.round(overdue*100)/100;
     var parts = [];
