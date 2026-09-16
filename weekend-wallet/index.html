@@ -82,7 +82,7 @@
     width:34px; height:34px; border-radius:11px; background:var(--accent);
     display:grid; place-items:center; color:var(--on-accent); font-weight:800; font-size:15px;
   }
-  .brand-name{font-weight:800; letter-spacing:-.02em; font-size:17px}
+  .brand-name{font-weight:800; letter-spacing:-.02em; font-size:17px; margin:0}   /* an h1 now; kill the UA margin */
   .brand-sub{font-size:11px; color:var(--ink2); text-transform:uppercase; letter-spacing:.12em; margin-top:1px}
 
   .micro{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--ink2); font-weight:600}
@@ -744,13 +744,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=8.6"></script>
+<script src="scan.js?v=8.7"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "8.6";
+  var APP_VERSION = "8.7";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1429,15 +1429,28 @@
     else if(tab==="history") html += viewHistory();
     else html += viewSettings();
     html += tabbar();
+    var hadFocus = document.activeElement;
     shell.innerHTML = html;
     bindView();
     syncToggleSemantics(shell);
+    /* closeSheet() returns focus before this runs, so on a delete it lands on
+       a row this render then destroys and focus falls to <body> -- a screen
+       reader jumps to the top of the page after every delete. Catch it here,
+       where the DOM is final. */
+    if(hadFocus && !document.contains(hadFocus) && document.activeElement === document.body){
+      if(!shell.hasAttribute("tabindex")) shell.setAttribute("tabindex", "-1");
+      try{ shell.focus({ preventScroll:true }); }catch(e){ shell.focus(); }
+    }
   }
 
   function topbar(){
+    /* There was no <h1> anywhere in the app once you were past onboarding, so
+       heading navigation had no top level to return to. The visible design is
+       unchanged -- brand-name simply becomes the heading it already looked
+       like. */
     return '<header class="topbar"><div class="brand">' +
       '<div class="brand-mark" aria-hidden="true">W</div>' +
-      '<div><div class="brand-name">Weekend Wallet</div>' +
+      '<div><h1 class="brand-name">Weekend Wallet</h1>' +
       '<div class="brand-sub">Daily money · weekend fun</div></div></div></header>';
   }
 
@@ -1652,7 +1665,10 @@
       : '<span class="safe-status">'+fmt(s.daily)+' daily guardrail</span>';
     var overLine = s.over > 0 ? '<div class="safe-over-copy">You’re '+fmt(s.over)+' over today’s guardrail</div>' : '';
     return '<section class="safe-card">'+
-      '<div class="safe-card-top"><div><span class="micro">Safe to spend</span><h2 class="safe-amount money">'+fmt(s.left)+'</h2>'+overLine+'<p>left for today · after what you already spent</p></div>'+IC.wallet+'</div>'+
+      /* the heading's whole accessible name was "MAD 177", so heading
+         navigation read bare numbers with the label in a sibling span */
+      '<div class="safe-card-top"><div><span class="micro" id="safe-lbl">Safe to spend</span>' +
+      '<h2 class="safe-amount money" aria-label="Safe to spend: '+esc(fmt(s.left))+'">'+fmt(s.left)+'</h2>'+overLine+'<p>left for today · after what you already spent</p></div>'+IC.wallet+'</div>'+
       '<div class="safe-stats"><div><span>Today’s limit</span><b class="money">'+fmt(s.daily)+'</b></div>'+
       '<div><span>Next 7 days</span><b class="money">'+fmt(s.week)+'</b></div></div>'+
       '<div class="safe-insight"><span>'+IC.check+'</span><div><b>What if I borrow nothing this week?</b><br><span>Stay inside about <strong class="money">'+fmt(s.week)+'</strong> of planned spending and no new shortfall needs to be recorded.</span></div></div>'+
@@ -2551,7 +2567,9 @@
   var openWk = null, openDay = null;
   var histMode = "days";
   function viewHistory(){
-    var h = '<div class="sec"><span class="micro">History</span></div>' +
+    /* the History tab had no headings of any kind, so there was nothing to
+       navigate by -- just a long flat run of text */
+    var h = '<div class="sec"><h2 class="micro" style="margin:0; font-size:inherit; font-weight:inherit; letter-spacing:inherit; text-transform:inherit; color:inherit">History</h2></div>' +
       '<div class="chips">' +
       '<button class="chip'+(histMode==="days"?" sel":"")+'" data-hist="days">'+IC.history+'Days</button>' +
       '<button class="chip'+(histMode==="weekends"?" sel":"")+'" data-hist="weekends">Weekends</button>' +
@@ -4216,18 +4234,109 @@
       'Not seeing a new feature? Close the app fully and reopen it.</p>';
   }
 
+/* One implementation, used from Settings and from the post-erase screen --
+   which is where someone who has just wiped the app actually is. */
+function importBackupFile(input){
+      var f = input.files && input.files[0]; input.value = "";
+      if(!f) return;
+      var r = new FileReader();
+      r.onload = function(){
+        var prev = null;
+        try{
+          var d = JSON.parse(r.result);
+          if(!d || !Array.isArray(d.expenses)) throw 0;
+          var hasData = state.expenses.length || state.commitments.length || state.goals.length || state.debts.length;
+          if(hasData && !window.confirm("Restore this backup and replace the current money data on this device?")){
+            toast("Restore cancelled — nothing changed");
+            return;
+          }
+          snapshot("before restoring a backup");
+          prev = state;
+          var importPayday = +d.payday||0;
+          var importPaydayEnd = +d.paydayEnd||importPayday;
+          if(!isPaydayDay(importPayday)) importPayday = 0;
+          if(!isPaydayDay(importPaydayEnd)) importPaydayEnd = importPayday;
+          if(importPaydayEnd < importPayday) importPaydayEnd = importPayday;
+          state = { setup:true, budget:+d.budget||0, currency:d.currency||"USD",
+                    expenses:cleanExpenses(d.expenses), apiKey:state.apiKey, geminiApiKey:state.geminiApiKey,
+                    agentRouterApiKey:state.agentRouterApiKey, agentRouterModel:state.agentRouterModel,
+                    scanProvider:d.scanProvider||state.scanProvider,
+                    scanModel:d.scanModel||state.scanModel,
+                    salary:+d.salary||0,
+                    commitments:Array.isArray(d.commitments)? d.commitments : [],
+                    goals:Array.isArray(d.goals)? d.goals : [],
+                    swept:(d.swept && typeof d.swept==="object")? d.swept : {},
+                    payday:importPayday, paydayEnd:importPaydayEnd,
+                    salaryReceived:cleanSalaryReceived(d.salaryReceived),
+                    debts:Array.isArray(d.debts)? d.debts : [],
+                    restAmount:+d.restAmount||0,
+                    restFrom:(typeof d.restFrom==="string")? d.restFrom : "", restTs:+d.restTs||0, cashTs:+d.cashTs||0,
+                    wkPlan:(d.wkPlan && typeof d.wkPlan==="object")? d.wkPlan : {},
+                    wkWeight:+d.wkWeight||1,
+                    /* without this the one-time "reset to flat" migration
+                       re-fires on every restore and quietly undoes a
+                       weighting you chose on purpose */
+                    wkWeightFlat:d.wkWeightFlat ? 1 : 0 };
+          cleanRows();
+          retireStalePool(state);
+          /* draw BEFORE writing: a backup with one bad row used to be saved
+             and then throw on render, leaving a white screen that survived
+             every reload */
+          render();
+          save();
+          toast("Backup restored — "+state.expenses.length+" expenses");
+        }catch(e){
+          if(prev){ state = prev; try{ render(); }catch(e2){} }
+          toast("That file isn't a Weekend Wallet backup");
+        }
+      };
+      r.readAsText(f);
+}
+
   function renderOnboarding(){
     var curOpts = CURRENCIES.map(function(c){
       return '<option value="'+c.code+'"'+(state.currency===c.code?" selected":"")+'>'+c.label+'</option>';
     }).join("");
+    /* Erasing sets setup:false, which replaces the whole shell with this
+       screen -- no tab bar, so no Settings, so no way back to the safety copy
+       the confirm had just promised. The only button on offer destroyed it.
+       If a copy exists, this screen leads with it. */
+    var snap = snapshotInfo();
+    var recovery = "";
+    if(snap){
+      var mins = Math.max(Math.round((Date.now() - snap.ts)/60000), 0);
+      var when = mins < 1 ? "just now" : mins < 60 ? mins+" minute"+(mins===1?"":"s")+" ago"
+               : new Date(snap.ts).toLocaleString(undefined,{month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"});
+      recovery =
+        '<div class="panel" style="border-color:var(--accent); margin-bottom:14px">' +
+        '<h2 style="margin:0 0 6px; font-size:17px">Your data is still here</h2>' +
+        '<p class="hint" style="margin-top:0">A safety copy from '+esc(when)+' holds <b>'+snap.count+
+        ' expense'+(snap.count===1?"":"s")+'</b> and everything that went with them.</p>' +
+        '<button class="btn primary" id="o-restore">Put my data back</button>' +
+        '<button class="btn ghost" id="o-import" style="margin-top:10px">Restore from a backup file</button>' +
+        '</div>';
+    }
     shell.innerHTML = '<div class="onb">' +
       '<div class="brand-mark" aria-hidden="true">W</div>' +
       '<h1>Money for the weekend, sorted.</h1>' +
       '<p class="lede">Set a Friday-to-Sunday budget, snap receipts and let the amounts fill themselves in. All on your phone.</p>' +
-      '<div class="panel"><div class="field"><label class="micro" for="o-budget">Money you have until the end of the month</label>' +
+      recovery +
+      '<div class="panel"><h2 style="margin:0 0 10px; font-size:17px">'+(snap? "Or start again" : "Get started")+'</h2>' +
+      '<div class="field"><label class="micro" for="o-budget">Money you have until the end of the month</label>' +
       '<input id="o-budget" type="text" inputmode="decimal" min="0" placeholder="e.g. 2000"></div>' +
       '<div class="field"><label class="micro" for="o-currency">Currency</label><select id="o-currency">'+curOpts+'</select></div>' +
-      '<button class="btn primary" id="o-go">Start tracking</button></div></div>';
+      '<button class="btn primary" id="o-go">Start tracking</button></div>' +
+      (snap ? '<input type="file" accept=".json,application/json" id="o-import-file" hidden>' : "") +
+      '</div>';
+    if(snap){
+      $("#o-restore").addEventListener("click", function(){
+        if(!window.confirm("Put back the copy from "+when+"? Anything logged since will be replaced.")) return;
+        if(restoreSnapshot("before putting the copy back")){ render(); toast("Your data is back"); }
+        else toast("Could not put it back — the copy could not be read");
+      });
+      $("#o-import").addEventListener("click", function(){ $("#o-import-file").click(); });
+      $("#o-import-file").addEventListener("change", function(){ importBackupFile(this); });
+    }
     $("#o-go").addEventListener("click", function(){
       var b = num($("#o-budget").value);
       if(!(b > 0)){ toast("Enter an amount to get started"); $("#o-budget").focus(); return; }
@@ -4451,6 +4560,18 @@
     });
   }
 
+  /* One place that knows which provider is actually usable. The copy used to
+     branch on state.apiKey alone, so a Gemini user with a valid Gemini key was
+     told he needed Claude scanning, and a failed scan advised him to turn on
+     the thing he already had on. */
+  var SCAN_KEY_FOR = { agentrouter:"agentRouterApiKey", gemini:"geminiApiKey", claude:"apiKey" };
+  var SCAN_NAME_FOR = { agentrouter:"AgentRouter", gemini:"Gemini", claude:"Claude", free:"free scanning" };
+  function scanProviderName(){ return SCAN_NAME_FOR[state.scanProvider] || "AI"; }
+  function aiScanKeyField(){ return SCAN_KEY_FOR[state.scanProvider] || ""; }
+  function aiScanReady(){
+    var f = aiScanKeyField();
+    return !!(f && state[f]);
+  }
   function scanReceipt(dataUrl){
     if(state.scanProvider === "agentrouter" && state.agentRouterApiKey){
       return scanWithAgentRouter(dataUrl).catch(function(err){
@@ -4481,9 +4602,14 @@
       if(run !== scanRun || !draft) return;   // sheet closed or newer photo taken
       var filled = [];
       var amountEl = $("#f-amount"), noteEl = $("#f-note"), dateEl = $("#f-date");
+      /* An amount read off a "TOTAL" line is a reading; anything else is the
+         biggest number on the ticket, which on a hanout receipt is the cash
+         handed over and on a snack ticket was the phone number. A guess is
+         still worth offering -- it is usually close -- but it must say so
+         rather than sitting there looking like a fact. */
       if(r.amount && amountEl && !amountEl.value){
         amountEl.value = (Math.round(r.amount*100)/100);
-        filled.push("amount");
+        filled.push(r.amountGuessed ? "amount (a guess)" : "amount");
       }
       if(r.merchant && noteEl && !noteEl.value){ noteEl.value = r.merchant; filled.push("store"); }
       /* the amount and the note only fill when you left them empty; the date
@@ -4495,21 +4621,25 @@
       if(r.category && !draft.catManual){ selectChip(r.category); }
       setPhotoUi("done");
       if(filled.length){
-        toast((r.source==="ai" ? "Read by Claude" : "Scanned") + " — check the " + filled.join(", "));
-        if(r.source==="ocr" && (r.conf||0) < 55){
+        toast((r.source==="ai" ? "Read by "+scanProviderName() : "Scanned") + " — check the " + filled.join(", "));
+        if(r.amountGuessed){
+          setTimeout(function(){
+            if(draft) toast("No total on the receipt — that amount is a guess");
+          }, 2600);
+        }else if(r.source==="ocr" && (r.conf||0) < 55){
           setTimeout(function(){
             if(draft) toast("Low confidence — double-check the amount");
           }, 3000);
         }
       }else{
-        toast(state.apiKey ? "Couldn't read it — type the amount"
-                           : "Couldn't read it — handwriting needs Claude scanning (Settings)");
+        toast(aiScanReady() ? "Couldn't read it — type the amount"
+                            : "Couldn't read it — handwriting needs AI scanning (Settings)");
       }
     }).catch(function(){
       if(run !== scanRun || !draft) return;
       setPhotoUi("done");
-      toast(state.apiKey ? "Couldn't read the receipt — type the amount"
-                         : "Couldn't read it — try Claude scanning in Settings");
+      toast(aiScanReady() ? "Couldn't read the receipt — type the amount"
+                         : "Couldn't read it — try AI scanning in Settings");
     });
   }
 
@@ -4529,10 +4659,24 @@
       s.textContent = "Tap to retake";
     }else{
       t.textContent = "Snap the receipt";
-      s.textContent = state.agentRouterApiKey ? "AgentRouter reads it — AI receipt scan"
-                                   : state.apiKey ? "Claude reads it — even handwriting"
-                                   : "Best on printed receipts — Claude scan reads handwriting";
+      /* branched on two specific keys, so a Gemini user with a working key was
+         told to go and turn on Claude */
+      s.textContent = aiScanReady() ? scanProviderName()+" reads it — even handwriting"
+                                    : "Best on printed receipts — AI scanning reads handwriting";
     }
+  }
+  /* A category that is not in the picker still has to be visible. Editing a
+     "Not logged" row rendered twelve chips with none selected, so there was no
+     way to see what would be saved -- and one tap on any chip lost the
+     reconciliation label with no way back. */
+  function catChipsHtml(selectedId){
+    var list = PICK_CATS.slice();
+    var known = list.some(function(c){ return c.id === selectedId; });
+    if(selectedId && !known){
+      var extra = cat(selectedId);
+      if(extra) list.unshift(extra);
+    }
+    return list;
   }
   function selectChip(catId){
     if(!draft) return;
@@ -4907,7 +5051,15 @@
     scanRun++;
     var focus = sheetReturnFocus;
     sheetReturnFocus = null;
-    if(focus && document.contains(focus)) focus.focus();
+    if(focus && document.contains(focus)){ focus.focus(); return; }
+    /* Deleting an expense destroys the row we came from, so focus fell to
+       <body> and a screen reader jumped back to the top of the page after
+       every delete -- with the Undo toast, which lives after #shell, a whole
+       Tab pass away before it expires. Land on the shell instead. */
+    if(shell){
+      if(!shell.hasAttribute("tabindex")) shell.setAttribute("tabindex", "-1");
+      try{ shell.focus({ preventScroll:true }); }catch(e){ shell.focus(); }
+    }
   }
   backdrop.addEventListener("click", closeSheet);
 
@@ -4973,7 +5125,7 @@
               amount: source.amount != null ? source.amount : "",
               note: source.note || "",
               date: source.date || todayIso() };
-    var chips = PICK_CATS.map(function(c){
+    var chips = catChipsHtml(draft.cat).map(function(c){
       return '<button class="chip'+(c.id===draft.cat?" sel":"")+'" data-cat="'+c.id+'">' +
         '<span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+c.name+'</button>';
     }).join("");
@@ -5073,6 +5225,7 @@
       '<button class="btn ghost" id="funding-cancel" aria-label="Cancel funding and return to the expense">Cancel</button>' +
       '</div>'
     );
+    var lastPersonValue = "";        /* survives a switch to another option and back */
     function update(){
       sheet.querySelectorAll("[data-funding]").forEach(function(b){
         var selected = b.getAttribute("data-funding")===mode;
@@ -5081,7 +5234,12 @@
         var radio = b.querySelector(".funding-radio");
         if(radio) radio.textContent = selected ? "✓" : "";
       });
-      var personValue = $("#fund-person") ? $("#fund-person").value : oldPerson;
+      /* update() re-renders #funding-detail wholesale, so switching to "Dad
+         loan" to compare and back again read the input AFTER it had gone and
+         fell through to oldPerson -- empty on a new expense. Comparing the two
+         options is the obvious thing to do here, and it cost you the typing. */
+      if($("#fund-person")) lastPersonValue = $("#fund-person").value;
+      var personValue = lastPersonValue || oldPerson;
       var detail = "";
       if(mode === "loan"){
         /* The old credit belongs to this expense. Remove it from the preview
@@ -5257,13 +5415,20 @@
       (e.loanAdded > 0 ? '<dt>Loan added</dt><dd>'+fmt(e.loanAdded)+' to '+esc((function(){ var x=loanById(e.loanId); return x?x.name:"the loan"; })())+'</dd>' : '') +
       (e.fundingType === "person" && e.fundingAmount > 0 ? '<dt>Funded by</dt><dd>'+fmt(e.fundingAmount)+' borrowed from '+esc(e.fundingPersonName)+'</dd>' : '') +
       '</dl>' +
-      '<button class="btn primary" id="d-again">Log this again today</button>' +
+      /* "again" is meaningless for a cash-check reconciliation -- you cannot
+         re-spend money you never noticed spending -- and one tap wrote a
+         second {cat:"missing"} row, so Home reported 680 "from your cash
+         checks" when only 340 ever came from one. That figure is the app's
+         measure of what he forgets to log; it must only ever come from an
+         actual count. */
+      (isReconciliation(e) ? "" : '<button class="btn primary" id="d-again">Log this again today</button>') +
       '<div style="height:10px"></div>' +
       '<button class="btn" id="d-edit">'+IC.pencil+' Edit expense</button>' +
       '<div style="height:10px"></div>' +
       '<button class="btn danger ghost" id="d-del">Delete expense</button>'
     );
-    $("#d-again").addEventListener("click", function(){
+    var againBtn = $("#d-again");
+    if(againBtn) againBtn.addEventListener("click", function(){
       openAdd(null, { amount:e.amount, cat:e.cat, note:e.note, date:todayIso(), photo:null, catManual:true });
     });
     $("#d-edit").addEventListener("click", function(){ openAdd(e.id); });
@@ -5468,16 +5633,28 @@
 
     var sSave = $("#s-save");
     if(sSave){
+      /* These reported "Saved" without checking save(), so on a full store the
+         screen showed a setting the next reload silently reverted -- the one
+         thing the rest of the app is careful never to do. */
       sSave.addEventListener("click", function(){
+        var before = state.currency;
         state.currency = $("#s-currency").value;
-        save(); render(); toast("Saved");
+        if(!save()){ state.currency = before; render(); return; }
+        render(); toast("Saved");
       });
       var wkw = $("#s-wkw");
       if(wkw) wkw.addEventListener("click", function(ev){
         var b = ev.target.closest("[data-wkw]"); if(!b) return;
+        var beforeW = state.wkWeight, key = currentWeekend(), beforePlan = state.wkPlan[key];
         state.wkWeight = parseFloat(b.getAttribute("data-wkw"));
-        delete state.wkPlan[currentWeekend()];      // re-freeze this weekend at the new rate
-        save(); render();
+        delete state.wkPlan[key];                   // re-freeze this weekend at the new rate
+        if(!save()){
+          state.wkWeight = beforeW;
+          if(beforePlan != null) state.wkPlan[key] = beforePlan;
+          render();
+          return;
+        }
+        render();
         var r = rateSplit();
         toast(r ? fmt(r.weekday)+" a weekday · "+fmt(r.weekend)+" a weekend day"
                 : "Saved — set your money in Plan to see the split");
@@ -5493,17 +5670,31 @@
         });
       }
       $("#s-scan-save").addEventListener("click", function(){
+        var before = { scanProvider:state.scanProvider, agentRouterApiKey:state.agentRouterApiKey,
+                       agentRouterModel:state.agentRouterModel, geminiApiKey:state.geminiApiKey,
+                       apiKey:state.apiKey, scanModel:state.scanModel };
         state.scanProvider = $("#s-provider").value;
         state.agentRouterApiKey = $("#s-agentrouter-key").value.trim();
         state.agentRouterModel = $("#s-agentrouter-model").value.trim() || "gpt-5.5";
         state.geminiApiKey = $("#s-gemini-key").value.trim();
         state.apiKey = $("#s-claude-key").value.trim();
         state.scanModel = $("#s-model").value;
-        save();
-        var msg = state.scanProvider === "free" ? "Using free on-phone scanning"
-                : state.scanProvider === "agentrouter" ? "AgentRouter AI scanning is on"
-                : state.scanProvider === "gemini" ? "Gemini scanning is on"
-                : "Claude scanning is on";
+        /* Settings reported success without checking save(), so on a full
+           store the screen said "Saved" while the next reload silently
+           reverted it. */
+        if(!save()){
+          state.scanProvider = before.scanProvider; state.agentRouterApiKey = before.agentRouterApiKey;
+          state.agentRouterModel = before.agentRouterModel; state.geminiApiKey = before.geminiApiKey;
+          state.apiKey = before.apiKey; state.scanModel = before.scanModel;
+          render();
+          return;
+        }
+        /* and it said "Claude scanning is on" with an empty key box, while
+           every scan quietly went to the free on-phone reader */
+        var msg;
+        if(state.scanProvider === "free") msg = "Using free on-phone scanning";
+        else if(!aiScanReady()) msg = scanProviderName()+" needs its key — still using free scanning";
+        else msg = scanProviderName()+" scanning is on";
         toast(msg);
       });
       $("#s-export").addEventListener("click", function(){
@@ -5539,62 +5730,7 @@
           else toast("That safety copy couldn't be read");
         });
       }
-      $("#s-import-file").addEventListener("change", function(){
-        var f = this.files && this.files[0]; this.value = "";
-        if(!f) return;
-        var r = new FileReader();
-        r.onload = function(){
-          var prev = null;
-          try{
-            var d = JSON.parse(r.result);
-            if(!d || !Array.isArray(d.expenses)) throw 0;
-            var hasData = state.expenses.length || state.commitments.length || state.goals.length || state.debts.length;
-            if(hasData && !window.confirm("Restore this backup and replace the current money data on this device?")){
-              toast("Restore cancelled — nothing changed");
-              return;
-            }
-            snapshot("before restoring a backup");
-            prev = state;
-            var importPayday = +d.payday||0;
-            var importPaydayEnd = +d.paydayEnd||importPayday;
-            if(!isPaydayDay(importPayday)) importPayday = 0;
-            if(!isPaydayDay(importPaydayEnd)) importPaydayEnd = importPayday;
-            if(importPaydayEnd < importPayday) importPaydayEnd = importPayday;
-            state = { setup:true, budget:+d.budget||0, currency:d.currency||"USD",
-                      expenses:cleanExpenses(d.expenses), apiKey:state.apiKey, geminiApiKey:state.geminiApiKey,
-                      agentRouterApiKey:state.agentRouterApiKey, agentRouterModel:state.agentRouterModel,
-                      scanProvider:d.scanProvider||state.scanProvider,
-                      scanModel:d.scanModel||state.scanModel,
-                      salary:+d.salary||0,
-                      commitments:Array.isArray(d.commitments)? d.commitments : [],
-                      goals:Array.isArray(d.goals)? d.goals : [],
-                      swept:(d.swept && typeof d.swept==="object")? d.swept : {},
-                      payday:importPayday, paydayEnd:importPaydayEnd,
-                      salaryReceived:cleanSalaryReceived(d.salaryReceived),
-                      debts:Array.isArray(d.debts)? d.debts : [],
-                      restAmount:+d.restAmount||0,
-                      restFrom:(typeof d.restFrom==="string")? d.restFrom : "", restTs:+d.restTs||0, cashTs:+d.cashTs||0,
-                      wkPlan:(d.wkPlan && typeof d.wkPlan==="object")? d.wkPlan : {},
-                      wkWeight:+d.wkWeight||1,
-                      /* without this the one-time "reset to flat" migration
-                         re-fires on every restore and quietly undoes a
-                         weighting you chose on purpose */
-                      wkWeightFlat:d.wkWeightFlat ? 1 : 0 };
-            cleanRows();
-            retireStalePool(state);
-            /* draw BEFORE writing: a backup with one bad row used to be saved
-               and then throw on render, leaving a white screen that survived
-               every reload */
-            render();
-            save();
-            toast("Backup restored — "+state.expenses.length+" expenses");
-          }catch(e){
-            if(prev){ state = prev; try{ render(); }catch(e2){} }
-            toast("That file isn't a Weekend Wallet backup");
-          }
-        };
-        r.readAsText(f);
-      });
+      $("#s-import-file").addEventListener("change", function(){ importBackupFile(this); });
       var wipeArmed = false;
       $("#s-wipe").addEventListener("click", function(){
         if(!wipeArmed){ wipeArmed = true; this.textContent = "Tap again to erase everything"; return; }

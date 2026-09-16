@@ -5,6 +5,9 @@
 
   /* "1 234,56" / "1,234.56" / "234.5" / "120" → number (or NaN) */
   function parseAmountToken(s) {
+    /* handwriting OCR routinely returns the letter O for zero, so "1O0,OO"
+       used to parse as 1 instead of 100.00 */
+    s = String(s == null ? "" : s).replace(/(\d)[Oo]/g, "$10").replace(/[Oo](\d)/g, "0$1");
     var numeric = String(s).match(/[+-]?\d[\d.,'\u2019\s]*/);
     if (!numeric) return NaN;
     s = numeric[0].replace(/\s/g, "").replace(/[\u2019']/g, "");
@@ -39,9 +42,19 @@
   var NUM_RE = /\d{1,3}(?:[ .,'\u2019]\d{2,3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?/g;
   var DATE_TOKEN_RE = /\b(?:\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})\b/g;
 
+  /* Lines that carry reference numbers, not money. guessMerchant already
+     refused to read a phone number as a shop name; guessAmount happily read
+     one as the price -- "TEL 0661 23 45 67" on a snack ticket booked 661 MAD
+     for a 47 MAD lunch, with no warning, because OCR is perfectly confident
+     about a cleanly printed phone number. */
+  var REF_LINE_RE = /t[ée]l[.:\s]|\btel\b|phone|\bgsm\b|\bfax\b|n[°o]\s*\d|\bice\b|\bcnss\b|\brib\b|\biban\b|carte\s*\d|card\s*\d|ticket\s*n|\bref\b|caisse\s*n/i;
+  /* four or more digit groups in a row is a card or account number */
+  var CARD_RE = /(?:\d[\d ]{2,}){4,}/;
+
   function numbersIn(line) {
     var out = [];
     var m, raw;
+    if (REF_LINE_RE.test(line) || CARD_RE.test(String(line))) return out;
     DATE_TOKEN_RE.lastIndex = 0;
     line = String(line).replace(DATE_TOKEN_RE, " ");
     NUM_RE.lastIndex = 0;
@@ -71,11 +84,15 @@
         if (best === null || candidate > best) best = candidate;
       }
     }
-    if (best !== null) return best;
-    // fallback: largest plausible number anywhere
+    if (best !== null) return { amount: best, guessed: false };
+    /* No line said "total". Whatever we pick here is a guess, and the caller
+       has to know that rather than presenting it as a reading -- picking the
+       biggest number on a hanout ticket lands on the cash tendered, not the
+       bill. */
     var all = [];
     for (var j = 0; j < lines.length; j++) all = all.concat(numbersIn(lines[j]));
-    return all.length ? Math.max.apply(null, all) : null;
+    return all.length ? { amount: Math.max.apply(null, all), guessed: true }
+                      : { amount: null, guessed: false };
   }
 
   function guessMerchant(lines) {
@@ -174,8 +191,10 @@
 
   function parseReceiptText(text, now) {
     var lines = String(text || "").split(/\n+/).map(function (l) { return l.trim(); }).filter(Boolean);
+    var amt = guessAmount(lines);
     return {
-      amount: guessAmount(lines),
+      amount: amt.amount,
+      amountGuessed: amt.guessed,
       merchant: guessMerchant(lines),
       date: guessDate(lines.join("\n"), now),
       category: guessCategory(text || "")
