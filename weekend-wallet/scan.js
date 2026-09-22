@@ -5,9 +5,14 @@
 
   /* "1 234,56" / "1,234.56" / "234.5" / "120" → number (or NaN) */
   function parseAmountToken(s) {
-    /* handwriting OCR routinely returns the letter O for zero, so "1O0,OO"
-       used to parse as 1 instead of 100.00 */
-    s = String(s == null ? "" : s).replace(/(\d)[Oo]/g, "$10").replace(/[Oo](\d)/g, "0$1");
+    /* Handwriting OCR routinely returns the letter O for zero. Doing this as
+       two digit-adjacent passes only half-converted a run of them -- the first
+       match consumed the digit it needed -- so "1OO,OO" became 10 and "O,50"
+       became 50. Convert every O in a token that is otherwise a number. */
+    s = String(s == null ? "" : s);
+    if(/[Oo]/.test(s) && /\d/.test(s) && /^[\s+-]*[\dOo][\dOo.,'\u2019\s]*$/.test(s)){
+      s = s.replace(/[Oo]/g, "0");
+    }
     var numeric = String(s).match(/[+-]?\d[\d.,'\u2019\s]*/);
     if (!numeric) return NaN;
     s = numeric[0].replace(/\s/g, "").replace(/[\u2019']/g, "");
@@ -55,8 +60,21 @@
     var out = [];
     var m, raw;
     if (REF_LINE_RE.test(line) || CARD_RE.test(String(line))) return out;
+    line = String(line);
+    /* The number scanner only matches digits, so a handwritten "1OO,OO" was
+       chopped down to "1" long before parseAmountToken could repair it. Heal
+       letter-O-for-zero here, where the token is still whole: repeat until
+       stable so a run of them converts, and only where an O actually sits
+       against a digit or a decimal mark. */
+    if (/[Oo]/.test(line)) {
+      for (var p = 0; p < 6; p++) {
+        var next = line.replace(/([\d.,])[Oo]/g, "$10").replace(/[Oo]([\d.,])/g, "0$1");
+        if (next === line) break;
+        line = next;
+      }
+    }
     DATE_TOKEN_RE.lastIndex = 0;
-    line = String(line).replace(DATE_TOKEN_RE, " ");
+    line = line.replace(DATE_TOKEN_RE, " ");
     NUM_RE.lastIndex = 0;
     while ((m = NUM_RE.exec(line)) !== null) {
       raw = m[0];

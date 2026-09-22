@@ -744,13 +744,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=8.7"></script>
+<script src="scan.js?v=8.8"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "8.7";
+  var APP_VERSION = "8.8";
   var KEY = "weekend-wallet-v1";
   var CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -799,12 +799,22 @@
 
   var ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
   var state = load();
+  writeSeq = (+state.seq) || 0;
+  window.addEventListener("storage", function(ev){
+    if(ev && ev.key === KEY && ev.newValue) warnStaleTab();
+  });
   state.expenses = cleanExpenses(state.expenses);
   cleanRows();
+  var loadFailedWithData = false;
   function load(){
     try{
       var raw = localStorage.getItem(KEY);
       if(raw){
+        /* If this throws below, there WAS data here and we could not read it.
+           Returning a blank state made that indistinguishable from a fresh
+           install -- and the first "Start tracking" overwrote the damaged
+           value for good. */
+        loadFailedWithData = true;
         var s = JSON.parse(raw);
         if(typeof s.apiKey !== "string") s.apiKey = "";
         if(typeof s.geminiApiKey !== "string") s.geminiApiKey = "";
@@ -846,6 +856,8 @@
            it once to a flat split; anyone who genuinely wants weighting can
            pick it again in Settings, and that choice sticks. */
         if(!s.wkWeightFlat){ s.wkWeight = 1; s.wkWeightFlat = 1; }
+        s.setupHidden = s.setupHidden ? 1 : 0;
+        loadFailedWithData = false;              /* read it fine after all */
         return s;
       }
     }catch(e){}
@@ -1014,34 +1026,77 @@
      snapshot first would overwrite the copy being restored — the exact loss
      this exists to prevent. */
   function restoreSnapshot(reason){
+    restoreSnapshot.lastError = "";
     var info = snapshotInfo();
-    if(!info) return false;
+    if(!info){ restoreSnapshot.lastError = "read"; return false; }
     var current = null;
     try{ current = localStorage.getItem(KEY); }catch(e){}
+    /* The copy read fine; it was the WRITE that failed -- and state had
+       already been replaced, so the screen kept showing the old view over
+       new data. Keep the previous state until the write lands, and let the
+       caller tell the two failures apart. */
+    var before = state;
     state = info.data;
     cleanRows();
     state.expenses = cleanExpenses(state.expenses);
-    if(!save()) return false;
+    retireStalePool(state);          /* a copy from a past cycle must not bring its pool back */
+    if(!save()){ state = before; restoreSnapshot.lastError = "write"; return false; }
+    restoreSnapshot.lastError = "";
     if(current){
       try{ localStorage.setItem(SNAP_KEY, JSON.stringify({ ts: Date.now(), reason: reason || "", data: current })); }catch(e){}
     }
     return true;
   }
 
-  function save(opts){
+  /* Two copies of the app in the same browser each hold a whole state object
+     and each save() writes all of it, so whichever wrote last erased the
+     other's entries with no warning -- and an old Safari tab left over from
+     before the app was installed to the home screen is a realistic way to
+     lose days of logging. Every write carries a counter; a write over a
+     newer one is refused, and the other tab's writes are noticed as they
+     happen. */
+  var writeSeq;          /* set from the stored value at boot, above -- no initialiser here,
+                            or this line would reset it after load() read it */
+  function stampedState(){
+    state.seq = ++writeSeq;
+    return state;
+  }
+  function storedSeq(){
     try{
-      localStorage.setItem(KEY, JSON.stringify(state));
+      var raw = localStorage.getItem(KEY);
+      if(!raw) return 0;
+      var v = JSON.parse(raw);
+      return (v && +v.seq) || 0;
+    }catch(e){ return 0; }
+  }
+  var staleTabWarned = false;
+  function warnStaleTab(){
+    if(staleTabWarned) return;
+    staleTabWarned = true;
+    toast("This app is open in another tab — reload to see the latest");
+  }
+  function save(opts){
+    save.explained = false;
+    if(storedSeq() > writeSeq){
+      /* someone else has written since we last did -- do not flatten them */
+      warnStaleTab();
+      save.explained = true;          /* callers must not talk over this */
+      return false;
+    }
+    try{
+      localStorage.setItem(KEY, JSON.stringify(stampedState()));
       return true;
     }catch(e){
       if(opts && opts.retryWithoutPhoto && opts.retryWithoutPhoto.photo){
         opts.retryWithoutPhoto.photo = null;
         try{
-          localStorage.setItem(KEY, JSON.stringify(state));
+          localStorage.setItem(KEY, JSON.stringify(stampedState()));
           toast("Storage full — saved without the photo");
           return true;
         }catch(e2){}
       }
       toast("Storage full — delete old weekends in History");
+      save.explained = true;
       return false;
     }
   }
@@ -1438,8 +1493,24 @@
        reader jumps to the top of the page after every delete. Catch it here,
        where the DOM is final. */
     if(hadFocus && !document.contains(hadFocus) && document.activeElement === document.body){
-      if(!shell.hasAttribute("tabindex")) shell.setAttribute("tabindex", "-1");
-      try{ shell.focus({ preventScroll:true }); }catch(e){ shell.focus(); }
+      /* Every render destroys the control you just pressed, so re-homing
+         blindly moved the reading cursor to the top of the page on every tab
+         and sub-tab switch. The control usually comes back with the same
+         identity -- put focus on its replacement, and only fall back to the
+         shell when there genuinely is none (a deleted row). */
+      var again = null;
+      try{
+        if(hadFocus.id) again = shell.querySelector("#"+CSS.escape(hadFocus.id));
+        if(!again && hadFocus.dataset){
+          if(hadFocus.dataset.tab) again = shell.querySelector('[data-tab="'+CSS.escape(hadFocus.dataset.tab)+'"]');
+          else if(hadFocus.dataset.hist) again = shell.querySelector('[data-hist="'+CSS.escape(hadFocus.dataset.hist)+'"]');
+        }
+      }catch(e){}
+      if(again){ try{ again.focus({ preventScroll:true }); }catch(e){ again.focus(); } }
+      else{
+        if(!shell.hasAttribute("tabindex")) shell.setAttribute("tabindex", "-1");
+        try{ shell.focus({ preventScroll:true }); }catch(e){ shell.focus(); }
+      }
     }
   }
 
@@ -1621,11 +1692,17 @@
        divided borrowing by three even with one month of history, diluting
        recent borrowing threefold. Both now use the months that actually have
        a record, and the plan is only a fallback for a loan never paid yet. */
+    /* monthOffsetKey invents keys by stepping back a month at a time, which
+       before the first salary receipt matches no real period at all -- giving
+       a rate built from nothing and a chart of five nested ranges all ending
+       on the same day ("Mar 28-Aug 27", "Apr 28-Aug 27", ...). loanMonthStats
+       already returns the periods that really happened, newest first, so the
+       pace comes from those. */
+    var real = loanMonthStats(c).filter(function(r){ return r.paid > 0 || r.added > 0; });
     var months = 0, paidSum = 0, addedSum = 0;
-    for(var i=0;i<3;i++){
-      var st = loanMonthStat(c, monthOffsetKey(monthKey(), -i));
-      if(st.paid > 0 || st.added > 0){ months++; paidSum += st.paid; addedSum += st.added; }
-    }
+    real.slice(0, 3).forEach(function(st){
+      months++; paidSum += st.paid; addedSum += st.added;
+    });
     var basis = (months && paidSum > 0) ? paidSum/months : (+c.amount || 0);
     var recentAdded = months ? addedSum/months : 0;
     var monthlyNet = Math.round((basis - recentAdded)*100)/100;
@@ -1633,11 +1710,15 @@
     loanAdditionItems(c).forEach(function(it){ if(!latest || it.date > latest) latest = it.date; });
     var noBorrowDays = null;
     if(latest){ noBorrowDays = Math.max(0, Math.floor((fromIso(todayIso()).getTime()-fromIso(latest).getTime())/86400000)); }
-    var chart = [];
-    for(var j=-5;j<=0;j++){
-      var mk = monthOffsetKey(monthKey(), j), row = loanMonthStat(c, mk);
-      chart.push({ mk:mk, added:row.added, paid:row.paid, net:row.net });
-    }
+    /* the periods that actually exist, oldest first, with the current one
+       always present even if nothing has happened in it yet */
+    var chart = [], seenNow = false;
+    loanMonthStats(c).slice(0, 6).forEach(function(r){
+      if(r.mk === monthKey()) seenNow = true;
+      chart.push({ mk:r.mk, added:r.added, paid:r.paid, net:r.net });
+    });
+    if(!seenNow) chart.unshift({ mk:monthKey(), added:now.added, paid:now.paid, net:now.net });
+    chart.reverse();
     return { loan:c, now:now, chart:chart, monthlyNet:monthlyNet, noBorrowDays:noBorrowDays,
              remaining:Math.max(+c.remaining||0,0) };
   }
@@ -1976,7 +2057,12 @@
          would otherwise be "Biggest day" forever */
       var spentOut = days[d].reduce(function(s,r){
         if(r.exp) return s + (isReconciliation(r.exp) ? 0 : r.exp.amount);
-        return s + (r.led ? -r.led.cash : -r.salary.amount);
+        /* Only money leaving counts here. Subtracting the salary made payday
+           net negative, so the day dropped out of "spending days" entirely:
+           three days logged, an average divided by two, and a "biggest day"
+           that could never be payday. */
+        if(r.led) return s + Math.max(-r.led.cash, 0);
+        return s;
       }, 0);
       return { date:d, items:days[d], out: Math.round(out*100)/100,
                spentOut: Math.round(spentOut*100)/100 };
@@ -2950,9 +3036,29 @@
       var r = row(periodKey(it.date));
       r.added += it.amount; r.items.push(it);
     });
+    /* Draws are bucketed on the cycle axis; payments kept whatever key
+       monthKey() happened to return when they were logged. The moment the
+       first salary receipt is logged that axis shifts from "2026-08" to
+       "2026-08-28", so every past payment landed in a bucket nothing else
+       used and Debt escape read "PAID BACK MAD 0" with a blank chart -- in
+       the configuration the app itself pushes you toward. Payments are now
+       placed by the day they were made, like everything else. */
     Object.keys(c.paid||{}).forEach(function(mk){
       var p = c.paid[mk];
-      if(p && +p.amt > 0) row(mk).paid = +p.amt;
+      if(!(p && +p.amt > 0)) return;
+      /* The key already says which period this payment belonged to; all that
+         is needed is to re-express it on the current axis. A timestamp is
+         better when it is a real one, but records written by older builds
+         carry placeholders, and trusting those filed every payment under
+         1970. */
+      var when = "";
+      if(+p.ts > 0){
+        var d = iso(new Date(+p.ts));
+        if(ISO_RE.test(d) && d >= "2015-01-01") when = d;
+      }
+      if(!when) when = ISO_RE.test(mk) ? mk : String(mk)+"-15";
+      var r = row(periodKey(when));
+      r.paid = Math.round((r.paid + +p.amt)*100)/100;
     });
     return Object.keys(by).sort().reverse().map(function(mk){
       var r = by[mk];
@@ -3206,7 +3312,12 @@
       if(existing){
         if(pos > -1) state.expenses.splice(pos, 1, e);
       }else state.expenses.push(e);
-      state.lastCat = e.cat;
+      /* Only categories you can actually pick are worth remembering. Editing
+         a cash-check row made "Not logged" the default for the NEXT expense,
+         and the chip was pre-selected and tappable -- so real spending got
+         filed into the category built to be excluded from day and weekend
+         figures, and Home then blamed it on a cash check that never ran. */
+      if(PICK_CATS.some(function(c){ return c.id === e.cat; })) state.lastCat = e.cat;
       var applied;
       if(keep){
         /* the money is unchanged; only move the friend's entry if the expense
@@ -3387,7 +3498,7 @@
        only repayments on the way in while counting everything on the way out
        meant borrowing 500 and giving it straight back left you 500 poorer on
        screen, and made every later cash check disagree with your real notes. */
-    return Math.round((state.restAmount - spentFromPool() - f.cashNet + poolCashIn()
+    return Math.round((state.restAmount - spentFromPool() - f.cashNet + poolCashIn() - poolCashOut()
                        - goalOutSince(state.restFrom, poolStartTs())) * 100) / 100;
   }
   function poolFlow(){ return ledgerFlowSince(state.restFrom, poolStartTs()); }
@@ -3412,6 +3523,27 @@
     return Math.round(sum*100)/100;
   }
   function poolCashIn(){ return loanCashSince(state.restFrom, poolStartTs()); }
+  /* Paying a bill is cash leaving your pocket, and the pool is raw counted
+     cash -- the cash sheet deliberately reserves nothing for bills while a
+     pool is running, precisely because the pool is supposed to already
+     reflect them. It never did: borrowing from a loan raised the pool but
+     repaying it did not lower it, and a subscription payment did nothing at
+     all. With a 2,000 monthly payment that overstated spendable money by
+     2,000 from the day it was logged until the next cash check, which then
+     wrote the difference off as spending he had forgotten. */
+  function commitCashOutSince(dIso, fromTs){
+    var t = fromTs > 0 ? fromTs : fromIso(dIso).getTime();
+    var sum = 0;
+    state.commitments.forEach(function(c){
+      var paid = c.paid || {};
+      Object.keys(paid).forEach(function(k){
+        var rec = paid[k];
+        if(rec && +rec.amt > 0 && (+rec.ts || 0) >= t) sum += +rec.amt;
+      });
+    });
+    return Math.round(sum*100)/100;
+  }
+  function poolCashOut(){ return commitCashOutSince(state.restFrom, poolStartTs()); }
   /* What the pool has had available since you counted: the cash in your hand
      that day, plus anything that came in after it, less anything handed over
      or put into a goal. Showing the raw count as the denominator while the
@@ -3420,7 +3552,7 @@
      remaining = available - spent true. */
   function poolBase(){
     if(!(state.restAmount > 0) || !state.restFrom) return null;
-    return Math.round((state.restAmount - poolFlow().cashNet + poolCashIn()
+    return Math.round((state.restAmount - poolFlow().cashNet + poolCashIn() - poolCashOut()
                        - goalOutSince(state.restFrom, poolStartTs())) * 100) / 100;
   }
   /* money left ÷ days left. Spending today doesn't move today's number
@@ -3470,7 +3602,7 @@
          twice -- spend 400 in the morning, count 1,400 at six, and the day's
          rate was worked out from 1,800. */
       return state.restAmount - (spentFromPool() - spentFromPoolToday()) - poolFlow().cashNet
-             + poolCashIn() - goalOutSince(state.restFrom, poolStartTs());
+             + poolCashIn() - poolCashOut() - goalOutSince(state.restFrom, poolStartTs());
     }
     if(state.salary > 0){
       return planMath().left - (monthSpent() - spentOn(todayIso()));
@@ -3937,7 +4069,15 @@
                      note:note, balanceApplied:!alreadyIncluded });
       if(!alreadyIncluded) c.remaining = Math.round((+c.remaining+amount)*100)/100;
       var addedId = c.draws[c.draws.length-1].id;
-      save(); closeSheet(); render();
+      /* announced "you now owe Dad 20,500" over a failed write, and raised the
+         pool with it -- he then spent against money never recorded */
+      if(!save()){
+        c.draws = c.draws.filter(function(d){ return d.id !== addedId; });
+        if(!alreadyIncluded) c.remaining = Math.round((+c.remaining-amount)*100)/100;
+        this.disabled = false; render();
+        return;
+      }
+      closeSheet(); render();
       toastAction(alreadyIncluded
         ? fmt(amount)+" recorded — "+c.name+" balance left at "+fmt(c.remaining)
         : fmt(amount)+" added — you now owe "+c.name+" "+fmt(c.remaining), "Undo", function(){
@@ -3961,9 +4101,11 @@
         var id = b.getAttribute("data-draw-remove"), draw = null;
         (c.draws||[]).forEach(function(d){ if(d.id === id) draw = d; });
         if(!draw) return;
+        var beforeRem = c.remaining, beforeDraws = (c.draws||[]).slice();
         if(draw.balanceApplied) c.remaining = Math.max(Math.round((+c.remaining-draw.amount)*100)/100, 0);
         c.draws = (c.draws||[]).filter(function(d){ return d.id !== id; });
-        save(); render(); openLoanDrawSheet(c, 0); toast("Borrowing record removed");
+        if(!save()){ c.remaining = beforeRem; c.draws = beforeDraws; render(); return; }
+        render(); openLoanDrawSheet(c, 0); toast("Borrowing record removed");
       });
     });
   }
@@ -4058,8 +4200,10 @@
       var armed = false;
       $("#c-del").addEventListener("click", function(){
         if(!armed){ armed = true; this.textContent = "Tap again to remove"; return; }
+        var beforeCms = state.commitments.slice();
         state.commitments = state.commitments.filter(function(x){ return x.id!==c.id; });
-        save(); closeSheet(); render();
+        if(!save()){ state.commitments = beforeCms; render(); return; }
+        closeSheet(); render();
       });
     }
   }
@@ -4102,8 +4246,10 @@
             : "Tap again to delete";
           return;
         }
+        var beforeGoals = state.goals.slice();
         state.goals = state.goals.filter(function(x){ return x.id!==g.id; });
-        save(); closeSheet(); render();
+        if(!save()){ state.goals = beforeGoals; render(); return; }
+        closeSheet(); render();
         toast(g.saved > 0 ? g.name+" deleted · "+fmt(g.saved)+" removed from savings" : g.name+" deleted");
       });
     }
@@ -4276,14 +4422,22 @@ function importBackupFile(input){
                     /* without this the one-time "reset to flat" migration
                        re-fires on every restore and quietly undoes a
                        weighting you chose on purpose */
-                    wkWeightFlat:d.wkWeightFlat ? 1 : 0 };
+                    wkWeightFlat:d.wkWeightFlat ? 1 : 0,
+                    setupHidden:d.setupHidden ? 1 : 0 };
           cleanRows();
           retireStalePool(state);
           /* draw BEFORE writing: a backup with one bad row used to be saved
              and then throw on render, leaving a white screen that survived
              every reload */
           render();
-          save();
+          /* A full phone is exactly when someone reaches for a restore. This
+             reported "Backup restored" over the storage error and showed the
+             restored data while the old state stayed on disk -- gone without
+             trace on the next launch. */
+          if(!save()){
+            if(prev){ state = prev; try{ render(); }catch(e2){} }
+            return;
+          }
           toast("Backup restored — "+state.expenses.length+" expenses");
         }catch(e){
           if(prev){ state = prev; try{ render(); }catch(e2){} }
@@ -4303,6 +4457,16 @@ function importBackupFile(input){
        If a copy exists, this screen leads with it. */
     var snap = snapshotInfo();
     var recovery = "";
+    /* Data that exists but cannot be parsed looked exactly like a fresh
+       install: the plain welcome screen, with the damaged value still sitting
+       in storage and the first "Start tracking" overwriting it for good. */
+    if(loadFailedWithData){
+      recovery += '<div class="panel" style="border-color:var(--bad); margin-bottom:14px">' +
+        '<h2 style="margin:0 0 6px; font-size:17px">Something is here, but it will not open</h2>' +
+        '<p class="hint" style="margin-top:0">Saved data was found on this phone and could not be read. It is still there — nothing has been overwritten. ' +
+        (snap ? 'Try the safety copy below, or restore a backup file.' : 'Restore a backup file if you have one, or start again to replace it.') +
+        '</p></div>';
+    }
     if(snap){
       var mins = Math.max(Math.round((Date.now() - snap.ts)/60000), 0);
       var when = mins < 1 ? "just now" : mins < 60 ? mins+" minute"+(mins===1?"":"s")+" ago"
@@ -4326,12 +4490,20 @@ function importBackupFile(input){
       '<input id="o-budget" type="text" inputmode="decimal" min="0" placeholder="e.g. 2000"></div>' +
       '<div class="field"><label class="micro" for="o-currency">Currency</label><select id="o-currency">'+curOpts+'</select></div>' +
       '<button class="btn primary" id="o-go">Start tracking</button></div>' +
-      (snap ? '<input type="file" accept=".json,application/json" id="o-import-file" hidden>' : "") +
+      ((snap || loadFailedWithData)
+        ? '<input type="file" accept=".json,application/json" id="o-import-file" hidden>' +
+          (snap ? "" : '<button class="btn ghost" id="o-import" style="margin-top:12px">Restore from a backup file</button>')
+        : "") +
       '</div>';
+    if(!snap && loadFailedWithData && $("#o-import")){
+      $("#o-import").addEventListener("click", function(){ $("#o-import-file").click(); });
+      $("#o-import-file").addEventListener("change", function(){ importBackupFile(this); });
+    }
     if(snap){
       $("#o-restore").addEventListener("click", function(){
         if(!window.confirm("Put back the copy from "+when+"? Anything logged since will be replaced.")) return;
         if(restoreSnapshot("before putting the copy back")){ render(); toast("Your data is back"); }
+        else if(restoreSnapshot.lastError === "write"){ render(); }   /* save() already said why */
         else toast("Could not put it back — the copy could not be read");
       });
       $("#o-import").addEventListener("click", function(){ $("#o-import-file").click(); });
@@ -4343,7 +4515,8 @@ function importBackupFile(input){
       state.restAmount = b; state.restFrom = todayIso(); state.restTs = Date.now();
       state.currency = $("#o-currency").value;
       state.setup = true;
-      save(); render();
+      if(!save()){ state.setup = false; state.restAmount = 0; state.restFrom = ""; state.restTs = 0; render(); return; }
+      render();
       toast("You're set — tap + to log spending");
     });
   }
@@ -4674,7 +4847,7 @@ function importBackupFile(input){
     var known = list.some(function(c){ return c.id === selectedId; });
     if(selectedId && !known){
       var extra = cat(selectedId);
-      if(extra) list.unshift(extra);
+      if(extra) list.unshift({ id:extra.id, name:extra.name, v:extra.v, locked:true });
     }
     return list;
   }
@@ -5092,7 +5265,10 @@ function importBackupFile(input){
       { done: state.expenses.length > 0,   label: "Log your first expense",         go: "add" }
     ];
     var open = items.filter(function(i){ return !i.done; });
-    if(!open.length) return "";
+    /* "Add your loan & subscriptions" can only ever be ticked by having a
+       loan, so anyone without one kept a permanent "3 of 4 done" nag at the
+       top of Home with no way to finish it and no way to dismiss it. */
+    if(!open.length || state.setupHidden) return "";
     var doneCount = items.length - open.length;
     var h = '<div class="sec"><span class="micro">Getting started</span>' +
       '<span class="micro">'+doneCount+' of '+items.length+' done</span></div><div class="row-list">';
@@ -5102,7 +5278,8 @@ function importBackupFile(input){
         '<span class="tx">'+i.label+'</span>' +
         (i.done? "" : '<span class="go">'+IC.chev+'</span>')+'</button>';
     });
-    return h + '</div>';
+    return h + '</div>' +
+      '<button class="btn ghost" id="h-setup-hide" style="margin-top:8px; color:var(--ink2)">Hide this list</button>';
   }
 
   function noteSuggestions(){
@@ -5126,7 +5303,10 @@ function importBackupFile(input){
               note: source.note || "",
               date: source.date || todayIso() };
     var chips = catChipsHtml(draft.cat).map(function(c){
-      return '<button class="chip'+(c.id===draft.cat?" sel":"")+'" data-cat="'+c.id+'">' +
+      /* shown so you can see what this row is, disabled so it cannot be
+         chosen for anything else */
+      return '<button class="chip'+(c.id===draft.cat?" sel":"")+'" data-cat="'+c.id+'"'+
+        (c.locked ? ' disabled aria-disabled="true" title="Written by a cash check"' : '')+'>' +
         '<span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+c.name+'</button>';
     }).join("");
     var sym = "";
@@ -5352,7 +5532,13 @@ function importBackupFile(input){
     }
     var result = commitExpense(e, existing, plan);
     closeSheet(); render();
-    if(!result.ok){ toast("Could not save — your money data was not changed"); return; }
+    if(!result.ok){
+      /* save() has usually already said exactly why -- a full store, or
+         another tab being ahead. Replacing that with a generic line loses
+         the only actionable part. */
+      if(!save.explained) toast("Could not save — your money data was not changed");
+      return;
+    }
     var wk = weekendKeyOf(e.date);
     var added = existing ? "Updated" : (wk ? (isLiveWeekend(wk) ? "Added to this weekend — "+fmt(e.amount)
                                                             : "Added to the "+weekendLabel(wk)+" weekend")
@@ -5478,6 +5664,16 @@ function importBackupFile(input){
         tab = go; render(); window.scrollTo(0,0);
       });
     });
+    var setupHide = $("#h-setup-hide");
+    if(setupHide) setupHide.addEventListener("click", function(){
+      state.setupHidden = 1;
+      if(!save()){ state.setupHidden = 0; return; }
+      render();
+      toastAction("Checklist hidden", "Undo", function(){
+        state.setupHidden = 0;
+        if(save()) render();
+      });
+    });
     shell.querySelectorAll("[data-tab]").forEach(function(b){
       b.addEventListener("click", function(){ tab = b.getAttribute("data-tab"); openWk = null; render(); window.scrollTo(0,0); });
     });
@@ -5564,6 +5760,7 @@ function importBackupFile(input){
         var v = num($("#p-salary").value);
         if(!(v >= 0)){ toast("Enter your salary"); return; }
         var paydayStartRaw = $("#p-payday-start").value.trim();
+        var beforeSalary = state.salary, beforePayday = state.payday, beforePaydayEnd = state.paydayEnd;
         var paydayEndRaw = $("#p-payday-end").value.trim();
         if(!paydayStartRaw && !paydayEndRaw){
           state.payday = 0; state.paydayEnd = 0;
@@ -5579,7 +5776,11 @@ function importBackupFile(input){
           state.payday = paydayStart; state.paydayEnd = paydayEnd;
         }
         state.salary = v;
-        save(); render(); toast("Salary saved");
+        if(!save()){
+          state.salary = beforeSalary; state.payday = beforePayday; state.paydayEnd = beforePaydayEnd;
+          render(); return;
+        }
+        render(); toast("Salary saved");
       });
       var pSalaryReceived = $("#p-salary-received");
       if(pSalaryReceived) pSalaryReceived.addEventListener("click", markSalaryReceived);
@@ -5703,7 +5904,8 @@ function importBackupFile(input){
                      salary:state.salary, commitments:state.commitments, goals:state.goals,
                      swept:state.swept, payday:state.payday, paydayEnd:state.paydayEnd, salaryReceived:state.salaryReceived, debts:state.debts,
                      restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs, wkPlan:state.wkPlan, wkWeight:state.wkWeight,
-                     wkWeightFlat:state.wkWeightFlat };  // keys deliberately excluded
+                     wkWeightFlat:state.wkWeightFlat,
+                     setupHidden:state.setupHidden };  // keys deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -5727,6 +5929,7 @@ function importBackupFile(input){
             return;
           }
           if(restoreSnapshot("before putting the safety copy back")){ render(); toast("Safety copy restored"); }
+          else if(restoreSnapshot.lastError === "write"){ render(); }
           else toast("That safety copy couldn't be read");
         });
       }
