@@ -648,6 +648,59 @@
     border-radius:16px;
   }
   .chips{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px}
+  /* ---- category budgets ---- */
+  /* a real heading for screen readers that still looks like every other
+     section label -- only the browser's own h2 margin needs undoing */
+  .sec-h{margin:0}
+  .cat-emoji{font-size:17px; line-height:1}
+  .bud-card{padding:6px 16px 12px}
+  .bud-row{padding:10px 0; border-bottom:1px solid var(--line)}
+  .bud-row:last-of-type{border-bottom:0}
+  .bud-top{display:flex; align-items:center; gap:10px; margin-bottom:7px}
+  .bud-top .ic-tile{width:30px; height:30px; flex:none}
+  .bud-name{flex:1; min-width:0; font-weight:700; font-size:14.5px; overflow-wrap:anywhere}
+  .bud-left{font-weight:800; font-size:13.5px; color:var(--good); white-space:nowrap}
+  .bud-left.neg{color:var(--bad)}
+  .bud-sub{margin-top:6px; font-size:12.5px; color:var(--ink2)}
+  .bud-total{display:flex; justify-content:space-between; gap:10px; padding-top:10px; margin-top:4px; border-top:1px solid var(--line); font-size:13.5px; font-weight:700}
+  .bud-total.muted{border-top:0; padding-top:4px; color:var(--ink2); font-weight:600}
+  .bud-warn{display:flex; gap:8px; align-items:flex-start; margin-top:10px; padding:10px 12px; border-radius:12px; font-size:13px;
+    color:var(--bad); background:color-mix(in srgb, var(--bad) 10%, var(--card2))}
+  .bud-warn svg{width:18px; height:18px; flex:none}
+  .bud-review-link{margin-top:10px}
+  .bud-hist{display:block; min-height:44px; margin-top:6px; text-align:left; color:var(--accent-deep)}
+  .bud-inputs{display:flex; flex-direction:column; gap:8px; margin-bottom:6px}
+  .bud-input{display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--line); border-radius:14px; background:var(--card)}
+  .bud-input .ic-tile{width:32px; height:32px; flex:none}
+  .bud-in-name{flex:1; min-width:0; font-weight:700; font-size:14.5px; display:flex; flex-direction:column}
+  .bud-in-name small{font-weight:600; font-size:11.5px; color:var(--ink3); margin-top:2px}
+  .bud-input input{width:96px; min-height:44px; text-align:right; font-weight:800; font-size:16px; padding:8px 10px}
+  .bud-sum{display:flex; justify-content:space-between; align-items:center; gap:10px; margin:14px 0; padding:12px 14px;
+    border-radius:14px; background:var(--card2); font-size:13px; color:var(--ink2)}
+  .bud-sum b{color:var(--good); white-space:nowrap}
+  .bud-sum.over b{color:var(--bad)}
+  .swatches{display:flex; flex-wrap:wrap; gap:10px}
+  .swatch{width:44px; height:44px; border-radius:50%; border:3px solid transparent; box-shadow:inset 0 0 0 2px var(--card)}
+  .swatch.sel{border-color:var(--ink)}
+  .rev-head{display:flex; gap:16px; align-items:center; margin:4px 0 12px}
+  .rev-score{flex:none; width:84px; height:84px; border-radius:50%; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:color-mix(in srgb, var(--warn) 16%, var(--card2)); color:var(--ink)}
+  .rev-score.all{background:color-mix(in srgb, var(--good) 18%, var(--card2))}
+  .rev-score b{font-size:24px; letter-spacing:-.02em}
+  .rev-score span{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink2)}
+  .rev-totals{flex:1; display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--ink2)}
+  .rev-totals div{display:flex; justify-content:space-between; gap:8px}
+  .rev-totals b{color:var(--ink)}
+  .rev-row{display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid var(--line)}
+  .rev-row .ic-tile{width:32px; height:32px; flex:none}
+  .rev-main{flex:1; min-width:0; display:flex; flex-direction:column}
+  .rev-name{font-weight:700; font-size:14.5px}
+  .rev-sub{font-size:12.5px; color:var(--ink2); overflow-wrap:anywhere}
+  .verdict{flex:none; font-size:11.5px; font-weight:800; padding:5px 9px; border-radius:999px; white-space:nowrap}
+  .verdict.right{color:var(--good); background:color-mix(in srgb, var(--good) 14%, var(--card2))}
+  .verdict.over{color:var(--bad); background:color-mix(in srgb, var(--bad) 14%, var(--card2))}
+  .verdict.under{color:var(--warn); background:color-mix(in srgb, var(--warn) 16%, var(--card2))}
+  .verdict.none{color:var(--ink2); background:var(--card2)}
   .chip{
     display:inline-flex; align-items:center; gap:7px; padding:9px 13px;
     border-radius:999px; border:1.5px solid var(--line); background:var(--card2);
@@ -744,15 +797,15 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=8.8"></script>
+<script src="scan.js?v=9.0"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "8.8";
+  var APP_VERSION = "9.0";
   var KEY = "weekend-wallet-v1";
-  var CATS = [
+  var BASE_CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
     {id:"drinks",    name:"Drinks",    v:"--c-drinks"},
     {id:"out",       name:"Going out", v:"--c-out"},
@@ -768,8 +821,45 @@
     {id:"other",     name:"Other",     v:"--c-other"},
     {id:"missing",   name:"Not logged", v:"--c-missing"}
   ];
-  /* "Not logged" is written by the cash check, never picked by hand */
+  /* Categories you make yourself sit between the built-ins and "Not logged".
+     They have to be registered BEFORE anything cleans expenses: cleanExpenses
+     rewrites any category it does not recognise to "Other", so a custom
+     category missing from this list at boot, on import or on restore would
+     silently lose every expense filed under it on the next save. */
+  var CUSTOM_COLORS = ["#d6336c","#7048e8","#1c7ed6","#0ca678","#f08c00","#e8590c","#5c940d","#ae3ec9","#1098ad","#c2255c"];
+  var CATS = BASE_CATS.slice();
+  /* "Not logged" is written by the cash check, never picked by hand; hidden
+     custom categories stay readable on old expenses but leave the picker */
   var PICK_CATS = CATS.filter(function(c){ return c.id !== "missing"; });
+  function cleanCustomCats(list){
+    if(!Array.isArray(list)) return [];
+    var seen = {};
+    return list.filter(function(c){
+      return c && typeof c === "object" && /^u[a-z0-9]{3,20}$/.test(String(c.id||"")) &&
+             String(c.name||"").trim() && !seen[c.id] && (seen[c.id] = 1);
+    }).map(function(c, i){
+      return { id: String(c.id), name: String(c.name).trim().slice(0, 24),
+               color: /^#[0-9a-f]{6}$/i.test(String(c.color||"")) ? String(c.color) : CUSTOM_COLORS[i % CUSTOM_COLORS.length],
+               emoji: String(c.emoji||"").replace(/[<>&"'\s]/g, "").slice(0, 4),
+               hidden: c.hidden ? 1 : 0 };
+    });
+  }
+  function rebuildCats(customList){
+    var custom = cleanCustomCats(customList !== undefined ? customList : (typeof state !== "undefined" && state ? state.customCats : []));
+    var base = BASE_CATS.filter(function(c){ return c.id !== "missing"; });
+    var missing = BASE_CATS.filter(function(c){ return c.id === "missing"; });
+    CATS = base.concat(custom.map(function(c){
+      return { id:c.id, name:c.name, v:"--c-"+c.id, custom:true, color:c.color, emoji:c.emoji, hidden:c.hidden };
+    })).concat(missing);
+    PICK_CATS = CATS.filter(function(c){ return c.id !== "missing" && !c.hidden; });
+    /* custom colours reach every existing var(--c-…) use with no other change */
+    try{
+      var tag = document.getElementById("custom-cat-vars");
+      if(!tag){ tag = document.createElement("style"); tag.id = "custom-cat-vars"; document.head.appendChild(tag); }
+      tag.textContent = ":root{" + custom.map(function(c){ return "--c-"+c.id+":"+c.color+";"; }).join("") + "}";
+    }catch(e){}
+    return custom;
+  }
   var CURRENCIES = [
     {code:"MAD", label:"Moroccan dirham (DH)"},
     {code:"USD", label:"US dollar ($)"},
@@ -803,6 +893,7 @@
   window.addEventListener("storage", function(ev){
     if(ev && ev.key === KEY && ev.newValue) warnStaleTab();
   });
+  state.customCats = rebuildCats(state.customCats);     /* before cleanExpenses -- see rebuildCats */
   state.expenses = cleanExpenses(state.expenses);
   cleanRows();
   var loadFailedWithData = false;
@@ -836,7 +927,12 @@
         if(typeof s.lastCat !== "string") s.lastCat = "";
         if(typeof s.restAmount !== "number") s.restAmount = 0;
         if(typeof s.restFrom !== "string") s.restFrom = "";
-        s.expenses = cleanExpenses(s.expenses);
+        /* load() cleans expenses before boot can register custom categories,
+           so it must check against THIS data's own category list -- checking
+           against the built-ins rewrote every custom-category expense to
+           "Other" on the first launch after it was created */
+        s.expenses = cleanExpenses(s.expenses,
+          BASE_CATS.concat(cleanCustomCats(s.customCats).map(function(c){ return { id:c.id }; })));
         /* carry over an old borrow limit into the new "money for rest of month" */
         if(s.restAmount === 0 && typeof s.borrowCap === "number" && s.borrowCap > 0){
           s.restAmount = s.borrowCap; s.restFrom = todayIso(); s.restTs = Date.now();
@@ -925,12 +1021,13 @@
      One row without a date used to be saved and then throw on the next render,
      leaving a white screen that survived every reload. Coerce what we can and
      drop what we can't. */
-  function cleanExpenses(list){
+  function cleanExpenses(list, cats){
     if(!Array.isArray(list)) return [];
+    cats = cats || CATS;
     return list.filter(function(e){
       return e && typeof e === "object" && ISO_RE.test(e.date) && isFinite(+e.amount);
     }).map(function(e){
-      var validCat = CATS.some(function(c){ return c.id === e.cat; });
+      var validCat = cats.some(function(c){ return c.id === e.cat; });
       return { id: e.id || uid(), ts: +e.ts || 0, amount: Math.round((+e.amount)*100)/100,
                cat: validCat ? e.cat : "other",
                note: typeof e.note === "string" ? e.note : "",
@@ -988,6 +1085,24 @@
         return { id: d.id || uid(), name: String(d.name || "Someone"),
                  balance: +d.balance || 0, log: log };
       });
+    state.customCats = rebuildCats(state.customCats);
+    state.catBudgets = cleanCatBudgets(state.catBudgets);
+    state.catReviewSeen = (typeof state.catReviewSeen === "string" && ISO_RE.test(state.catReviewSeen)) ? state.catReviewSeen : "";
+  }
+  /* { "<period start, YYYY-MM-DD>": { "<category id>": amount } } */
+  function cleanCatBudgets(all){
+    var out = {};
+    if(!all || typeof all !== "object") return out;
+    Object.keys(all).forEach(function(k){
+      if(!ISO_RE.test(k) || !all[k] || typeof all[k] !== "object") return;
+      var row = {}, any = false;
+      Object.keys(all[k]).forEach(function(id){
+        var v = Math.round((+all[k][id] || 0)*100)/100;
+        if(v > 0 && /^[a-z][a-z0-9]{1,24}$/.test(id)){ row[id] = v; any = true; }
+      });
+      if(any) out[k] = row;
+    });
+    return out;
   }
   /* "money for the rest of the month" belongs to the month you set it in */
   function retireStalePool(s){
@@ -1037,10 +1152,11 @@
        caller tell the two failures apart. */
     var before = state;
     state = info.data;
-    cleanRows();
+    state.customCats = rebuildCats(state.customCats);
     state.expenses = cleanExpenses(state.expenses);
+    cleanRows();
     retireStalePool(state);          /* a copy from a past cycle must not bring its pool back */
-    if(!save()){ state = before; restoreSnapshot.lastError = "write"; return false; }
+    if(!save()){ state = before; rebuildCats(state.customCats); restoreSnapshot.lastError = "write"; return false; }
     restoreSnapshot.lastError = "";
     if(current){
       try{ localStorage.setItem(SNAP_KEY, JSON.stringify({ ts: Date.now(), reason: reason || "", data: current })); }catch(e){}
@@ -1110,7 +1226,13 @@
     s = typeof s === "string" ? s : "";
     return /^data:image\/(?:gif|jpe?g|png|webp|bmp|svg\+xml);/i.test(s) ? s : "";
   }
-  function cat(id){ for(var i=0;i<CATS.length;i++){ if(CATS[i].id===id) return CATS[i]; } return CATS[CATS.length-1]; }
+  function cat(id){
+    for(var i=0;i<CATS.length;i++){ if(CATS[i].id===id) return CATS[i]; }
+    /* this fell through to the last entry -- "Not logged" -- so any unknown
+       id rendered as a cash-check reconciliation */
+    for(var j=0;j<CATS.length;j++){ if(CATS[j].id==="other") return CATS[j]; }
+    return CATS[0];
+  }
   function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
   /* accepts 7,5 and 7.5 and "7 500,25" — people type money both ways */
@@ -1456,7 +1578,13 @@
     other:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5.6L12 14 3 8.6 12 3Z" opacity="0"/><path d="M3.5 12.5 11.5 4.5a1.7 1.7 0 0 1 1.2-.5h6.3a1.5 1.5 0 0 1 1.5 1.5v6.3c0 .45-.18.88-.5 1.2l-8 8a1.5 1.5 0 0 1-2.12 0l-6.38-6.38a1.5 1.5 0 0 1 0-2.12Z"/><circle cx="16" cy="8" r="1.1"/></svg>',
     missing:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12v17l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4v-17Z"/><path d="M10 9.2a2 2 0 1 1 2.6 1.9c-.4.15-.6.5-.6.95v.6"/><path d="M12 15.6h.01"/></svg>'
   };
-  function catIcon(id){ return CAT_IC[id] || CAT_IC.other; }
+  function catIcon(id){
+    if(CAT_IC[id]) return CAT_IC[id];
+    var c = null;
+    for(var i=0;i<CATS.length;i++){ if(CATS[i].id === id) c = CATS[i]; }
+    if(c && c.emoji) return '<span class="cat-emoji" aria-hidden="true">'+esc(c.emoji)+'</span>';
+    return CAT_IC.other;
+  }
   function catTile(c, size){
     return '<span class="'+(size==="big"?"exp-thumb":"ic-tile")+'" style="color:var('+c.v+'); background:color-mix(in srgb, var('+c.v+') 15%, var(--card2))">'+catIcon(c.id)+'</span>';
   }
@@ -1812,6 +1940,7 @@
     var h = "";
 
     h += setupChecklist();
+    h += catBudgetNudge();
     h += safeSpendCard();
     h += debtEscapeCard();
 
@@ -2655,7 +2784,7 @@
   function viewHistory(){
     /* the History tab had no headings of any kind, so there was nothing to
        navigate by -- just a long flat run of text */
-    var h = '<div class="sec"><h2 class="micro" style="margin:0; font-size:inherit; font-weight:inherit; letter-spacing:inherit; text-transform:inherit; color:inherit">History</h2></div>' +
+    var h = '<div class="sec"><h2 class="micro sec-h">History</h2></div>' +
       '<div class="chips">' +
       '<button class="chip'+(histMode==="days"?" sel":"")+'" data-hist="days">'+IC.history+'Days</button>' +
       '<button class="chip'+(histMode==="weekends"?" sel":"")+'" data-hist="weekends">Weekends</button>' +
@@ -2775,6 +2904,12 @@
         '<span class="wk-label">'+label+(now?' · now':'')+'</span>' +
         '<span class="wk-amt money">'+dayTotalText(out)+'</span></div>' +
         '<div class="wk-sub">'+bits.join(' · ')+'</div>';
+      var rev = catReview(k);
+      if(rev && rev.count){
+        h += '<button class="linkish bud-hist" data-bud-review="'+esc(k)+'">' +
+          (now ? 'Budgets so far: '+esc(reviewHeadline(rev).replace(/^Right for/, "on track for").replace(/^Every budget was right/, "all on track"))
+               : 'Budgets: '+esc(reviewHeadline(rev).toLowerCase())) + ' ›</button>';
+      }
 
       if(now && (spendable > 0 || poolLive)){
         /* Home and this card describe the same month in the same second, so
@@ -3729,6 +3864,445 @@
     toast("Salary received logged · "+fmt(amount));
   }
 
+  /* ---------- category budgets ----------
+     A plan per category for the month, and at the end of it a straight answer
+     to "was that budget right?". This is a planning layer: it never changes
+     the pool, the daily figure or the salary plan -- those stay the single
+     answer to "what can I spend". What it adds is where that money is meant
+     to go, and how close the guess was.
+
+     Stored by the START date of the period it belongs to, so it follows the
+     salary cycle once one exists. Looking one up also accepts any stored key
+     that falls inside the period, because logging the first salary receipt
+     moves the start of the current period (Oct 1 becomes Sep 28) and budgets
+     set the day before must not vanish. */
+  var BUDGET_TOLERANCE = 0.10;      /* within 10% either way counts as right */
+
+  function catBudgetKeyFor(mk){
+    var all = state.catBudgets || {}, b = periodBounds(mk || monthKey());
+    if(all[b.start]) return b.start;
+    var hit = "";
+    Object.keys(all).sort().forEach(function(k){
+      if(!hit && k >= b.start && k < b.endExclusive) hit = k;
+    });
+    return hit;
+  }
+  function catBudgetsFor(mk){
+    var k = catBudgetKeyFor(mk);
+    return k ? state.catBudgets[k] : null;
+  }
+  function previousPeriodKey(mk){
+    var d = fromIso(periodBounds(mk || monthKey()).start);
+    d.setDate(d.getDate() - 1);
+    return periodKeyForDate(iso(d));
+  }
+  /* what actually went on each category in a period -- the cash check's
+     catch-all is drift, not a category, so it stays out */
+  function catSpentIn(mk){
+    var out = {};
+    state.expenses.forEach(function(e){
+      if(isReconciliation(e) || !dateInPeriod(e.date, mk)) return;
+      out[e.cat] = Math.round(((out[e.cat] || 0) + e.amount) * 100) / 100;
+    });
+    return out;
+  }
+  function budgetableMoney(){
+    var pb = poolBase();
+    if(pb !== null) return pb;
+    if(state.salary > 0) return Math.max(planMath().left, 0);
+    return null;
+  }
+  /* a number someone would actually type: tens below a thousand, fifties above */
+  function niceAmount(x){
+    if(!(x > 0)) return 0;
+    var step = x >= 1000 ? 50 : 10;
+    return Math.max(Math.round(x / step) * step, step);
+  }
+  function catReview(mk){
+    var budgets = catBudgetsFor(mk);
+    if(!budgets) return null;
+    var spent = catSpentIn(mk), rows = [], unplanned = [];
+    var totalBudget = 0, totalSpent = 0, right = 0;
+    Object.keys(budgets).forEach(function(id){
+      var b = budgets[id], sp = spent[id] || 0;
+      var verdict = sp > b * (1 + BUDGET_TOLERANCE) ? "over"
+                  : sp < b * (1 - BUDGET_TOLERANCE) ? "under" : "right";
+      if(verdict === "right") right++;
+      totalBudget += b; totalSpent += sp;
+      rows.push({ id:id, cat:cat(id), budget:b, spent:sp,
+                  diff: Math.round((sp - b) * 100) / 100, verdict:verdict,
+                  /* keep a budget that worked; otherwise suggest what really happened */
+                  suggest: verdict === "right" ? b : niceAmount(sp) });
+    });
+    Object.keys(spent).forEach(function(id){
+      if(!budgets[id] && spent[id] > 0) unplanned.push({ id:id, cat:cat(id), spent:spent[id], suggest:niceAmount(spent[id]) });
+    });
+    var order = { over:0, under:1, right:2 };
+    rows.sort(function(a, b){ return order[a.verdict] - order[b.verdict] || b.budget - a.budget; });
+    unplanned.sort(function(a, b){ return b.spent - a.spent; });
+    return { mk:mk, rows:rows, unplanned:unplanned, right:right, count:rows.length,
+             totalBudget: Math.round(totalBudget * 100) / 100,
+             totalSpent: Math.round(totalSpent * 100) / 100,
+             unplannedTotal: Math.round(unplanned.reduce(function(s, u){ return s + u.spent; }, 0) * 100) / 100 };
+  }
+  function reviewHeadline(r){
+    if(!r || !r.count) return "";
+    if(r.right === r.count) return "Every budget was right";
+    return "Right for " + r.right + " of " + r.count + " categor" + (r.count === 1 ? "y" : "ies");
+  }
+  function periodName(mk){
+    var b = periodBounds(mk);
+    return b.salary ? periodLabel(mk).replace(/ cycle$/, "")
+                    : fromIso(b.start).toLocaleDateString(undefined, { month:"long" });
+  }
+
+  /* ---- Plan: this period's budgets, live ---- */
+  function catBudgetSection(){
+    var mk = monthKey(), budgets = catBudgetsFor(mk), prevMk = previousPeriodKey(mk);
+    var prevReview = catReview(prevMk);
+    var word = salaryReceiptEntries().length > 0 ? "cycle" : "month";
+    var h = '<div class="sec"><h2 class="micro sec-h">Category budgets</h2><span class="micro">'+esc(periodName(mk))+'</span></div>';
+    if(budgets){
+      var spent = catSpentIn(mk), tb = 0, ts = 0;
+      h += '<div class="goal bud-card">';
+      Object.keys(budgets).sort(function(a, b){ return budgets[b] - budgets[a]; }).forEach(function(id){
+        var c = cat(id), b = budgets[id], sp = spent[id] || 0, left = Math.round((b - sp) * 100) / 100;
+        tb += b; ts += sp;
+        h += '<div class="bud-row">' +
+          '<div class="bud-top">' + catTile(c) +
+          '<span class="bud-name">'+esc(c.name)+'</span>' +
+          '<span class="bud-left money'+(left < 0 ? ' neg' : '')+'">' +
+            (left < 0 ? fmt(-left)+' over' : fmt(left)+' left') + '</span></div>' +
+          meterHtml(sp, b) +
+          '<div class="bud-sub">spent <b class="money">'+fmt(sp)+'</b> of <b class="money">'+fmt(b)+'</b></div></div>';
+      });
+      var unplanned = 0;
+      Object.keys(spent).forEach(function(id){ if(!budgets[id]) unplanned += spent[id]; });
+      h += '<div class="bud-total"><span>Budgeted</span><b class="money">'+fmt(Math.round(ts*100)/100)+' of '+fmt(Math.round(tb*100)/100)+'</b></div>';
+      if(unplanned > 0){
+        h += '<div class="bud-total muted"><span>Spent outside a budget</span><b class="money">'+fmt(Math.round(unplanned*100)/100)+'</b></div>';
+      }
+      var avail = budgetableMoney();
+      if(avail !== null && tb > avail + 0.5){
+        h += '<div class="bud-warn">'+IC.alert+'<span>These add up to <b class="money">'+fmt(tb)+'</b> — <b class="money">'+
+          fmt(Math.round((tb - avail)*100)/100)+'</b> more than this '+word+' leaves you.</span></div>';
+      }
+      h += '</div>';
+      h += '<div class="row2" style="margin-top:10px"><button class="btn" id="p-bud-edit">'+IC.pencil+' Edit budgets</button>' +
+        '<button class="btn" id="p-cats">Categories</button></div>';
+    }else{
+      h += emptyBox(IC.target, 'Give each category a budget for the '+word+' —<br>then see at the end whether you got it right.');
+      h += '<div class="row2"><button class="btn primary" id="p-bud-edit">Set category budgets</button>' +
+        '<button class="btn" id="p-cats">Categories</button></div>';
+    }
+    if(prevReview && prevReview.count){
+      h += '<button class="row-item bud-review-link" data-bud-review="'+esc(prevMk)+'">' +
+        '<span class="ic-tile" style="color:var(--accent-deep); background:color-mix(in srgb, var(--accent) 16%, var(--card2))">'+IC.check+'</span>' +
+        '<span class="name"><span class="ttl">How did '+esc(periodName(prevMk))+' go?</span>' +
+        '<span class="subline">'+esc(reviewHeadline(prevReview))+'</span></span>'+IC.chev+'</button>';
+    }
+    return h;
+  }
+
+  /* ---- Home: the first days of a new period ---- */
+  function catBudgetNudge(){
+    var mk = monthKey(), prevMk = previousPeriodKey(mk);
+    var prev = catReview(prevMk);
+    if(!prev || !prev.count) return "";                   /* never used budgets: never nag */
+    var b = periodBounds(mk);
+    var daysIn = Math.floor((fromIso(todayIso()) - fromIso(b.start)) / 86400000);
+    var hasNow = !!catBudgetsFor(mk);
+    var seen = state.catReviewSeen === catBudgetKeyFor(prevMk);
+    /* once you have looked, it has done its job -- Plan still offers both */
+    if(daysIn > 10 || seen) return "";
+    return '<div class="suggest bud-nudge"><span class="txt"><b>'+esc(periodName(prevMk))+'</b> is done — '+
+      esc(reviewHeadline(prev).toLowerCase())+'.'+(hasNow ? '' : ' Set this '+(b.salary ? 'cycle' : 'month')+'’s budgets?')+'</span>' +
+      '<button data-bud-review="'+esc(prevMk)+'">See how it went</button></div>';
+  }
+
+  /* ---- the review: was the budget right? ---- */
+  function openCatReviewSheet(mk){
+    var r = catReview(mk);
+    if(!r) return;
+    var key = catBudgetKeyFor(mk);
+    var nowMk = monthKey(), isPast = mk !== nowMk;
+    var verdictText = { over:"went over", under:"budgeted too much", right:"about right" };
+    var rows = r.rows.map(function(x){
+      var line = x.verdict === "over" ? 'over by <b class="money">'+fmt(x.diff)+'</b>'
+               : x.verdict === "under" ? '<b class="money">'+fmt(-x.diff)+'</b> left unspent'
+               : 'within '+Math.round(BUDGET_TOLERANCE*100)+'% of the plan';
+      return '<div class="rev-row">' + catTile(x.cat) +
+        '<span class="rev-main"><span class="rev-name">'+esc(x.cat.name)+'</span>' +
+        '<span class="rev-sub">spent <b class="money">'+fmt(x.spent)+'</b> of <b class="money">'+fmt(x.budget)+'</b> · '+line+'</span></span>' +
+        '<span class="verdict '+x.verdict+'">'+verdictText[x.verdict]+'</span></div>';
+    }).join("");
+    var unplanned = r.unplanned.map(function(u){
+      return '<div class="rev-row">' + catTile(u.cat) +
+        '<span class="rev-main"><span class="rev-name">'+esc(u.cat.name)+'</span>' +
+        '<span class="rev-sub">spent <b class="money">'+fmt(u.spent)+'</b> with no budget</span></span>' +
+        '<span class="verdict none">not planned</span></div>';
+    }).join("");
+    /* what to carry into the next period: keep what worked, correct what did not */
+    var next = {};
+    r.rows.forEach(function(x){ if(x.suggest > 0) next[x.id] = x.suggest; });
+    r.unplanned.forEach(function(u){ if(u.suggest > 0) next[u.id] = u.suggest; });
+    var nextTotal = Object.keys(next).reduce(function(s, k){ return s + next[k]; }, 0);
+    var canApply = isPast && Object.keys(next).length > 0;
+    var nowHas = !!catBudgetsFor(nowMk);
+    openSheet(
+      '<h2>'+esc(periodName(mk))+(isPast ? ' — how it went' : ' so far')+'</h2>' +
+      '<div class="rev-head"><div class="rev-score'+(r.right === r.count ? ' all' : '')+'"><b>'+r.right+'/'+r.count+'</b><span>right</span></div>' +
+      '<div class="rev-totals"><div><span>Budgeted</span><b class="money">'+fmt(r.totalBudget)+'</b></div>' +
+      '<div><span>Spent in those</span><b class="money">'+fmt(r.totalSpent)+'</b></div>' +
+      (r.unplannedTotal > 0 ? '<div><span>Spent outside</span><b class="money">'+fmt(r.unplannedTotal)+'</b></div>' : '') +
+      '</div></div>' +
+      '<p class="hint" style="margin-top:0">A budget counts as right when what you spent landed within '+Math.round(BUDGET_TOLERANCE*100)+'% of it.</p>' +
+      rows + unplanned +
+      (canApply
+        ? '<div class="panel" style="margin-top:16px"><b>For '+esc(periodName(nowMk))+'</b>' +
+          '<p class="hint" style="margin:4px 0 10px">Keep the ones that were right, and use what you really spent for the rest — '+
+          '<b class="money">'+fmt(nextTotal)+'</b> in total.</p>' +
+          '<button class="btn primary" id="rev-apply">'+(nowHas ? 'Replace this '+(periodBounds(nowMk).salary?'cycle':'month')+'’s budgets' : 'Use these budgets')+'</button>' +
+          '<button class="btn ghost" id="rev-edit" style="margin-top:8px">Adjust them first</button></div>'
+        : '')
+    );
+    if(isPast && key && state.catReviewSeen !== key){
+      state.catReviewSeen = key;
+      if(!save()) state.catReviewSeen = "";
+    }
+    var apply = $("#rev-apply");
+    if(apply) apply.addEventListener("click", function(){
+      if(nowHas && !window.confirm("Replace the budgets you already set for "+periodName(nowMk)+"?")) return;
+      if(writeCatBudgets(nowMk, next)){
+        closeSheet(); render();
+        toast("Budgets set for "+periodName(nowMk)+" — "+fmt(nextTotal));
+      }
+    });
+    var edit = $("#rev-edit");
+    if(edit) edit.addEventListener("click", function(){ openCatBudgetSheet(next); });
+  }
+
+  /* ---- setting the budgets ---- */
+  function writeCatBudgets(mk, row){
+    var key = catBudgetKeyFor(mk) || periodBounds(mk).start;
+    var before = state.catBudgets[key];
+    var clean = {}, any = false;
+    Object.keys(row || {}).forEach(function(id){
+      var v = Math.round((+row[id] || 0) * 100) / 100;
+      if(v > 0){ clean[id] = v; any = true; }
+    });
+    if(any) state.catBudgets[key] = clean; else delete state.catBudgets[key];
+    if(!save()){
+      if(before) state.catBudgets[key] = before; else delete state.catBudgets[key];
+      return false;
+    }
+    return true;
+  }
+  var budgetDraft = null;        /* typed values survive a trip to "new category" */
+  function openCatBudgetSheet(prefill){
+    var mk = monthKey(), current = catBudgetsFor(mk) || {};
+    var prevMk = previousPeriodKey(mk), prevBudgets = catBudgetsFor(prevMk) || {}, prevSpent = catSpentIn(prevMk);
+    var values = budgetDraft || prefill || current;
+    budgetDraft = null;
+    var avail = budgetableMoney();
+    var word = periodBounds(mk).salary ? "cycle" : "month";
+    var hasPrevBudgets = Object.keys(prevBudgets).length > 0;
+    var hasPrevSpend = Object.keys(prevSpent).some(function(id){ return prevSpent[id] > 0; });
+    var rows = PICK_CATS.map(function(c){
+      var hint = [];
+      if(prevBudgets[c.id]) hint.push('budget '+fmt(prevBudgets[c.id]));
+      if(prevSpent[c.id]) hint.push('spent '+fmt(prevSpent[c.id]));
+      return '<label class="bud-input" for="bud-'+c.id+'">' + catTile(c) +
+        '<span class="bud-in-name">'+esc(c.name) +
+        (hint.length ? '<small>last '+word+': '+hint.join(' · ')+'</small>' : '') + '</span>' +
+        '<input id="bud-'+c.id+'" data-bud="'+c.id+'" type="text" inputmode="decimal" placeholder="—" value="'+(values[c.id] ? values[c.id] : '')+'"></label>';
+    }).join("");
+    openSheet(
+      '<h2>Budgets for '+esc(periodName(mk))+'</h2>' +
+      '<p class="hint" style="margin-top:0">Leave a category empty to skip it. This plans where your money goes; it does not change your daily figure.</p>' +
+      ((hasPrevBudgets || hasPrevSpend)
+        ? '<div class="row2" style="margin-bottom:12px">' +
+          (hasPrevBudgets ? '<button class="btn" id="bud-copy">Copy last '+word+'</button>' : '') +
+          (hasPrevSpend ? '<button class="btn" id="bud-actual">What I really spent</button>' : '') + '</div>'
+        : '') +
+      '<div class="bud-inputs">'+rows+'</div>' +
+      '<button class="addrow" id="bud-newcat">+ New category</button>' +
+      '<div class="bud-sum" id="bud-sum"></div>' +
+      '<button class="btn primary" id="bud-save">Save budgets</button>'
+    );
+    function read(){
+      var row = {};
+      sheet.querySelectorAll("[data-bud]").forEach(function(el){
+        var v = num(el.value);
+        if(v > 0) row[el.getAttribute("data-bud")] = Math.round(v * 100) / 100;
+      });
+      return row;
+    }
+    function fill(row){
+      sheet.querySelectorAll("[data-bud]").forEach(function(el){
+        var v = row[el.getAttribute("data-bud")];
+        el.value = v > 0 ? v : "";
+      });
+      paint();
+    }
+    function paint(){
+      var row = read(), t = Object.keys(row).reduce(function(s, k){ return s + row[k]; }, 0);
+      t = Math.round(t * 100) / 100;
+      var el = $("#bud-sum");
+      if(!el) return;
+      if(avail === null){ el.innerHTML = '<span>Total</span><b class="money">'+fmt(t)+'</b>'; return; }
+      var gap = Math.round((avail - t) * 100) / 100;
+      el.className = "bud-sum" + (gap < 0 ? " over" : "");
+      el.innerHTML = '<span>Total '+fmt(t)+' of '+fmt(avail)+' this '+word+' leaves</span><b class="money">'+
+        (gap < 0 ? fmt(-gap)+' too much' : fmt(gap)+' unplanned')+'</b>';
+    }
+    sheet.querySelectorAll("[data-bud]").forEach(function(el){ el.addEventListener("input", paint); });
+    paint();
+    var copy = $("#bud-copy");
+    if(copy) copy.addEventListener("click", function(){ fill(prevBudgets); });
+    var actual = $("#bud-actual");
+    if(actual) actual.addEventListener("click", function(){
+      var row = {};
+      Object.keys(prevSpent).forEach(function(id){ if(prevSpent[id] > 0) row[id] = niceAmount(prevSpent[id]); });
+      fill(row);
+    });
+    $("#bud-newcat").addEventListener("click", function(){
+      budgetDraft = read();
+      openCategoryEditSheet(null, function(){ openCatBudgetSheet(); });
+    });
+    $("#bud-save").addEventListener("click", function(){
+      if(this.disabled) return;
+      this.disabled = true;
+      var row = read();
+      if(!writeCatBudgets(mk, row)){ this.disabled = false; return; }
+      closeSheet(); render();
+      var n = Object.keys(row).length;
+      toast(n ? n+" budget"+(n===1?"":"s")+" set for "+periodName(mk) : "Budgets cleared for "+periodName(mk));
+    });
+  }
+
+  /* ---- your own categories ---- */
+  function catInUse(id){
+    if(state.expenses.some(function(e){ return e.cat === id; })) return true;
+    var all = state.catBudgets || {};
+    return Object.keys(all).some(function(k){ return all[k][id] > 0; });
+  }
+  function openCategoriesSheet(){
+    var custom = state.customCats || [];
+    var mine = custom.length
+      ? custom.map(function(c){
+          var C = cat(c.id);
+          return '<button class="row-item" data-cat-edit="'+esc(c.id)+'">' + catTile(C) +
+            '<span class="name"><span class="ttl">'+esc(c.name)+'</span>' +
+            '<span class="subline">'+(c.hidden ? 'hidden from the picker' : 'yours')+'</span></span>'+IC.chev+'</button>';
+        }).join("")
+      : '<p class="hint" style="margin:0 0 8px">None yet. Make one for anything the built-in list does not cover — coffee, the gym, your car.</p>';
+    var built = BASE_CATS.filter(function(c){ return c.id !== "missing"; })
+      .map(function(c){ return '<span class="chip" style="pointer-events:none">'+
+        '<span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+esc(c.name)+'</span>'; }).join("");
+    openSheet(
+      '<h2>Categories</h2>' +
+      '<div class="micro" style="margin:2px 0 8px">Yours</div><div class="row-list">'+mine+'</div>' +
+      '<button class="addrow" id="cats-new">+ New category</button>' +
+      '<div class="micro" style="margin:18px 0 8px">Built in</div><div class="chips">'+built+'</div>'
+    );
+    sheet.querySelectorAll("[data-cat-edit]").forEach(function(b){
+      b.addEventListener("click", function(){ openCategoryEditSheet(b.getAttribute("data-cat-edit"), openCategoriesSheet); });
+    });
+    $("#cats-new").addEventListener("click", function(){ openCategoryEditSheet(null, openCategoriesSheet); });
+  }
+  function openCategoryEditSheet(id, back){
+    var list = state.customCats || [], c = null;
+    list.forEach(function(x){ if(x.id === id) c = x; });
+    var color = c ? c.color : CUSTOM_COLORS[list.length % CUSTOM_COLORS.length];
+    var used = c ? catInUse(c.id) : false;
+    var swatches = CUSTOM_COLORS.map(function(col){
+      return '<button type="button" class="swatch'+(col === color ? ' sel' : '')+'" data-swatch="'+col+'" style="background:'+col+'" aria-label="Colour '+col+'" aria-pressed="'+(col === color)+'"></button>';
+    }).join("");
+    openSheet(
+      '<h2>'+(c ? 'Edit category' : 'New category')+'</h2>' +
+      '<div class="row2"><div class="field" style="flex:3"><label class="micro" for="cat-name">Name</label>' +
+      '<input id="cat-name" type="text" maxlength="24" placeholder="Coffee, Gym, Car…" value="'+(c ? esc(c.name) : '')+'"></div>' +
+      '<div class="field" style="flex:1"><label class="micro" for="cat-emoji">Emoji</label>' +
+      '<input id="cat-emoji" type="text" maxlength="4" placeholder="☕" value="'+(c ? esc(c.emoji) : '')+'"></div></div>' +
+      '<div class="micro" style="margin:2px 0 8px">Colour</div><div class="swatches">'+swatches+'</div>' +
+      '<button class="btn primary" id="cat-save" style="margin-top:16px">'+(c ? 'Save' : 'Create category')+'</button>' +
+      (c ? '<button class="btn ghost" id="cat-hide" style="margin-top:10px">'+(c.hidden ? 'Show in the picker again' : 'Hide from the picker')+'</button>' +
+           (used ? '<p class="hint">It is used by expenses or budgets, so it can be hidden but not deleted — your history keeps it.</p>'
+                 : '<button class="btn danger ghost" id="cat-del" style="margin-top:10px">Delete category</button>')
+         : '') +
+      '<button class="btn ghost" id="cat-back" style="margin-top:10px">Back</button>'
+    );
+    sheet.querySelectorAll("[data-swatch]").forEach(function(b){
+      b.addEventListener("click", function(){
+        color = b.getAttribute("data-swatch");
+        sheet.querySelectorAll("[data-swatch]").forEach(function(x){
+          var on = x === b; x.classList.toggle("sel", on); x.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+      });
+    });
+    function commit(mutate, msg){
+      var before = (state.customCats || []).map(function(x){ return Object.assign({}, x); });
+      mutate();
+      state.customCats = rebuildCats(state.customCats);
+      if(!save()){ state.customCats = before; rebuildCats(before); return false; }
+      if(msg) toast(msg);
+      if(back) back(); else closeSheet();
+      render();
+      return true;
+    }
+    $("#cat-save").addEventListener("click", function(){
+      var name = $("#cat-name").value.trim().replace(/\s+/g, " ");
+      var emoji = $("#cat-emoji").value.trim().replace(/[<>&"'\s]/g, "").slice(0, 4);
+      if(!name){ toast("Give it a name"); $("#cat-name").focus(); return; }
+      var clash = CATS.some(function(x){ return x.id !== (c && c.id) && x.name.toLowerCase() === name.toLowerCase(); });
+      if(clash){ toast("There is already a category called "+name); return; }
+      if(c) commit(function(){ c.name = name; c.emoji = emoji; c.color = color; }, name+" saved");
+      else commit(function(){
+        if(!Array.isArray(state.customCats)) state.customCats = [];
+        state.customCats.push({ id: "u" + uid().replace(/[^a-z0-9]/g, "").slice(0, 12), name:name, color:color, emoji:emoji, hidden:0 });
+      }, name+" created");
+    });
+    var hide = $("#cat-hide");
+    if(hide) hide.addEventListener("click", function(){
+      var nowHidden = !c.hidden;
+      commit(function(){ c.hidden = nowHidden ? 1 : 0; }, c.name+(nowHidden ? " hidden" : " is back in the picker"));
+    });
+    var del = $("#cat-del");
+    if(del) del.addEventListener("click", function(){
+      if(catInUse(c.id)) return;        /* checked again: never delete something history points at */
+      commit(function(){ state.customCats = state.customCats.filter(function(x){ return x.id !== c.id; }); }, c.name+" deleted");
+    });
+    $("#cat-back").addEventListener("click", function(){ if(back) back(); else closeSheet(); });
+    setTimeout(function(){ var el = $("#cat-name"); if(el && !c) el.focus(); }, 300);
+  }
+
+  /* Smarter guessing for the note box: a category you named yourself wins,
+     then whatever you filed the same note under before, then the built-in
+     rules. "Café Hafa" logged as Coffee once is Coffee next time. */
+  function guessCatFromNote(note){
+    var n = String(note || "").trim().toLowerCase();
+    if(n.length < 2) return null;
+    var hit = null;
+    PICK_CATS.forEach(function(c){
+      if(!hit && c.custom){
+        var nm = c.name.toLowerCase();
+        if(n.indexOf(nm) > -1 || (n.length >= 3 && nm.indexOf(n) === 0)) hit = c.id;
+      }
+    });
+    if(hit) return hit;
+    for(var i = state.expenses.length - 1; i >= 0; i--){
+      var e = state.expenses[i];
+      if(String(e.note || "").trim().toLowerCase() === n &&
+         PICK_CATS.some(function(c){ return c.id === e.cat; })) return e.cat;
+    }
+    return (window.ReceiptParse && ReceiptParse.guessCategory(note)) || null;
+  }
+  /* what an AI scanner needs to know about categories it has never seen */
+  function catPromptList(){
+    return PICK_CATS.map(function(c){ return c.custom ? c.id+" ("+c.name+")" : c.id; }).join(", ");
+  }
+
   function viewPlan(){
     var m = planMath();
     var monthName = periodLabel(monthKey());
@@ -3893,6 +4467,7 @@
     h += '<button class="addrow" id="p-add-split">+ Split a bill</button>' +
       '<button class="addrow" id="p-add-debt">+ Money in / out</button>';
 
+    h += catBudgetSection();
     h += '<div class="sec"><span class="micro">Saving goals</span></div>';
     if(state.goals.length){
       state.goals.forEach(function(g){
@@ -3930,7 +4505,7 @@
         '<p class="payment-status-copy">'+(diff
           ? fmt(Math.abs(diff))+(diff>0? ' more' : ' less')+' than the usual '+fmt(c.amount)+'. '
           : 'The usual amount was paid. ')+(poolActive
-          ? 'This payment is recorded for history and debt tracking. Your manual spending pool is separate, so logging it does not change that pool.'
+          ? 'This payment came out of the cash you counted, so it has been taken off your money for the rest of the '+periodWord+'.'
           : 'This payment is already included in your salary plan. Logging it confirms the payment; it is not subtracted a second time.')+'</p>' +
         '<button class="btn ghost" id="c-unpay" style="color:var(--ink2)">Undo payment</button></div>';
     }
@@ -3941,7 +4516,7 @@
       '<input id="c-paid" type="text" inputmode="decimal" placeholder="'+c.amount+'" value=""></div>' +
       '<button class="btn primary" id="c-pay">Log payment</button>' +
       '<div class="hint">'+(poolActive
-        ? 'Your manual spending pool is separate. This records the payment for history and debt tracking; adjust the pool if the cash came from it.'
+        ? 'Logging it takes the amount off the cash you counted, the same as any other money leaving your pocket.'
         : state.salary > 0
           ? 'The usual amount is already reserved from your salary. Logging confirms it; only paying more or less changes Left to spend.'
           : 'Log the real amount to track the payment. Add a salary plan if you want Left to spend calculated.')+'</div></div>';
@@ -4403,8 +4978,13 @@ function importBackupFile(input){
           if(!isPaydayDay(importPayday)) importPayday = 0;
           if(!isPaydayDay(importPaydayEnd)) importPaydayEnd = importPayday;
           if(importPaydayEnd < importPayday) importPaydayEnd = importPayday;
+          /* the backup's own categories, registered before its expenses are
+             cleaned -- otherwise every custom-category expense in the file
+             would be rewritten to "Other" on the way in */
+          var importCats = cleanCustomCats(d.customCats);
+          var importCatList = BASE_CATS.concat(importCats.map(function(c){ return { id:c.id }; }));
           state = { setup:true, budget:+d.budget||0, currency:d.currency||"USD",
-                    expenses:cleanExpenses(d.expenses), apiKey:state.apiKey, geminiApiKey:state.geminiApiKey,
+                    expenses:cleanExpenses(d.expenses, importCatList), apiKey:state.apiKey, geminiApiKey:state.geminiApiKey,
                     agentRouterApiKey:state.agentRouterApiKey, agentRouterModel:state.agentRouterModel,
                     scanProvider:d.scanProvider||state.scanProvider,
                     scanModel:d.scanModel||state.scanModel,
@@ -4423,7 +5003,9 @@ function importBackupFile(input){
                        re-fires on every restore and quietly undoes a
                        weighting you chose on purpose */
                     wkWeightFlat:d.wkWeightFlat ? 1 : 0,
-                    setupHidden:d.setupHidden ? 1 : 0 };
+                    setupHidden:d.setupHidden ? 1 : 0,
+                    customCats:importCats,
+                    catBudgets:cleanCatBudgets(d.catBudgets) };
           cleanRows();
           retireStalePool(state);
           /* draw BEFORE writing: a backup with one bad row used to be saved
@@ -4435,12 +5017,12 @@ function importBackupFile(input){
              restored data while the old state stayed on disk -- gone without
              trace on the next launch. */
           if(!save()){
-            if(prev){ state = prev; try{ render(); }catch(e2){} }
+            if(prev){ state = prev; rebuildCats(state.customCats); try{ render(); }catch(e2){} }
             return;
           }
           toast("Backup restored — "+state.expenses.length+" expenses");
         }catch(e){
-          if(prev){ state = prev; try{ render(); }catch(e2){} }
+          if(prev){ state = prev; rebuildCats(state.customCats); try{ render(); }catch(e2){} }
           toast("That file isn't a Weekend Wallet backup");
         }
       };
@@ -4615,7 +5197,7 @@ function importBackupFile(input){
         }}},
         messages: [{ role: "user", content: [
           { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
-          { type: "text", text: "This is a photo of a receipt for a personal expense tracker. Extract the final total actually paid (after tax/tip), the merchant name, the purchase date, and pick the best category: food (restaurants, cafés, groceries), drinks (bars), out (entertainment, events), transport (taxi, fuel, parking), shop (retail, pharmacy), other. If it is not a receipt or the total is unreadable, set amount to null." }
+          { type: "text", text: "This is a photo of a receipt for a personal expense tracker. Extract the final total actually paid (after tax/tip), the merchant name, the purchase date, and pick the best category: food (restaurants, cafés, groceries), drinks (bars), out (entertainment, events), transport (taxi, fuel, parking), shop (retail, pharmacy), other — or one of these by id: "+catPromptList()+". If it is not a receipt or the total is unreadable, set amount to null." }
         ]}]
       })
     }).then(function(resp){
@@ -4655,7 +5237,7 @@ function importBackupFile(input){
         messages: [
           { role: "system", content: "You extract structured data from receipt photos. Return ONLY one valid JSON object with no markdown." },
           { role: "user", content: [
-            { type: "text", text: "Extract the final total actually paid after tax/tip, merchant name, purchase date, and best category from this receipt. Category must be one of: "+catIds.join(", ")+". Use amount as a number or null, merchant as a string or null, date as YYYY-MM-DD or null. If this is not a receipt or the total is unreadable, set amount to null. Return exactly: {\"amount\":number|null,\"merchant\":string|null,\"category\":string|null,\"date\":string|null}." },
+            { type: "text", text: "Extract the final total actually paid after tax/tip, merchant name, purchase date, and best category from this receipt. Category must be one of: "+catPromptList()+". Use amount as a number or null, merchant as a string or null, date as YYYY-MM-DD or null. If this is not a receipt or the total is unreadable, set amount to null. Return exactly: {\"amount\":number|null,\"merchant\":string|null,\"category\":string|null,\"date\":string|null}." },
             { type: "image_url", image_url: { url: "data:image/jpeg;base64," + b64 } }
           ]}
         ]
@@ -5349,6 +5931,7 @@ function importBackupFile(input){
     $("#f-note").addEventListener("input", function(){
       if(draft.catManual) return;
       var g = window.ReceiptParse && ReceiptParse.guessCategory(this.value);
+      g = guessCatFromNote(this.value) || g;
       if(g) selectChip(g);
     });
     $("#f-quicks").addEventListener("click", function(ev){
@@ -5664,6 +6247,13 @@ function importBackupFile(input){
         tab = go; render(); window.scrollTo(0,0);
       });
     });
+    var budEdit = $("#p-bud-edit");
+    if(budEdit) budEdit.addEventListener("click", function(){ openCatBudgetSheet(); });
+    var catsBtn = $("#p-cats");
+    if(catsBtn) catsBtn.addEventListener("click", openCategoriesSheet);
+    shell.querySelectorAll("[data-bud-review]").forEach(function(b){
+      b.addEventListener("click", function(){ openCatReviewSheet(b.getAttribute("data-bud-review")); });
+    });
     var setupHide = $("#h-setup-hide");
     if(setupHide) setupHide.addEventListener("click", function(){
       state.setupHidden = 1;
@@ -5905,7 +6495,8 @@ function importBackupFile(input){
                      swept:state.swept, payday:state.payday, paydayEnd:state.paydayEnd, salaryReceived:state.salaryReceived, debts:state.debts,
                      restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs, wkPlan:state.wkPlan, wkWeight:state.wkWeight,
                      wkWeightFlat:state.wkWeightFlat,
-                     setupHidden:state.setupHidden };  // keys deliberately excluded
+                     setupHidden:state.setupHidden,
+                     customCats:state.customCats, catBudgets:state.catBudgets };  // keys deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -5943,7 +6534,9 @@ function importBackupFile(input){
         }
         snapshot("before erasing everything");
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", agentRouterApiKey:"", agentRouterModel:"gpt-5.5", scanProvider:"free", scanModel:"claude-opus-4-8",
-                  salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:1 };
+                  salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:1,
+                  customCats:[], catBudgets:{} };
+        rebuildCats([]);
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
         /* the confirm now says a copy remains, so there has to be a way to
