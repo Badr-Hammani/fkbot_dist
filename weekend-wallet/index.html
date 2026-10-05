@@ -625,6 +625,106 @@
     .meter-fill,.meter i{transition:none}
     button:active,.row-item:active,.exp:active,.qa-tile:active,.chip:active,.wk:active,.task:active{transform:none}
   }
+  /* ---------- motion & depth ----------
+     The language of the ad, kept cheap enough for an app opened ten times a
+     day: only transform, opacity and filter animate (the compositor's job,
+     not layout's), the 3D is CSS rather than a WebGL scene, and nothing runs
+     unless something just changed -- a re-render after every tap must never
+     replay an entrance. Reduce Motion switches all of it off. */
+  :root{ --glow:rgba(232,158,36,.20); --glow-strong:rgba(232,158,36,.55); --ease-out:cubic-bezier(.22,1,.36,1) }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --glow:rgba(242,169,59,.42); --glow-strong:rgba(242,169,59,.85) } }
+  :root[data-theme="dark"]{ --glow:rgba(242,169,59,.42); --glow-strong:rgba(242,169,59,.85) }
+
+  /* the ad's atmosphere: an amber bloom over indigo depth, drifting slowly */
+  body::before{
+    content:""; position:fixed; inset:-20%; z-index:-1; pointer-events:none;
+    background:
+      radial-gradient(42% 30% at 70% 12%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%),
+      radial-gradient(50% 40% at 18% 88%, color-mix(in srgb, #6c5ce7 14%, transparent), transparent 72%);
+    animation:drift 28s ease-in-out infinite alternate;
+  }
+  @keyframes drift{ from{transform:translate3d(-3%, -2%, 0)} to{transform:translate3d(3%, 2%, 0)} }
+
+  /* screens arrive the way the ad's captions do: rise, sharpen, settle */
+  @keyframes rise{
+    from{opacity:0; transform:translate3d(var(--enter-x, 0px), 16px, 0); filter:blur(6px)}
+    to{opacity:1; transform:none; filter:blur(0)}
+  }
+  /* content slides in from the side; never let that widen the page */
+  #shell.enter{overflow-x:clip}
+  #shell.enter > :not(.topbar):not(.tabbar){animation:rise .52s var(--ease-out) both; animation-delay:calc(var(--i, 0) * 38ms)}
+  #shell.enter .meter-fill{animation:grow .95s var(--ease-out) both; animation-delay:.18s; transform-origin:0 50%}
+  @keyframes grow{ from{transform:scaleX(0)} }
+  .sheet.sheet-enter > *:not(.sheet-x):not(.grab){animation:rise .46s var(--ease-out) both; animation-delay:calc(var(--i, 0) * 30ms + 70ms)}
+
+  /* the number that matters glows, and blooms when it changes */
+  .hero-amount{text-shadow:0 0 30px var(--glow), 0 0 2px var(--glow)}
+  .hero-amount.over{text-shadow:0 0 30px color-mix(in srgb, var(--bad) 40%, transparent)}
+  .safe-amount{text-shadow:0 0 26px var(--glow)}
+  .hero-amount.bump{animation:bloom .7s var(--ease-out)}
+  @keyframes bloom{
+    0%{transform:translateY(10px) scale(.97); filter:blur(5px); opacity:.25; text-shadow:0 0 46px var(--glow-strong)}
+    55%{filter:blur(0); opacity:1; text-shadow:0 0 40px var(--glow-strong)}
+    100%{transform:none; text-shadow:0 0 30px var(--glow), 0 0 2px var(--glow)}
+  }
+  .hero::before{animation:orb 14s ease-in-out infinite alternate}
+  @keyframes orb{ from{transform:translate3d(0,0,0) scale(1)} to{transform:translate3d(-40px, 26px, 0) scale(1.18)} }
+  .btn.primary, .addbtn{box-shadow:0 10px 28px -10px color-mix(in srgb, var(--accent) 80%, transparent), 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent)}
+
+  /* a pill that slides to the tab you picked instead of jumping there */
+  .tabbar-inner{position:relative}
+  .tab, .addbtn{position:relative; z-index:1}
+  .tab.active{background:transparent}
+  .tab-ind{position:absolute; top:7px; bottom:7px; left:0; border-radius:18px; z-index:0; pointer-events:none;
+    background:color-mix(in srgb, var(--accent) 12%, var(--card2));
+    box-shadow:0 0 22px -6px var(--glow), inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent)}
+
+  /* the brand tile, with real thickness: layers stacked in depth */
+  .brand-mark{background:none; perspective:240px; color:var(--on-accent)}
+  .bm3d{position:relative; width:100%; height:100%; transform-style:preserve-3d; display:block; border-radius:inherit;
+    animation:sway 7s ease-in-out infinite; cursor:pointer}
+  .bm3d > span{position:absolute; inset:0; border-radius:inherit}
+  .bm-layer{background:color-mix(in srgb, var(--accent) 62%, #3a1f00); transform:translateZ(var(--z))}
+  .bm-front{display:grid; place-items:center; font-weight:800; transform:translateZ(3px);
+    background:linear-gradient(145deg, color-mix(in srgb, var(--accent) 70%, #fff) 0%, var(--accent) 45%, color-mix(in srgb, var(--accent) 80%, #6b3d00) 100%);
+    box-shadow:0 0 18px -4px var(--glow-strong); overflow:hidden}
+  .bm-front::after{content:""; position:absolute; inset:-40%; background:linear-gradient(115deg, transparent 40%, rgba(255,255,255,.55) 50%, transparent 60%);
+    transform:translateX(-120%); animation:glint 7s ease-in-out infinite}
+  @keyframes sway{ 0%,100%{transform:rotateY(-16deg) rotateX(8deg)} 50%{transform:rotateY(16deg) rotateX(-4deg)} }
+  @keyframes glint{ 0%,70%{transform:translateX(-120%)} 85%,100%{transform:translateX(120%)} }
+  .bm3d.spin{animation:spin3d .9s var(--ease-out)}
+  @keyframes spin3d{ from{transform:rotateY(0) rotateX(8deg)} to{transform:rotateY(360deg) rotateX(8deg)} }
+
+  /* a dirham coin in three dimensions: two faces and a stacked rim */
+  .coin3d{--size:34px; position:relative; display:inline-block; width:var(--size); height:var(--size); transform-style:preserve-3d}
+  .coin3d > span{position:absolute; inset:0; border-radius:50%}
+  .c-face{display:grid; place-items:center; font-weight:800; font-size:calc(var(--size) * .34); letter-spacing:-.02em; color:#7a4500;
+    background:radial-gradient(circle at 34% 28%, #fff0c4 0%, #f5b941 42%, #c47f12 78%, #8a5200 100%);
+    box-shadow:inset 0 0 0 calc(var(--size) * .07) rgba(122,69,0,.38)}
+  .c-front{transform:translateZ(2.5px)}
+  .c-back{transform:rotateY(180deg) translateZ(2.5px)}
+  .c-rim{background:#b8741a; transform:translateZ(var(--z))}
+  .coin-burst{position:fixed; z-index:90; width:0; height:0; pointer-events:none; perspective:600px}
+  .coin-burst .cb{position:absolute; left:-17px; top:-17px; animation:toss 1.15s cubic-bezier(.2,.7,.3,1) both; animation-delay:var(--d)}
+  .coin-burst .cb .coin3d{animation:flip .55s linear infinite}
+  @keyframes toss{
+    0%{transform:translate3d(0,0,0) scale(.3); opacity:0}
+    12%{opacity:1}
+    40%{transform:translate3d(calc(var(--dx) * .75), var(--dy), 0) scale(1)}
+    100%{transform:translate3d(var(--dx), calc(var(--dy) + 190px), 0) scale(.75); opacity:0}
+  }
+  @keyframes flip{ to{transform:rotateY(360deg) rotateX(18deg)} }
+  .onb-coins{position:relative; height:92px; margin-bottom:6px}
+  .onb-coins > span{position:absolute; animation:float 4.5s ease-in-out infinite; perspective:400px}
+  .onb-coins .coin3d{animation:flip 3.2s linear infinite}
+  @keyframes float{ 0%,100%{translate:0 0} 50%{translate:0 -10px} }
+  .onb h1{text-shadow:0 0 34px var(--glow)}
+
+  @media (prefers-reduced-motion: reduce){
+    body::before, .hero::before, .bm3d, .bm-front::after, .coin3d, .onb-coins > span, .onb-coins .coin3d{animation:none !important}
+    #shell.enter > *, #shell.enter .meter-fill, .sheet.sheet-enter > *, .hero-amount.bump{animation:none !important}
+    .coin-burst{display:none}
+  }
   .grab{width:40px; height:5px; border-radius:3px; background:var(--line); margin:0 auto 14px;
     position:relative; cursor:grab}
   /* a wider invisible target so the drag starts where a thumb actually lands */
@@ -797,13 +897,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=9.0"></script>
+<script src="scan.js?v=9.1"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "9.0";
+  var APP_VERSION = "9.1";
   var KEY = "weekend-wallet-v1";
   var BASE_CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1605,7 +1705,14 @@
   var shell = $("#shell");
 
   function render(){
-    if(!state.setup){ renderOnboarding(); return; }
+    if(!state.setup){ renderOnboarding(); lastView = "onboarding"; return; }
+    var view = tab + (tab === "history" ? ":" + histMode : "");
+    var entering = view !== lastView;
+    var dir = 0;
+    if(entering && lastView && TAB_ORDER[tab] != null){
+      var prevTab = String(lastView).split(":")[0];
+      if(TAB_ORDER[prevTab] != null) dir = TAB_ORDER[tab] - TAB_ORDER[prevTab];
+    }
     var html = topbar();
     if(tab==="home") html += viewHome();
     else if(tab==="plan") html += viewPlan();
@@ -1616,6 +1723,8 @@
     shell.innerHTML = html;
     bindView();
     syncToggleSemantics(shell);
+    afterRenderMotion(entering, dir);
+    lastView = view;
     /* closeSheet() returns focus before this runs, so on a delete it lands on
        a row this render then destroys and focus falls to <body> -- a screen
        reader jumps to the top of the page after every delete. Catch it here,
@@ -1642,13 +1751,95 @@
     }
   }
 
+  /* ---------- motion helpers ---------- */
+  var TAB_ORDER = { home:0, plan:1, history:2, settings:3 };
+  var lastView = null, lastHeroText = null, lastIndX = null;
+  var reducedMotion = window.matchMedia ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+  // Every launch opens on Home, so a scroll position remembered from another
+  // screen only lands the page part-way down. Start at the top instead.
+  try { if ("scrollRestoration" in history) history.scrollRestoration = "manual"; } catch (e) {}
+  function motionOK(){ return !(reducedMotion && reducedMotion.matches); }
+
+  function brand3d(){
+    var layers = "";
+    for(var z = -5; z <= 2; z++) layers += '<span class="bm-layer" style="--z:'+z+'px"></span>';
+    return '<span class="bm3d">'+layers+'<span class="bm-front">W</span></span>';
+  }
+  function coinHtml(size){
+    var rim = "";
+    for(var z = -2; z <= 2; z++) rim += '<span class="c-rim" style="--z:'+(z*0.9).toFixed(1)+'px"></span>';
+    return '<span class="coin3d" style="--size:'+(size||34)+'px">'+rim+
+      '<span class="c-face c-back">DH</span><span class="c-face c-front">DH</span></span>';
+  }
+  /* coins thrown up from where the good news happened -- for the moments
+     worth marking, never for an ordinary expense */
+  function coinBurst(origin){
+    if(!motionOK()) return;
+    var r = origin && origin.getBoundingClientRect ? origin.getBoundingClientRect() : null;
+    var x = r && r.width ? r.left + r.width/2 : innerWidth/2;
+    var y = r && r.height ? r.top + r.height/2 : innerHeight * 0.42;
+    var host = document.createElement("div");
+    host.className = "coin-burst"; host.setAttribute("aria-hidden", "true");
+    host.style.left = x + "px"; host.style.top = y + "px";
+    for(var i = 0; i < 9; i++){
+      var c = document.createElement("div"), ang = -Math.PI/2 + (i - 4) * 0.34 + (Math.random() - .5) * 0.22;
+      var dist = 95 + Math.random() * 75;
+      c.className = "cb";
+      c.style.setProperty("--dx", (Math.cos(ang) * dist).toFixed(1) + "px");
+      c.style.setProperty("--dy", (Math.sin(ang) * dist).toFixed(1) + "px");
+      c.style.setProperty("--d", (i * 22) + "ms");
+      c.innerHTML = coinHtml(30 + Math.round(Math.random() * 10));
+      host.appendChild(c);
+    }
+    document.body.appendChild(host);
+    setTimeout(function(){ if(host.parentNode) host.parentNode.removeChild(host); }, 1500);
+  }
+  function afterRenderMotion(entering, dir){
+    /* the pill under the active tab slides from wherever it last was */
+    var ind = shell.querySelector(".tab-ind"), act = shell.querySelector(".tab.active");
+    if(ind && act){
+      var x = act.offsetLeft;
+      ind.style.width = act.offsetWidth + "px";
+      ind.style.transform = "translateX(" + x + "px)";
+      if(motionOK() && lastIndX !== null && Math.abs(lastIndX - x) > 1 && ind.animate){
+        ind.animate([{ transform:"translateX(" + lastIndX + "px)" }, { transform:"translateX(" + x + "px)" }],
+                    { duration:420, easing:"cubic-bezier(.22,1,.36,1)" });
+      }
+      lastIndX = x;
+    }
+    var hero = shell.querySelector(".hero-amount");
+    var heroText = hero ? hero.textContent : null;
+    if(!motionOK()){ lastHeroText = heroText; return; }
+    if(entering){
+      shell.classList.remove("enter");
+      void shell.offsetWidth;                         /* restart, even back to back */
+      shell.style.setProperty("--enter-x", (dir > 0 ? 22 : dir < 0 ? -22 : 0) + "px");
+      var k = 0;
+      for(var i = 0; i < shell.children.length; i++){
+        var el = shell.children[i];
+        if(el.classList.contains("topbar") || el.classList.contains("tabbar")) continue;
+        el.style.setProperty("--i", Math.min(k++, 10));
+      }
+      shell.classList.add("enter");
+      clearTimeout(afterRenderMotion.t);
+      afterRenderMotion.t = setTimeout(function(){ shell.classList.remove("enter"); }, 1200);
+    }else{
+      /* a re-render of the same screen (a tap soon after arriving) must not
+         replay the entrance on the fresh content */
+      clearTimeout(afterRenderMotion.t);
+      shell.classList.remove("enter");
+      if(hero && lastHeroText !== null && heroText !== lastHeroText) hero.classList.add("bump");
+    }
+    lastHeroText = heroText;
+  }
+
   function topbar(){
     /* There was no <h1> anywhere in the app once you were past onboarding, so
        heading navigation had no top level to return to. The visible design is
        unchanged -- brand-name simply becomes the heading it already looked
        like. */
     return '<header class="topbar"><div class="brand">' +
-      '<div class="brand-mark" aria-hidden="true">W</div>' +
+      '<div class="brand-mark" aria-hidden="true">'+brand3d()+'</div>' +
       '<div><h1 class="brand-name">Weekend Wallet</h1>' +
       '<div class="brand-sub">Daily money · weekend fun</div></div></div></header>';
   }
@@ -1663,7 +1854,7 @@
       '<button class="addbtn" id="open-add" aria-label="Add expense">'+IC.plus+'</button>' +
       t("history","History",IC.history) +
       t("settings","Settings",IC.gear) +
-      '</div></nav>';
+      '<span class="tab-ind" aria-hidden="true"></span></div></nav>';
   }
 
   function meterHtml(spent, budget){
@@ -3860,7 +4051,7 @@
       return;
     }
     lastSeenDay = todayIso();
-    render();
+    render(); coinBurst();
     toast("Salary received logged · "+fmt(amount));
   }
 
@@ -4074,7 +4265,7 @@
     if(apply) apply.addEventListener("click", function(){
       if(nowHas && !window.confirm("Replace the budgets you already set for "+periodName(nowMk)+"?")) return;
       if(writeCatBudgets(nowMk, next)){
-        closeSheet(); render();
+        closeSheet(); render(); coinBurst();
         toast("Budgets set for "+periodName(nowMk)+" — "+fmt(nextTotal));
       }
     });
@@ -4177,6 +4368,7 @@
       if(!writeCatBudgets(mk, row)){ this.disabled = false; return; }
       closeSheet(); render();
       var n = Object.keys(row).length;
+      if(n) coinBurst();
       toast(n ? n+" budget"+(n===1?"":"s")+" set for "+periodName(mk) : "Budgets cleared for "+periodName(mk));
     });
   }
@@ -4860,7 +5052,7 @@
         toast("Could not save — your money data was not changed");
         return;
       }
-      closeSheet(); render();
+      closeSheet(); render(); coinBurst();
       var done = g.saved >= g.target;
       toastAction(
         over > 0 ? g.name+" is full — "+fmt(put)+" put away, "+fmt(over)+" wasn't needed"
@@ -5063,7 +5255,11 @@ function importBackupFile(input){
         '</div>';
     }
     shell.innerHTML = '<div class="onb">' +
-      '<div class="brand-mark" aria-hidden="true">W</div>' +
+      '<div class="onb-coins" aria-hidden="true">' +
+        '<span style="left:8%; top:30px; animation-delay:-1.2s">'+coinHtml(30)+'</span>' +
+        '<span style="left:44%; top:0; animation-delay:-.4s">'+coinHtml(44)+'</span>' +
+        '<span style="right:10%; top:38px; animation-delay:-2.1s">'+coinHtml(26)+'</span></div>' +
+      '<div class="brand-mark" aria-hidden="true">'+brand3d()+'</div>' +
       '<h1>Money for the weekend, sorted.</h1>' +
       '<p class="lede">Set a Friday-to-Sunday budget, snap receipts and let the amounts fill themselves in. All on your phone.</p>' +
       recovery +
@@ -5663,7 +5859,7 @@ function importBackupFile(input){
       state.cashTs = Date.now();
       if(Math.abs(d) < 1){
         if(!save()){ state.cashTs = cashBefore; return; }
-        closeSheet(); render();
+        closeSheet(); render(); coinBurst();
         toast("Nice — the app matches your pocket");
         return;
       }
@@ -5728,6 +5924,16 @@ function importBackupFile(input){
     sheet.querySelector(".sheet-x").addEventListener("click", closeSheet);
     attachSheetDrag();
     backdrop.classList.add("show");
+    if(motionOK()){
+      var kids = sheet.children, kk = 0;
+      for(var ci = 0; ci < kids.length; ci++){
+        if(kids[ci].classList.contains("grab") || kids[ci].classList.contains("sheet-x")) continue;
+        kids[ci].style.setProperty("--i", Math.min(kk++, 12));
+      }
+      sheet.classList.remove("sheet-enter"); void sheet.offsetWidth; sheet.classList.add("sheet-enter");
+      clearTimeout(openSheet.t);
+      openSheet.t = setTimeout(function(){ sheet.classList.remove("sheet-enter"); }, 1100);
+    }
     requestAnimationFrame(function(){
       sheet.classList.add("show");
       /* land on the field the sheet exists for — an amount box that needs one
@@ -6246,6 +6452,12 @@ function importBackupFile(input){
         if(go === "add"){ openQuickAdd(); return; }
         tab = go; render(); window.scrollTo(0,0);
       });
+    });
+    var bm = shell.querySelector(".bm3d");
+    if(bm) bm.addEventListener("click", function(){
+      if(!motionOK()) return;
+      bm.classList.remove("spin"); void bm.offsetWidth; bm.classList.add("spin");
+      setTimeout(function(){ bm.classList.remove("spin"); }, 950);
     });
     var budEdit = $("#p-bud-edit");
     if(budEdit) budEdit.addEventListener("click", function(){ openCatBudgetSheet(); });
