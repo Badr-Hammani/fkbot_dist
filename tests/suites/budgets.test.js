@@ -97,6 +97,21 @@ exports.run = async function (t, env) {
     t.has("a healthy one says what is left", card, "MAD 50 left");
     t.has("spending with no budget is counted separately", card, "Spent outside a budget MAD 200");
     t.no("the cash-check catch-all is not a category", /999/.test(card), card);
+
+    /* the review is reachable mid-month, and judges a running month fairly */
+    const link = app.page.locator('.bud-review-link[data-bud-review="2026-09"]');
+    t.has("Plan offers this month's review", norm(await link.innerText()), "How is September going? On track for 2 of 3");
+    t.ok("its arrow is arrow-sized", await link.evaluate(b => b.querySelector(":scope > svg").getBoundingClientRect().width <= 20));
+    await link.click();
+    await app.page.waitForTimeout(400);
+    const live = norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText));
+    t.has("it is labelled as still running", live, "September so far");
+    t.has("scored on track, not right", live.toLowerCase(), "2/3 on track");
+    t.has("money left is room, not a wrong guess", live, "room left");
+    t.no("nothing is called over-budgeted before the month ends", /budgeted too much|about right/.test(live), live);
+    t.has("an overspent budget is already over", live, "over already");
+    t.ok("the score is drawn as a ring", await app.page.evaluate(() => !!document.querySelector("#sheet .rev-score .rs-fill")));
+    t.no("and there is nothing to apply yet", await app.page.evaluate(() => !!document.querySelector("#rev-apply")));
     await app.close();
   }
 
