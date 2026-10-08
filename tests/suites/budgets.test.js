@@ -100,18 +100,49 @@ exports.run = async function (t, env) {
 
     /* the review is reachable mid-month, and judges a running month fairly */
     const link = app.page.locator('.bud-review-link[data-bud-review="2026-09"]');
-    t.has("Plan offers this month's review", norm(await link.innerText()), "How is September going? On track for 2 of 3");
+    /* day 20 of 30: Food's 1,450 of 1,500 is under budget but would end near
+       2,175 at this pace -- that is not on track, however much is "left" */
+    t.has("Plan offers this month's review", norm(await link.innerText()), "How is September going? On track for 1 of 3 · 10 days left");
     t.ok("its arrow is arrow-sized", await link.evaluate(b => b.querySelector(":scope > svg").getBoundingClientRect().width <= 20));
     await link.click();
     await app.page.waitForTimeout(400);
     const live = norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText));
     t.has("it is labelled as still running", live, "September so far");
-    t.has("scored on track, not right", live.toLowerCase(), "2/3 on track");
-    t.has("money left is room, not a wrong guess", live, "room left");
+    t.has("scored on track, not right", live.toLowerCase(), "1/3 on track");
+    t.has("it says how far through the month you are", live, "Day 20 of 30 · 10 days left");
+    t.has("a budget being used up too quickly is flagged", live, "spending fast");
+    t.has("with where that pace ends up", live, "heading for MAD 2,200 by Sep 30");
+    t.has("a slow one is on pace", live, "on pace");
     t.no("nothing is called over-budgeted before the month ends", /budgeted too much|about right/.test(live), live);
     t.has("an overspent budget is already over", live, "over already");
     t.ok("the score is drawn as a ring", await app.page.evaluate(() => !!document.querySelector("#sheet .rev-score .rs-fill")));
     t.no("and there is nothing to apply yet", await app.page.evaluate(() => !!document.querySelector("#rev-apply")));
+    t.no("one month of budgets: nothing to step through", await app.page.evaluate(() => !!document.querySelector(".rev-nav")));
+    await app.close();
+  }
+
+  /* ---- the first days of a period: no verdicts from a few receipts ---- */
+  {
+    const early = september();
+    early.expenses.push(expense({ id: "o1", amount: 700, date: "2026-10-02", cat: "food" }));
+    early.catBudgets["2026-10-01"] = { food: 1500 };
+    const app = await boot(browser, early, { now: "2026-10-02T09:00:00" });
+    await app.tab("plan");
+    await app.page.click('.bud-review-link[data-bud-review="2026-10"]');
+    await app.page.waitForTimeout(400);
+    const txt = norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText));
+    t.has("day 2 says the pace comes later", txt, "pace shows from day 4");
+    t.has("so a big first shop is just spending", txt, "room left");
+    t.no("not a projection", /heading for/.test(txt), txt);
+
+    /* stepping back to last month from this one */
+    await app.page.click('.rev-step[data-rev-go="2026-09"]');
+    await app.page.waitForTimeout(400);
+    const back = norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText));
+    t.has("the arrow opens the previous review", back, "September how it went");
+    t.has("with its final verdicts", back, "about right");
+    t.ok("and can step forward again", await app.page.evaluate(() => !!document.querySelector('.rev-step[data-rev-go="2026-10"]')));
+    t.no("no page errors", app.errors.length, app.errors.join(" | "));
     await app.close();
   }
 

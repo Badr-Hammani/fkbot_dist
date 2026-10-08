@@ -114,7 +114,8 @@
   .hero-caption strong{color:var(--ink); font-weight:700}
 
   .meter{margin-top:16px}
-  .meter-track{height:12px; border-radius:6px; background:var(--card2); overflow:hidden; display:flex}
+  .meter-track{position:relative; height:12px; border-radius:6px; background:var(--card2); overflow:hidden; display:flex}
+  .meter-today{position:absolute; top:0; bottom:0; width:2px; margin-left:-1px; background:var(--ink); opacity:.75; box-shadow:0 0 6px var(--glow)}
   .meter-fill{height:100%; border-radius:6px; background:var(--accent); min-width:4px; transition:width .4s ease}
   .meter-fill.warn{background:var(--warn)}
   .meter-fill.over{background:var(--bad)}
@@ -724,7 +725,7 @@
   @media (prefers-reduced-motion: reduce){
     body::before, .hero::before, .bm3d, .bm-front::after, .coin3d, .onb-coins > span, .onb-coins .coin3d{animation:none !important}
     #shell.enter > *, #shell.enter .meter-fill, .sheet.sheet-enter > *, .hero-amount.bump{animation:none !important}
-    .rs-fill{animation:none !important}
+    .rs-fill, .rb-fill{animation:none !important}
     .coin-burst{display:none}
   }
   .grab{width:40px; height:5px; border-radius:3px; background:var(--line); margin:0 auto 14px;
@@ -800,7 +801,24 @@
   .rev-totals{flex:1; display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--ink2)}
   .rev-totals div{display:flex; justify-content:space-between; gap:8px}
   .rev-totals b{color:var(--ink)}
-  .rev-row{display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid var(--line)}
+  .rev-row{display:flex; align-items:center; gap:10px; padding:12px 0; border-top:1px solid var(--line)}
+  .rev-top{display:flex; align-items:center; justify-content:space-between; gap:8px}
+  .rev-title{display:flex; align-items:center; justify-content:space-between; gap:10px; padding-right:44px}
+  .rev-title h2{margin:0}
+  .rev-kicker{margin:2px 0 0; font-size:15px; font-weight:600; color:var(--ink2)}
+  .rev-nav{display:flex; gap:6px; flex:none}
+  .rev-step{width:36px; height:36px; border-radius:50%; background:var(--card2); color:var(--ink); font-size:20px; line-height:1; display:grid; place-items:center}
+  .rev-step:disabled{opacity:.3}
+  .rev-pace{margin:6px 0 4px; font-size:13px; color:var(--ink2)}
+  .rev-bar{position:relative; display:block; height:8px; margin:8px 0 6px; border-radius:4px; background:var(--card2); overflow:hidden}
+  .rb-zone{position:absolute; top:0; bottom:0; background:color-mix(in srgb, var(--good) 30%, transparent);
+    box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--good) 60%, transparent); border-radius:2px}
+  .rb-fill{position:absolute; left:0; top:0; bottom:0; border-radius:4px; background:var(--good); transform-origin:0 50%;
+    animation:grow .9s var(--ease-out) .3s both}
+  .rb-fill.over{background:var(--bad)}
+  .rb-fill.under{background:var(--warn)}
+  .rb-tick{position:absolute; top:0; bottom:0; width:2px; margin-left:-1px; background:var(--ink); border-radius:1px}
+  .rb-tick.today{background:var(--ink); box-shadow:0 0 6px var(--glow)}
   .rev-row .ic-tile{width:32px; height:32px; flex:none}
   .rev-main{flex:1; min-width:0; display:flex; flex-direction:column}
   .rev-name{font-weight:700; font-size:14.5px}
@@ -906,13 +924,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=9.2"></script>
+<script src="scan.js?v=9.3"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "9.2";
+  var APP_VERSION = "9.3";
   var KEY = "weekend-wallet-v1";
   var BASE_CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1866,10 +1884,13 @@
       '<span class="tab-ind" aria-hidden="true"></span></div></nav>';
   }
 
-  function meterHtml(spent, budget){
+  function meterHtml(spent, budget, todayFrac){
     var pct = budget>0 ? Math.min(spent/budget*100, 100) : 0;
     var cls = spent>budget ? " over" : (budget>0 && spent/budget>.85 ? " warn" : "");
-    return '<div class="meter-track"><div class="meter-fill'+cls+'" style="width:'+pct.toFixed(1)+'%"></div></div>';
+    /* optional tick: where spending evenly would have you by today */
+    var tick = todayFrac > 0 && todayFrac < 1
+      ? '<span class="meter-today" style="left:'+(todayFrac*100).toFixed(1)+'%" aria-hidden="true"></span>' : '';
+    return '<div class="meter-track"><div class="meter-fill'+cls+'" style="width:'+pct.toFixed(1)+'%"></div>'+tick+'</div>';
   }
 
   function paydayRange(){
@@ -4118,19 +4139,39 @@
     var step = x >= 1000 ? 50 : 10;
     return Math.max(Math.round(x / step) * step, step);
   }
+  /* How far through a RUNNING period today is. Null for one that has ended.
+     A projection from the first few days is mostly noise (one big shop on
+     day 2 is not a habit), so it only counts as reliable from day 4. */
+  function periodPace(mk){
+    if(mk !== monthKey()) return null;
+    var b = periodBounds(mk);
+    var total = Math.round((fromIso(b.endExclusive) - fromIso(b.start)) / 86400000);
+    var day = Math.round((fromIso(todayIso()) - fromIso(b.start)) / 86400000) + 1;
+    if(!(total > 0)) return null;
+    day = Math.min(Math.max(day, 1), total);
+    var last = fromIso(b.endExclusive); last.setDate(last.getDate() - 1);
+    return { day:day, total:total, frac:day / total, daysLeft:total - day, reliable:day >= 4,
+             endLabel:last.toLocaleDateString(undefined, { month:"short", day:"numeric" }) };
+  }
   function catReview(mk){
     var budgets = catBudgetsFor(mk);
     if(!budgets) return null;
     var spent = catSpentIn(mk), rows = [], unplanned = [];
-    var totalBudget = 0, totalSpent = 0, right = 0, liveOver = 0;
+    var totalBudget = 0, totalSpent = 0, right = 0, offTrack = 0;
+    var pace = periodPace(mk);
     Object.keys(budgets).forEach(function(id){
       var b = budgets[id], sp = spent[id] || 0;
       var verdict = sp > b * (1 + BUDGET_TOLERANCE) ? "over"
                   : sp < b * (1 - BUDGET_TOLERANCE) ? "under" : "right";
       if(verdict === "right") right++;
-      if(sp > b) liveOver++;
+      /* while the period runs, what matters is where today's pace ends up */
+      var projected = pace && pace.reliable ? Math.round(sp / pace.frac * 100) / 100 : null;
+      var live = sp > b ? "over"
+               : projected !== null && projected > b * (1 + BUDGET_TOLERANCE) ? "fast"
+               : projected !== null ? "pace" : "room";
+      if(live === "over" || live === "fast") offTrack++;
       totalBudget += b; totalSpent += sp;
-      rows.push({ id:id, cat:cat(id), budget:b, spent:sp,
+      rows.push({ id:id, cat:cat(id), budget:b, spent:sp, projected:projected, live:live,
                   diff: Math.round((sp - b) * 100) / 100, verdict:verdict,
                   /* keep a budget that worked; otherwise suggest what really happened */
                   suggest: verdict === "right" ? b : niceAmount(sp) });
@@ -4138,11 +4179,13 @@
     Object.keys(spent).forEach(function(id){
       if(!budgets[id] && spent[id] > 0) unplanned.push({ id:id, cat:cat(id), spent:spent[id], suggest:niceAmount(spent[id]) });
     });
-    var order = { over:0, under:1, right:2 };
-    rows.sort(function(a, b){ return order[a.verdict] - order[b.verdict] || b.budget - a.budget; });
+    var order = pace ? { over:0, fast:1, pace:2, room:2 } : { over:0, under:1, right:2 };
+    rows.sort(function(a, b){
+      return order[pace ? a.live : a.verdict] - order[pace ? b.live : b.verdict] || b.budget - a.budget;
+    });
     unplanned.sort(function(a, b){ return b.spent - a.spent; });
     return { mk:mk, rows:rows, unplanned:unplanned, right:right, count:rows.length,
-             onTrack: rows.length - liveOver,
+             onTrack: rows.length - offTrack, pace:pace,
              totalBudget: Math.round(totalBudget * 100) / 100,
              totalSpent: Math.round(totalSpent * 100) / 100,
              unplannedTotal: Math.round(unplanned.reduce(function(s, u){ return s + u.spent; }, 0) * 100) / 100 };
@@ -4169,7 +4212,7 @@
     var word = salaryReceiptEntries().length > 0 ? "cycle" : "month";
     var h = '<div class="sec"><h2 class="micro sec-h">Category budgets</h2><span class="micro">'+esc(periodName(mk))+'</span></div>';
     if(budgets){
-      var spent = catSpentIn(mk), tb = 0, ts = 0;
+      var spent = catSpentIn(mk), tb = 0, ts = 0, pace = periodPace(mk);
       h += '<div class="goal bud-card">';
       Object.keys(budgets).sort(function(a, b){ return budgets[b] - budgets[a]; }).forEach(function(id){
         var c = cat(id), b = budgets[id], sp = spent[id] || 0, left = Math.round((b - sp) * 100) / 100;
@@ -4179,7 +4222,7 @@
           '<span class="bud-name">'+esc(c.name)+'</span>' +
           '<span class="bud-left money'+(left < 0 ? ' neg' : '')+'">' +
             (left < 0 ? fmt(-left)+' over' : fmt(left)+' left') + '</span></div>' +
-          meterHtml(sp, b) +
+          meterHtml(sp, b, pace && pace.frac) +
           '<div class="bud-sub">spent <b class="money">'+fmt(sp)+'</b> of <b class="money">'+fmt(b)+'</b></div></div>';
       });
       var unplanned = 0;
@@ -4201,7 +4244,8 @@
         h += '<button class="row-item bud-review-link" data-bud-review="'+esc(mk)+'">' +
           '<span class="ic-tile" style="color:var(--accent-deep); background:color-mix(in srgb, var(--accent) 16%, var(--card2))">'+IC.target+'</span>' +
           '<span class="name"><span class="ttl">How is '+esc(periodName(mk))+' going?</span>' +
-          '<span class="subline">'+esc(reviewHeadline(liveReview, true))+'</span></span>'+IC.chev+'</button>';
+          '<span class="subline">'+esc(reviewHeadline(liveReview, true))+
+          (liveReview.pace ? ' · '+liveReview.pace.daysLeft+' day'+(liveReview.pace.daysLeft === 1 ? '' : 's')+' left' : '')+'</span></span>'+IC.chev+'</button>';
       }
     }else{
       h += emptyBox(IC.target, 'Give each category a budget for the '+word+' —<br>then see at the end whether you got it right.');
@@ -4234,6 +4278,22 @@
   }
 
   /* ---- the review: was the budget right? ---- */
+  /* One category's bar. Finished: scaled past the budget so going over shows,
+     with the "right" zone (budget ± tolerance) shaded. Running: scaled to the
+     budget, with a tick where spending evenly would put you today. */
+  function reviewBar(x, pace, tag){
+    var scale = pace ? x.budget : Math.max(x.budget * (1 + BUDGET_TOLERANCE * 1.5), x.spent);
+    if(!(scale > 0)) return "";
+    var pct = function(v){ return Math.min(Math.max(v / scale * 100, 0), 100).toFixed(1) + "%"; };
+    /* fill first, markers over it -- an overspent fill must not hide the budget */
+    var h = '<span class="rev-bar" aria-hidden="true"><span class="rb-fill '+tag+'" style="width:'+pct(x.spent)+'"></span>';
+    if(!pace){
+      h += '<span class="rb-zone" style="left:'+pct(x.budget*(1-BUDGET_TOLERANCE))+'; right:calc(100% - '+pct(x.budget*(1+BUDGET_TOLERANCE))+')"></span>' +
+           '<span class="rb-tick" style="left:'+pct(x.budget)+'"></span>';
+    }
+    if(pace) h += '<span class="rb-tick today" style="left:'+(pace.frac*100).toFixed(1)+'%"></span>';
+    return h + '</span>';
+  }
   function openCatReviewSheet(mk){
     var r = catReview(mk);
     if(!r) return;
@@ -4248,17 +4308,21 @@
              : 'within '+Math.round(BUDGET_TOLERANCE*100)+'% of the plan';
         tag = x.verdict; label = verdictText[x.verdict];
       }else{
-        /* still running: money left is room, not a wrong guess */
-        var over = x.spent > x.budget;
-        line = over ? 'over by <b class="money">'+fmt(x.diff)+'</b>'
-                    : '<b class="money">'+fmt(-x.diff)+'</b> left';
-        tag = over ? "over" : x.spent >= x.budget * 0.85 ? "under" : "right";
-        label = over ? "over already" : tag === "under" ? "almost used" : "room left";
+        /* still running: money left is room, not a wrong guess -- unless the
+           pace so far would carry it well past the budget */
+        line = x.live === "over" ? 'over by <b class="money">'+fmt(x.diff)+'</b>'
+                                 : '<b class="money">'+fmt(-x.diff)+'</b> left';
+        if(x.projected !== null && x.live !== "over"){
+          line += ' · heading for <b class="money">'+fmt(niceAmount(x.projected))+'</b> by '+esc(r.pace.endLabel);
+        }
+        tag = { over:"over", fast:"under", pace:"right", room:"right" }[x.live];
+        label = { over:"over already", fast:"spending fast", pace:"on pace", room:"room left" }[x.live];
       }
       return '<div class="rev-row">' + catTile(x.cat) +
-        '<span class="rev-main"><span class="rev-name">'+esc(x.cat.name)+'</span>' +
-        '<span class="rev-sub">spent <b class="money">'+fmt(x.spent)+'</b> of <b class="money">'+fmt(x.budget)+'</b> · '+line+'</span></span>' +
-        '<span class="verdict '+tag+'">'+label+'</span></div>';
+        '<span class="rev-main"><span class="rev-top"><span class="rev-name">'+esc(x.cat.name)+'</span>' +
+        '<span class="verdict '+tag+'">'+label+'</span></span>' +
+        reviewBar(x, isPast ? null : r.pace, tag) +
+        '<span class="rev-sub">spent <b class="money">'+fmt(x.spent)+'</b> of <b class="money">'+fmt(x.budget)+'</b> · '+line+'</span></span></div>';
     }).join("");
     /* the score, drawn as a ring that fills to it */
     var score = isPast ? r.right : r.onTrack, all = score === r.count;
@@ -4269,9 +4333,9 @@
       '<b>'+score+'/'+r.count+'</b><span>'+(isPast ? 'right' : 'on track')+'</span></div>';
     var unplanned = r.unplanned.map(function(u){
       return '<div class="rev-row">' + catTile(u.cat) +
-        '<span class="rev-main"><span class="rev-name">'+esc(u.cat.name)+'</span>' +
-        '<span class="rev-sub">spent <b class="money">'+fmt(u.spent)+'</b> with no budget</span></span>' +
-        '<span class="verdict none">not planned</span></div>';
+        '<span class="rev-main"><span class="rev-top"><span class="rev-name">'+esc(u.cat.name)+'</span>' +
+        '<span class="verdict none">not planned</span></span>' +
+        '<span class="rev-sub">spent <b class="money">'+fmt(u.spent)+'</b> with no budget</span></span></div>';
     }).join("");
     /* what to carry into the next period: keep what worked, correct what did not */
     var next = {};
@@ -4280,8 +4344,26 @@
     var nextTotal = Object.keys(next).reduce(function(s, k){ return s + next[k]; }, 0);
     var canApply = isPast && Object.keys(next).length > 0;
     var nowHas = !!catBudgetsFor(nowMk);
+    /* step through every period that had budgets, up to this one */
+    var reviewable = [];
+    Object.keys(state.catBudgets || {}).sort().forEach(function(k){
+      var pk = periodKeyForDate(k);
+      if(pk <= nowMk && reviewable.indexOf(pk) < 0 && catReview(pk)) reviewable.push(pk);
+    });
+    reviewable.sort();
+    var at = reviewable.indexOf(mk);
+    var prevK = at > 0 ? reviewable[at - 1] : "", nextK = at >= 0 && at < reviewable.length - 1 ? reviewable[at + 1] : "";
+    var nav = reviewable.length > 1
+      ? '<div class="rev-nav">' +
+          '<button class="rev-step" '+(prevK ? 'data-rev-go="'+esc(prevK)+'" aria-label="'+esc(periodName(prevK))+'"' : 'disabled aria-label="No earlier review"')+'>‹</button>' +
+          '<button class="rev-step" '+(nextK ? 'data-rev-go="'+esc(nextK)+'" aria-label="'+esc(periodName(nextK))+'"' : 'disabled aria-label="No later review"')+'>›</button></div>'
+      : '';
+    var paceLine = !isPast && r.pace
+      ? '<p class="rev-pace">Day <b>'+r.pace.day+'</b> of '+r.pace.total+' · '+r.pace.daysLeft+' day'+(r.pace.daysLeft === 1 ? '' : 's')+' left'+
+        (r.pace.reliable ? '' : ' · pace shows from day 4')+'</p>'
+      : '';
     openSheet(
-      '<h2>'+esc(periodName(mk))+(isPast ? ' — how it went' : ' so far')+'</h2>' +
+      '<div class="rev-title"><div><h2>'+esc(periodName(mk))+'</h2><p class="rev-kicker">'+(isPast ? 'how it went' : 'so far')+'</p></div>'+nav+'</div>' + paceLine +
       '<div class="rev-head">' + ring +
       '<div class="rev-totals"><div><span>Budgeted</span><b class="money">'+fmt(r.totalBudget)+'</b></div>' +
       '<div><span>Spent in those</span><b class="money">'+fmt(r.totalSpent)+'</b></div>' +
@@ -4289,7 +4371,7 @@
       '</div></div>' +
       '<p class="hint" style="margin-top:0">'+(isPast
         ? 'A budget counts as right when what you spent landed within '+Math.round(BUDGET_TOLERANCE*100)+'% of it.'
-        : 'Still running. When it ends, each budget is judged right if what you spent landed within '+Math.round(BUDGET_TOLERANCE*100)+'% of it.')+'</p>' +
+        : 'The line on each bar is where you would be today spending evenly. When it ends, a budget is right if you landed within '+Math.round(BUDGET_TOLERANCE*100)+'% of it.')+'</p>' +
       rows + unplanned +
       (canApply
         ? '<div class="panel" style="margin-top:16px"><b>For '+esc(periodName(nowMk))+'</b>' +
@@ -4313,6 +4395,9 @@
     });
     var edit = $("#rev-edit");
     if(edit) edit.addEventListener("click", function(){ openCatBudgetSheet(next); });
+    sheet.querySelectorAll("[data-rev-go]").forEach(function(b){
+      b.addEventListener("click", function(){ openCatReviewSheet(b.getAttribute("data-rev-go")); });
+    });
   }
 
   /* ---- setting the budgets ---- */
