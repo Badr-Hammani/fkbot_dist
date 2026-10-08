@@ -771,6 +771,31 @@
     color:var(--bad); background:color-mix(in srgb, var(--bad) 10%, var(--card2))}
   .bud-warn svg{width:18px; height:18px; flex:none}
   .bud-review-link{margin-top:10px}
+  .fuel-box{margin:4px 0 14px}
+  .fuel-box .chip svg, .place-box svg, .place-ic svg{width:16px; height:16px; flex:none}
+  .fuel-box .row2{margin-top:10px}
+  .place-box{margin:0 0 14px; padding:10px 12px; border-radius:16px; background:var(--card2)}
+  .place-box:empty{display:none}
+  .place-top{display:flex; align-items:center; gap:8px; font-size:14px; min-height:28px}
+  .place-top > span{flex:1; min-width:0}
+  .place-top input{flex:1; min-width:0}
+  .place-top.muted, .place-top .muted{color:var(--ink2)}
+  .place-top svg{color:var(--accent-deep)}
+  .place-cats{margin-top:8px}
+  .place-cats small{margin-left:4px; font-weight:700; color:var(--ink3)}
+  .fuel-big{display:flex; gap:10px}
+  .fuel-big > div{flex:1; min-width:0; display:flex; flex-direction:column; gap:2px}
+  .fuel-big b{font-size:22px; letter-spacing:-.02em}
+  .fuel-big span{font-size:11.5px; color:var(--ink2)}
+  .fuel-card .bud-total{margin-top:12px}
+  .fuel-card .bud-total b{white-space:nowrap}
+  .addrow svg{width:17px; height:17px; vertical-align:-3px; margin-right:4px}
+  .place-list{margin-top:12px; border-top:1px solid var(--line)}
+  .place-item{display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line)}
+  .place-ic{color:var(--accent-deep); display:inline-flex}
+  .place-main{flex:1; min-width:0; display:flex; flex-direction:column}
+  .place-main span{font-size:12.5px; color:var(--ink2)}
+  .linkish.danger{color:var(--bad)}
   .bud-hist{display:block; min-height:44px; margin-top:6px; text-align:left; color:var(--accent-deep)}
   .bud-inputs{display:flex; flex-direction:column; gap:8px; margin-bottom:6px}
   .bud-input{display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--line); border-radius:14px; background:var(--card)}
@@ -924,13 +949,13 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=9.3"></script>
+<script src="scan.js?v=9.4"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "9.3";
+  var APP_VERSION = "9.4";
   var KEY = "weekend-wallet-v1";
   var BASE_CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -1080,6 +1105,8 @@
            pick it again in Settings, and that choice sticks. */
         if(!s.wkWeightFlat){ s.wkWeight = 1; s.wkWeightFlat = 1; }
         s.setupHidden = s.setupHidden ? 1 : 0;
+        s.places = cleanPlaces(s.places);
+        s.placesOn = s.placesOn ? 1 : 0;
         loadFailedWithData = false;              /* read it fine after all */
         return s;
       }
@@ -1165,7 +1192,29 @@
                fundingPersonId: typeof e.fundingPersonId === "string" ? e.fundingPersonId : "",
                fundingPersonName: typeof e.fundingPersonName === "string" ? e.fundingPersonName : "",
                fundingAmount: +e.fundingAmount > 0 ? Math.round((+e.fundingAmount)*100)/100 : 0,
-               fundingLogId: typeof e.fundingLogId === "string" ? e.fundingLogId : "" };
+               fundingLogId: typeof e.fundingLogId === "string" ? e.fundingLogId : "",
+               /* where it was bought, and for a fuel fill-up how much went in */
+               placeId: typeof e.placeId === "string" ? e.placeId : "",
+               fuelLiters: +e.fuelLiters > 0 && +e.fuelLiters < 1000 ? Math.round((+e.fuelLiters)*100)/100 : 0,
+               odometer: +e.odometer > 0 && +e.odometer < 5e6 ? Math.round(+e.odometer) : 0 };
+    });
+  }
+  /* Places you saved yourself. A coordinate pair and a name, nothing else --
+     what you buy there is read from the expenses filed under it. */
+  function cleanPlaces(list){
+    if(!Array.isArray(list)) return [];
+    var seen = {};
+    return list.filter(function(p){
+      return p && typeof p === "object" && isFinite(+p.lat) && isFinite(+p.lng) &&
+             Math.abs(+p.lat) <= 90 && Math.abs(+p.lng) <= 180 && String(p.name || "").trim();
+    }).map(function(p){
+      var id = typeof p.id === "string" && p.id ? p.id : uid();
+      if(seen[id]) id = uid();
+      seen[id] = 1;
+      var r = +p.radius;
+      return { id:id, name:String(p.name).trim().slice(0, 40),
+               lat:Math.round(+p.lat * 1e6) / 1e6, lng:Math.round(+p.lng * 1e6) / 1e6,
+               radius: r >= 30 && r <= 500 ? Math.round(r) : 120, ts:+p.ts || 0 };
     });
   }
   /* the rest of the shapes, coerced in place */
@@ -1668,6 +1717,8 @@
     history:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.5"/><path d="M4 4v4.5H8.5"/><path d="M12 8v4l3 2"/></svg>',
     gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 0 0-.14-1.4l2-1.55-2-3.46-2.35.95A7 7 0 0 0 14.1 5.1L13.7 2.6h-3.4l-.4 2.5a7 7 0 0 0-2.4 1.44l-2.36-.95-2 3.46 2 1.55A7 7 0 0 0 5 12c0 .48.05.94.14 1.4l-2 1.55 2 3.46 2.35-.95c.7.63 1.52 1.12 2.41 1.44l.4 2.5h3.4l.4-2.5a7 7 0 0 0 2.4-1.44l2.36.95 2-3.46-2-1.55c.09-.46.14-.92.14-1.4Z"/></svg>',
     plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+    pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z"/><circle cx="12" cy="10" r="2.4"/></svg>',
+    fuel:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 20V5.5A1.5 1.5 0 0 1 6 4h6a1.5 1.5 0 0 1 1.5 1.5V20M3 20h12M6.5 8h5M13.5 10h2a1.5 1.5 0 0 1 1.5 1.5v4a1.3 1.3 0 0 0 2.6 0V8.5L17 6"/></svg>',
     camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h2.5l1.5-2.5h8L17.5 8H20a1.5 1.5 0 0 1 1.5 1.5V18A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18V9.5A1.5 1.5 0 0 1 4 8Z"/><circle cx="12" cy="13.5" r="3.4"/></svg>',
     plan:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9h-9V3Z"/><path d="M15.5 3.7A9 9 0 0 1 20.3 8.5H15.5V3.7Z"/></svg>',
     banknote:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5h.01M18 14.5h.01"/></svg>',
@@ -3661,6 +3712,9 @@
       var e = existing || candidate;
       e.amount = candidate.amount; e.cat = candidate.cat; e.note = candidate.note;
       e.date = candidate.date; e.photo = candidate.photo;
+      e.placeId = candidate.placeId || "";
+      e.fuelLiters = candidate.fuelLiters > 0 ? candidate.fuelLiters : 0;
+      e.odometer = candidate.odometer > 0 ? candidate.odometer : 0;
       if(!keep){
         e.loanId = ""; e.loanAdded = 0; e.fundingType = ""; e.fundingPersonId = "";
         e.fundingPersonName = ""; e.fundingAmount = 0; e.fundingLogId = "";
@@ -4622,6 +4676,138 @@
     return PICK_CATS.map(function(c){ return c.custom ? c.id+" ("+c.name+")" : c.id; }).join(", ");
   }
 
+  /* ================= places ================= */
+  /* Location is read once, when you open Add expense, and only while you
+     have it switched on. Nothing is sent anywhere: matching is a distance
+     check against places you named yourself. */
+  function distM(aLat, aLng, bLat, bLng){
+    var R = 6371000, rad = Math.PI / 180;
+    var dLat = (bLat - aLat) * rad, dLng = (bLng - aLng) * rad;
+    var h = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(aLat * rad) * Math.cos(bLat * rad) * Math.sin(dLng/2) * Math.sin(dLng/2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  function placeById(id){
+    var hit = null;
+    (state.places || []).forEach(function(p){ if(p.id === id) hit = p; });
+    return hit;
+  }
+  /* the nearest saved place you are standing in -- a phone indoors can be
+     off by a street, so a poor fix widens the net a little, never a lot */
+  function placeAt(pos){
+    if(!pos) return null;
+    var slack = Math.min(Math.max(+pos.acc || 0, 0), 150), best = null, bestD = Infinity;
+    (state.places || []).forEach(function(p){
+      var d = distM(pos.lat, pos.lng, p.lat, p.lng);
+      if(d <= p.radius + slack && d < bestD){ best = p; bestD = d; }
+    });
+    return best;
+  }
+  /* what you actually buy at a place, most often first */
+  function placeCats(id){
+    var n = {}, total = 0;
+    state.expenses.forEach(function(e){
+      if(e.placeId !== id || isReconciliation(e)) return;
+      if(!PICK_CATS.some(function(c){ return c.id === e.cat; })) return;
+      n[e.cat] = (n[e.cat] || 0) + 1; total++;
+    });
+    return Object.keys(n).sort(function(a, b){ return n[b] - n[a]; })
+      .map(function(id){ return { id:id, n:n[id], share: n[id] / total }; });
+  }
+  function placeUses(id){
+    return state.expenses.filter(function(e){ return e.placeId === id; }).length;
+  }
+  function locate(done){
+    if(!navigator.geolocation){ done(null, "unsupported"); return; }
+    var finished = false;
+    function once(pos, err){ if(finished) return; finished = true; done(pos, err); }
+    /* some browsers never call back at all when the prompt is ignored */
+    var guard = setTimeout(function(){ once(null, "timeout"); }, 12000);
+    try{
+      navigator.geolocation.getCurrentPosition(function(p){
+        clearTimeout(guard);
+        once({ lat:p.coords.latitude, lng:p.coords.longitude, acc:p.coords.accuracy || 0 }, "");
+      }, function(e){
+        clearTimeout(guard);
+        once(null, e && e.code === 1 ? "denied" : "unavailable");
+      }, { enableHighAccuracy:true, timeout:10000, maximumAge:60000 });
+    }catch(e){ clearTimeout(guard); once(null, "unavailable"); }
+  }
+
+  /* ================= fuel ================= */
+  var FUEL_RE = /\b(essence|gasoil|gazoil|diesel|carburant|fuel|petrol|benzine|sans plomb|afriquia|shell|totalenergies|winxo|petrom|ziz|oilibya)\b/i;
+  function fuelFills(){
+    return state.expenses.filter(function(e){ return e.fuelLiters > 0; })
+      .sort(function(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.ts || 0) - (b.ts || 0); });
+  }
+  function lastOdometer(exceptId){
+    var best = 0;
+    state.expenses.forEach(function(e){ if(e.id !== exceptId && e.odometer > best) best = e.odometer; });
+    return best;
+  }
+  /* Consumption from fill-ups: the fuel bought AFTER the first reading,
+     over the distance between the first and last reading. Exact when you
+     fill to full each time, and it averages out when you do not. */
+  function fuelStats(){
+    var fills = fuelFills();
+    if(!fills.length) return null;
+    var out = { fills:fills.length, last:fills[fills.length - 1] };
+    out.pricePerL = out.last.amount / out.last.fuelLiters;
+    var mk = monthKey();
+    out.periodSpent = 0; out.periodFills = 0;
+    fills.forEach(function(e){ if(dateInPeriod(e.date, mk)){ out.periodSpent += e.amount; out.periodFills++; } });
+    out.periodSpent = Math.round(out.periodSpent * 100) / 100;
+    var odo = fills.filter(function(e){ return e.odometer > 0; })
+      .sort(function(a, b){ return a.odometer - b.odometer; });
+    if(odo.length >= 2){
+      var first = odo[0], lastR = odo[odo.length - 1], km = lastR.odometer - first.odometer;
+      var liters = 0, cost = 0;
+      odo.slice(1).forEach(function(e){ liters += e.fuelLiters; cost += e.amount; });
+      if(km >= 20 && liters > 0){
+        out.km = km;
+        out.l100 = liters / km * 100;
+        out.perKm = cost / km;
+        var days = Math.round((fromIso(lastR.date) - fromIso(first.date)) / 86400000);
+        if(days >= 3){
+          out.kmPerDay = km / days;
+          var pace = periodPace(mk);
+          if(pace && pace.daysLeft > 0){
+            out.daysLeft = pace.daysLeft; out.endLabel = pace.endLabel;
+            out.kmLeft = out.kmPerDay * pace.daysLeft;
+            out.moreCost = out.perKm * out.kmLeft;
+          }
+        }
+      }
+    }
+    return out;
+  }
+  function fuelSection(){
+    var st = fuelStats();
+    var h = '<div class="sec"><h2 class="micro sec-h">Car &amp; fuel</h2>' + (st ? '<span class="micro">'+esc(periodName(monthKey()))+'</span>' : '') + '</div>';
+    if(!st){
+      return h + '<button class="addrow" id="p-fuel-add">'+IC.fuel+' Track fuel — log a fill-up</button>';
+    }
+    var n1 = function(x){ return (Math.round(x * 10) / 10).toLocaleString(undefined, { minimumFractionDigits:1, maximumFractionDigits:1 }); };
+    var n2 = function(x){ return (Math.round(x * 100) / 100).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 }); };
+    h += '<div class="goal fuel-card">';
+    if(st.l100){
+      h += '<div class="fuel-big"><div><b>'+n1(st.l100)+'</b><span>L / 100 km</span></div>' +
+           '<div><b class="money">'+n2(st.perKm)+'</b><span>'+esc(state.currency)+' per km</span></div>' +
+           '<div><b class="money">'+n2(st.pricePerL)+'</b><span>'+esc(state.currency)+' per litre</span></div></div>';
+    }else{
+      h += '<div class="fuel-big"><div><b class="money">'+n2(st.pricePerL)+'</b><span>'+esc(state.currency)+' per litre, last fill-up</span></div></div>' +
+           '<p class="hint" style="margin:6px 0 0">Add the odometer at two fill-ups and this shows your real consumption and cost per km.</p>';
+    }
+    h += '<div class="bud-total"><span>Fuel this '+(periodBounds(monthKey()).salary ? 'cycle' : 'month')+'</span><b class="money">'+fmt(st.periodSpent)+
+         (st.periodFills ? ' · '+st.periodFills+' fill-up'+(st.periodFills === 1 ? '' : 's') : '')+'</b></div>';
+    if(st.moreCost > 0){
+      h += '<div class="bud-total muted"><span>At your pace, about '+Math.round(st.kmLeft).toLocaleString()+' km more by '+esc(st.endLabel)+'</span>' +
+           '<b class="money">≈ '+fmt(niceAmount(st.moreCost))+'</b></div>';
+    }
+    h += '</div><button class="addrow" id="p-fuel-add">'+IC.fuel+' Log a fill-up</button>';
+    return h;
+  }
+
   function viewPlan(){
     var m = planMath();
     var monthName = periodLabel(monthKey());
@@ -4787,6 +4973,7 @@
       '<button class="addrow" id="p-add-debt">+ Money in / out</button>';
 
     h += catBudgetSection();
+    h += fuelSection();
     h += '<div class="sec"><span class="micro">Saving goals</span></div>';
     if(state.goals.length){
       state.goals.forEach(function(g){
@@ -5194,6 +5381,79 @@
     setTimeout(function(){ var el = $("#gm-amount"); if(el) el.focus(); }, 350);
   }
 
+  function placesPanel(){
+    var list = state.places || [];
+    var rows = list.map(function(p){
+      var top = placeCats(p.id)[0], uses = placeUses(p.id);
+      return '<div class="place-item"><span class="place-ic">'+IC.pin+'</span><span class="place-main"><b>'+esc(p.name)+'</b>' +
+        '<span>'+uses+' expense'+(uses === 1 ? '' : 's')+(top ? ' · mostly '+esc(cat(top.id).name) : '')+'</span></span>' +
+        '<button class="linkish" data-place-rename="'+esc(p.id)+'">Rename</button>' +
+        '<button class="linkish danger" data-place-del="'+esc(p.id)+'" aria-label="Delete '+esc(p.name)+'">Delete</button></div>';
+    }).join("");
+    return '<div class="panel"><h3>'+IC.pin+'Places</h3>' +
+      '<p>When you add an expense, the app can check where you are and suggest what you usually buy there — at the foyer, the café, the station. ' +
+      'Your location is only read while Add expense is open and never leaves this phone. Places you save are kept in this app and in your backup files.</p>' +
+      '<button class="btn'+(state.placesOn ? '' : ' primary')+'" id="s-places-toggle">'+(state.placesOn ? 'Turn off location suggestions' : 'Suggest by location')+'</button>' +
+      (rows ? '<div class="place-list">'+rows+'</div>' : (state.placesOn ? '<p class="hint" style="margin-top:10px">No places yet. Next time you add an expense, tap “Save this place”.</p>' : '')) +
+      (list.length > 1 ? '<button class="btn ghost" id="s-places-clear" style="margin-top:8px">Delete all places</button>' : '') +
+      '</div>';
+  }
+  function forgetPlaces(ids){
+    var before = { places:state.places.slice(), tags:state.expenses.map(function(e){ return e.placeId; }) };
+    state.places = state.places.filter(function(p){ return ids.indexOf(p.id) < 0; });
+    /* the expenses stay exactly as they were, only no longer pinned to a spot */
+    state.expenses.forEach(function(e){ if(ids.indexOf(e.placeId) >= 0) e.placeId = ""; });
+    if(!save()){
+      state.places = before.places;
+      state.expenses.forEach(function(e, i){ e.placeId = before.tags[i]; });
+      return false;
+    }
+    return true;
+  }
+  function bindPlaces(){
+    var tg = $("#s-places-toggle");
+    if(tg) tg.addEventListener("click", function(){
+      if(state.placesOn){
+        state.placesOn = 0;
+        if(!save()){ state.placesOn = 1; return; }
+        render(); toast("Location suggestions off — your places are kept");
+        return;
+      }
+      /* ask for permission now, where the reason is on screen, not in the
+         middle of logging a coffee */
+      tg.disabled = true; tg.textContent = "Asking for location…";
+      locate(function(pos, err){
+        if(err === "denied"){ render(); toast("Location is blocked — allow it for this app in your phone’s settings"); return; }
+        state.placesOn = 1;
+        if(!save()){ state.placesOn = 0; render(); return; }
+        render();
+        toast(pos ? "On — add an expense here and tap “Save this place”" : "On — your location wasn’t available just now, it will be tried again");
+      });
+    });
+    shell.querySelectorAll("[data-place-rename]").forEach(function(b){
+      b.addEventListener("click", function(){
+        var p = placeById(b.getAttribute("data-place-rename"));
+        if(!p) return;
+        var name = window.prompt("Rename this place", p.name);
+        if(name == null || !name.trim()) return;
+        var old = p.name; p.name = name.trim().slice(0, 40);
+        if(!save()){ p.name = old; return; }
+        render();
+      });
+    });
+    shell.querySelectorAll("[data-place-del]").forEach(function(b){
+      b.addEventListener("click", function(){
+        var p = placeById(b.getAttribute("data-place-del"));
+        if(!p || !window.confirm("Delete “"+p.name+"”? Its expenses stay, they just stop pointing at it.")) return;
+        if(forgetPlaces([p.id])){ render(); toast("Deleted "+p.name); }
+      });
+    });
+    var clr = $("#s-places-clear");
+    if(clr) clr.addEventListener("click", function(){
+      if(!window.confirm("Delete all "+state.places.length+" places? Your expenses stay.")) return;
+      if(forgetPlaces(state.places.map(function(p){ return p.id; }))){ render(); toast("All places deleted"); }
+    });
+  }
   function viewSettings(){
     var curOpts = CURRENCIES.map(function(c){
       return '<option value="'+c.code+'"'+(state.currency===c.code?" selected":"")+'>'+c.label+'</option>';
@@ -5252,6 +5512,7 @@
       '<div class="panel"><h3>'+IC.share+'Put it on your home screen</h3>' +
       '<p>In Safari tap the <b>Share</b> button, then <b>Add to Home Screen</b>. Weekend Wallet opens full-screen like a normal app — your data stays on this phone.</p></div>' +
 
+      placesPanel() +
       '<div class="panel"><h3>'+IC.download+'Backup</h3><p>Your expenses live in this browser. Download a backup before switching phones.</p>' +
       '<button class="btn" id="s-export">Download backup file</button>' +
       '<div style="height:10px"></div>' +
@@ -5324,7 +5585,10 @@ function importBackupFile(input){
                     wkWeightFlat:d.wkWeightFlat ? 1 : 0,
                     setupHidden:d.setupHidden ? 1 : 0,
                     customCats:importCats,
-                    catBudgets:cleanCatBudgets(d.catBudgets) };
+                    catBudgets:cleanCatBudgets(d.catBudgets),
+                    places:cleanPlaces(d.places),
+                    /* location permission belongs to this phone, not the file */
+                    placesOn:state.placesOn ? 1 : 0 };
           cleanRows();
           retireStalePool(state);
           /* draw BEFORE writing: a backup with one bad row used to be saved
@@ -5759,10 +6023,96 @@ function importBackupFile(input){
   function selectChip(catId){
     if(!draft) return;
     draft.cat = catId;
-    var all = sheet.querySelectorAll(".chip");
+    var all = sheet.querySelectorAll(".chip[data-cat]");
     for(var i=0;i<all.length;i++){
       all[i].classList.toggle("sel", all[i].getAttribute("data-cat")===catId);
+      all[i].setAttribute("aria-pressed", all[i].classList.contains("sel") ? "true" : "false");
     }
+    var fb = $("#f-fuel");
+    if(fb) fb.hidden = catId !== "transport";
+  }
+  function setFuel(on){
+    if(!draft) return;
+    draft.fuel = !!on;
+    var b = $("#f-fuel-on"), f = $("#f-fuel-fields");
+    if(b){ b.classList.toggle("sel", draft.fuel); b.setAttribute("aria-pressed", draft.fuel ? "true" : "false"); }
+    if(f) f.hidden = !draft.fuel;
+    fuelHint();
+  }
+  /* "= 12.80 per litre" while you type, so a slipped digit shows at once */
+  function fuelHint(){
+    var el = $("#f-fuel-hint");
+    if(!el) return;
+    var a = num($("#f-amount") ? $("#f-amount").value : ""), l = num($("#f-liters") ? $("#f-liters").value : "");
+    el.textContent = draft && draft.fuel && a > 0 && l > 0
+      ? "= " + (Math.round(a / l * 100) / 100).toFixed(2) + " " + state.currency + " per litre" : "";
+  }
+  function wireFuel(){
+    var on = $("#f-fuel-on");
+    if(!on) return;
+    on.addEventListener("click", function(){ setFuel(!draft.fuel); if(draft.fuel && $("#f-liters")) $("#f-liters").focus(); });
+    ["#f-amount", "#f-liters"].forEach(function(id){ var el = $(id); if(el) el.addEventListener("input", fuelHint); });
+    fuelHint();
+  }
+  /* the place row under the form: where you are, and what you usually buy there */
+  function drawPlace(state_, info){
+    var box = $("#f-place");
+    if(!box || !draft) return;
+    var p = draft.placeId ? placeById(draft.placeId) : null;
+    if(p){
+      var cats = placeCats(p.id).slice(0, 3);
+      box.innerHTML = '<div class="place-top">'+IC.pin+'<span>At <b>'+esc(p.name)+'</b></span>' +
+        '<button class="linkish" id="f-place-clear" aria-label="Not at '+esc(p.name)+'">Not here</button></div>' +
+        (cats.length ? '<div class="chips place-cats">' + cats.map(function(c){
+          var k = cat(c.id);
+          return '<button class="chip'+(draft.cat === c.id ? ' sel' : '')+'" data-cat="'+c.id+'">' +
+            '<span style="color:var('+k.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+esc(k.name)+'<small>'+c.n+'×</small></button>';
+        }).join("") + '</div>' : '<div class="hint" style="margin:4px 0 0">First time here — this expense teaches it.</div>');
+      $("#f-place-clear").addEventListener("click", function(){
+        draft.placeId = ""; draft.placeDismissed = true; drawPlace(draft.pos ? "here" : "none");
+      });
+      box.querySelectorAll(".place-cats [data-cat]").forEach(function(b){
+        b.addEventListener("click", function(){ selectChip(b.getAttribute("data-cat")); draft.catManual = true; drawPlace("place"); });
+      });
+      return;
+    }
+    if(state_ === "looking"){ box.innerHTML = '<div class="place-top muted">'+IC.pin+'<span>Finding where you are…</span></div>'; return; }
+    if(state_ === "here" && draft.pos){
+      box.innerHTML = draft.naming
+        ? '<div class="place-top">'+IC.pin+'<input id="f-place-name" type="text" maxlength="40" placeholder="Name this place — Foyer, Marjane…" value="'+esc(draft.newPlace)+'"></div>'
+        : '<div class="place-top">'+IC.pin+'<span class="muted">Somewhere new</span>' +
+          '<button class="linkish" id="f-place-save">Save this place</button></div>';
+      var save_ = $("#f-place-save");
+      if(save_) save_.addEventListener("click", function(){ draft.naming = true; drawPlace("here"); var i = $("#f-place-name"); if(i) i.focus(); });
+      var nm = $("#f-place-name");
+      if(nm) nm.addEventListener("input", function(){ draft.newPlace = this.value; });
+      return;
+    }
+    if(state_ === "denied"){
+      box.innerHTML = '<div class="place-top muted">'+IC.pin+'<span>Location is blocked for this app — allow it in your phone’s settings, or turn places off in Settings.</span></div>';
+      return;
+    }
+    box.innerHTML = info ? '<div class="place-top muted">'+IC.pin+'<span>'+esc(info)+'</span></div>' : '';
+  }
+  function wirePlace(fresh){
+    if(!$("#f-place")) return;
+    if(!fresh || !state.placesOn){ drawPlace(draft.placeId ? "place" : "none"); return; }
+    var mine = draft;
+    drawPlace("looking");
+    locate(function(pos, err){
+      if(draft !== mine) return;                     /* the sheet moved on */
+      if(!pos){ drawPlace(err === "denied" ? "denied" : "none", err === "denied" ? "" : "Couldn’t get your location this time"); return; }
+      draft.pos = pos;
+      var p = placeAt(pos);
+      if(p && !draft.placeDismissed){
+        draft.placeId = p.id;
+        /* a place you have used before picks its usual category -- unless
+           you have already chosen one yourself */
+        var top = placeCats(p.id)[0];
+        if(top && !draft.catManual) selectChip(top.id);
+        drawPlace("place");
+      }else drawPlace("here");
+    });
   }
 
   /* ---------- add / detail sheets ---------- */
@@ -6159,7 +6509,8 @@ function importBackupFile(input){
       '<button class="qa-tile" id="qa-snap">'+IC.camera+'Snap receipt</button>' +
       '<button class="qa-tile" id="qa-split">'+IC.split+'Split a bill</button>' +
       '<button class="qa-tile" id="qa-friend">'+IC.person+'Friend money</button>' +
-      '<button class="qa-tile qa-wide" id="qa-cash">'+IC.wallet+'Check my cash</button>' +
+      '<button class="qa-tile" id="qa-fuel">'+IC.fuel+'Fuel fill-up</button>' +
+      '<button class="qa-tile" id="qa-cash">'+IC.wallet+'Check my cash</button>' +
       '</div>'
     );
     $("#qa-expense").addEventListener("click", function(){ openAdd(); });
@@ -6170,6 +6521,7 @@ function importBackupFile(input){
     $("#qa-split").addEventListener("click", openSplitSheet);
     $("#qa-friend").addEventListener("click", function(){ openBorrowSheet(0); });
     $("#qa-cash").addEventListener("click", openCashSheet);
+    $("#qa-fuel").addEventListener("click", function(){ openAdd(null, { cat:"transport", fuel:true, catManual:true }); });
   }
 
   function setupChecklist(){
@@ -6216,7 +6568,12 @@ function importBackupFile(input){
               catManual: seed ? seed.catManual !== false : !!editing,
               amount: source.amount != null ? source.amount : "",
               note: source.note || "",
-              date: source.date || todayIso() };
+              date: source.date || todayIso(),
+              placeId: source.placeId || "", pos: source.pos || null, newPlace: source.newPlace || "",
+              fuel: !!(source.fuel || source.fuelLiters > 0),
+              fuelLiters: source.fuelLiters > 0 ? source.fuelLiters : "",
+              odometer: source.odometer > 0 ? source.odometer : "" };
+    var prevOdo = lastOdometer(editing ? editing.id : "");
     var chips = catChipsHtml(draft.cat).map(function(c){
       /* shown so you can see what this row is, disabled so it cannot be
          chosen for anything else */
@@ -6251,9 +6608,20 @@ function importBackupFile(input){
       noteSuggestions().map(function(n){ return '<option value="'+esc(n)+'">'; }).join("")+'</datalist></div>' +
       '<div><label class="micro" for="f-date" style="display:block; margin-bottom:6px">Date</label>' +
       '<input id="f-date" type="date" max="'+todayIso()+'" value="'+esc(draft.date)+'"></div></div>' +
+      '<div class="fuel-box" id="f-fuel"'+(draft.cat === "transport" ? '' : ' hidden')+'>' +
+        '<button class="chip'+(draft.fuel ? ' sel' : '')+'" id="f-fuel-on" aria-pressed="'+(draft.fuel ? 'true' : 'false')+'">'+IC.fuel+'Fuel fill-up</button>' +
+        '<div class="row2" id="f-fuel-fields"'+(draft.fuel ? '' : ' hidden')+'>' +
+          '<div><label class="micro" for="f-liters" style="display:block; margin-bottom:6px">Litres</label>' +
+          '<input id="f-liters" type="text" inputmode="decimal" placeholder="e.g. 30" autocomplete="off" value="'+esc(draft.fuelLiters)+'"></div>' +
+          '<div><label class="micro" for="f-odo" style="display:block; margin-bottom:6px">Odometer (km)</label>' +
+          '<input id="f-odo" type="text" inputmode="numeric" placeholder="'+(prevOdo ? 'last '+prevOdo.toLocaleString() : 'optional')+'" autocomplete="off" value="'+esc(draft.odometer)+'"></div>' +
+        '</div><div class="hint" id="f-fuel-hint" style="margin:6px 0 0"></div></div>' +
+      (state.placesOn || draft.placeId ? '<div class="place-box" id="f-place" aria-live="polite"></div>' : '') +
       '<button class="btn primary" id="f-save">'+(editing? "Save changes" : "Save expense")+'</button>'
     );
     setPhotoUi(draft.photo? "done" : "idle");
+    wireFuel();
+    wirePlace(!editing && !seed);
 
     $("#f-cats").addEventListener("click", function(ev){
       var b = ev.target.closest("[data-cat]"); if(!b) return;
@@ -6265,6 +6633,7 @@ function importBackupFile(input){
       if(draft.catManual) return;
       var g = window.ReceiptParse && ReceiptParse.guessCategory(this.value);
       g = guessCatFromNote(this.value) || g;
+      if(FUEL_RE.test(this.value)){ g = "transport"; setFuel(true); }
       if(g) selectChip(g);
     });
     $("#f-quicks").addEventListener("click", function(ev){
@@ -6282,7 +6651,8 @@ function importBackupFile(input){
   }
   function fundingSeed(candidate, existing){
     return { editId: existing ? existing.id : null, amount:candidate.amount, cat:candidate.cat,
-             note:candidate.note, date:candidate.date, photo:candidate.photo, catManual:true };
+             note:candidate.note, date:candidate.date, photo:candidate.photo, catManual:true,
+             placeId:candidate.placeId, fuelLiters:candidate.fuelLiters, odometer:candidate.odometer };
   }
   function openFundingSheet(candidate, existing, proposal){
     /* Nothing is added to any debt until you confirm below. */
@@ -6424,9 +6794,47 @@ function importBackupFile(input){
       id: existing ? existing.id : uid(), ts: existing ? existing.ts : Date.now(),
       amount: Math.round(amt*100)/100, cat: draft.cat,
       note: $("#f-note").value.trim(), date: $("#f-date").value || todayIso(), photo: draft.photo,
-      loanId:"", loanAdded:0, fundingType:"", fundingPersonId:"", fundingPersonName:"", fundingAmount:0, fundingLogId:""
+      loanId:"", loanAdded:0, fundingType:"", fundingPersonId:"", fundingPersonName:"", fundingAmount:0, fundingLogId:"",
+      placeId: draft.placeId || "", fuelLiters:0, odometer:0
     };
+    /* a fill-up is only a fill-up while it is filed as Transport */
+    if(draft.fuel && draft.cat === "transport"){
+      var liters = num($("#f-liters") ? $("#f-liters").value : "");
+      var odo = Math.round(num($("#f-odo") ? $("#f-odo").value : ""));
+      if(!(liters > 0)){ toast("Enter the litres, or switch off Fuel fill-up"); if($("#f-liters")) $("#f-liters").focus(); return; }
+      if(liters >= 1000){ toast("That is a lot of litres — check the number"); return; }
+      if(e.amount / liters < 3 || e.amount / liters > 60){
+        if(saveDraft.warnedFuel !== e.amount + "/" + liters){
+          saveDraft.warnedFuel = e.amount + "/" + liters;
+          toast("That is " + (Math.round(e.amount / liters * 100) / 100) + " per litre — check it · tap Save again to keep it");
+          return;
+        }
+      }
+      var before = lastOdometer(existing ? existing.id : "");
+      if(odo > 0 && before > 0 && odo < before && !existing){
+        if(saveDraft.warnedOdo !== odo){
+          saveDraft.warnedOdo = odo;
+          toast("Lower than your last reading (" + before.toLocaleString() + " km) — tap Save again to keep it");
+          return;
+        }
+      }
+      e.fuelLiters = Math.round(liters * 100) / 100;
+      e.odometer = odo > 0 && odo < 5e6 ? odo : 0;
+    }
+    saveDraft.warnedFuel = ""; saveDraft.warnedOdo = 0;
+    /* naming the spot you are standing in saves it, with this expense in it */
+    var madePlace = null;
+    if(!e.placeId && draft.pos && String(draft.newPlace || "").trim()){
+      madePlace = { id:uid(), name:String(draft.newPlace).trim().slice(0, 40),
+                    lat:Math.round(draft.pos.lat * 1e6) / 1e6, lng:Math.round(draft.pos.lng * 1e6) / 1e6,
+                    radius:120, ts:Date.now() };
+      if(!Array.isArray(state.places)) state.places = [];
+      state.places.push(madePlace);
+      e.placeId = madePlace.id;
+    }
     var proposal = expenseFundingProposal(e.amount, existing, e.date);
+    /* a place named here goes with it: the funding screen saves it together
+       with the expense, and "Cancel" brings the form back still at it */
     if(proposal.shortfall > 0){ openFundingSheet(e, existing, proposal); return; }
     /* Editing a note or a date used to silently delete the funding record --
        the friend's debt or the loan draw that paid for this expense -- because
@@ -6447,6 +6855,7 @@ function importBackupFile(input){
         : { type:"keep" };
     }
     var result = commitExpense(e, existing, plan);
+    if(!result.ok && madePlace) state.places = state.places.filter(function(p){ return p !== madePlace; });
     closeSheet(); render();
     if(!result.ok){
       /* save() has usually already said exactly why -- a full store, or
@@ -6459,7 +6868,7 @@ function importBackupFile(input){
     var added = existing ? "Updated" : (wk ? (isLiveWeekend(wk) ? "Added to this weekend — "+fmt(e.amount)
                                                             : "Added to the "+weekendLabel(wk)+" weekend")
                                        : "Added — "+fmt(e.amount));
-    toast(added);
+    toast(madePlace ? added + " · saved " + madePlace.name : added);
   }
 
   camera.addEventListener("change", function(){
@@ -6516,6 +6925,9 @@ function importBackupFile(input){
       (weekendKeyOf(e.date) ? '<dt>Weekend</dt><dd>'+weekendLabel(weekendOf(e.date), true)+'</dd>' : "") +
       (e.loanAdded > 0 ? '<dt>Loan added</dt><dd>'+fmt(e.loanAdded)+' to '+esc((function(){ var x=loanById(e.loanId); return x?x.name:"the loan"; })())+'</dd>' : '') +
       (e.fundingType === "person" && e.fundingAmount > 0 ? '<dt>Funded by</dt><dd>'+fmt(e.fundingAmount)+' borrowed from '+esc(e.fundingPersonName)+'</dd>' : '') +
+      (e.placeId && placeById(e.placeId) ? '<dt>Place</dt><dd>'+esc(placeById(e.placeId).name)+'</dd>' : '') +
+      (e.fuelLiters > 0 ? '<dt>Fuel</dt><dd>'+e.fuelLiters+' L · '+(Math.round(e.amount / e.fuelLiters * 100) / 100).toFixed(2)+' per litre' +
+        (e.odometer > 0 ? ' · '+e.odometer.toLocaleString()+' km' : '')+'</dd>' : '') +
       '</dl>' +
       /* "again" is meaningless for a cash-check reconciliation -- you cannot
          re-spend money you never noticed spending -- and one tap wrote a
@@ -6586,6 +6998,8 @@ function importBackupFile(input){
       bm.classList.remove("spin"); void bm.offsetWidth; bm.classList.add("spin");
       setTimeout(function(){ bm.classList.remove("spin"); }, 950);
     });
+    var fuelAdd = $("#p-fuel-add");
+    if(fuelAdd) fuelAdd.addEventListener("click", function(){ openAdd(null, { cat:"transport", fuel:true, catManual:true }); });
     var budEdit = $("#p-bud-edit");
     if(budEdit) budEdit.addEventListener("click", function(){ openCatBudgetSheet(); });
     var catsBtn = $("#p-cats");
@@ -6835,7 +7249,8 @@ function importBackupFile(input){
                      restAmount:state.restAmount, restFrom:state.restFrom, restTs:state.restTs, cashTs:state.cashTs, wkPlan:state.wkPlan, wkWeight:state.wkWeight,
                      wkWeightFlat:state.wkWeightFlat,
                      setupHidden:state.setupHidden,
-                     customCats:state.customCats, catBudgets:state.catBudgets };  // keys deliberately excluded
+                     customCats:state.customCats, catBudgets:state.catBudgets,
+                     places:state.places || [] };  // keys deliberately excluded
         var blob = new Blob([JSON.stringify(copy, null, 2)], {type:"application/json"});
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -6847,6 +7262,7 @@ function importBackupFile(input){
         toast("Backup downloaded");
       });
       $("#s-import").addEventListener("click", function(){ $("#s-import-file").click(); });
+      bindPlaces();
       var undoRestore = $("#s-undo-restore");
       if(undoRestore){
         var undoArmed = false;
@@ -6874,7 +7290,7 @@ function importBackupFile(input){
         snapshot("before erasing everything");
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", agentRouterApiKey:"", agentRouterModel:"gpt-5.5", scanProvider:"free", scanModel:"claude-opus-4-8",
                   salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:1,
-                  customCats:[], catBudgets:{} };
+                  customCats:[], catBudgets:{}, places:[], placesOn:0 };
         rebuildCats([]);
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
