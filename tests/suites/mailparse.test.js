@@ -302,6 +302,57 @@ exports.run = async function (t) {
     text: "Paiement par carte de 250,00 MAD chez ZARA.", authResults: "mx.google.com; dkim=pass header.i=@phish.example" })));
   t.ok("forged CIH alert: 0.85 − 0.3", cihForged === 0.55, cihForged);
 
+  /* ===== round 3 ===== */
+
+  /* 1. incoming transfers are credits, whatever the word order */
+  const cihMail = (text) => mail({ from: "CIH Bank <alertes@cihbank.ma>", subject: "Alerte", text });
+  const incoming = [
+    ["Vous avez reçu un virement de 8 500,00 MAD de la part de SAMIR ALAMI.", 8500],
+    ["Un virement de 3 000 MAD a été reçu sur votre compte.", 3000],
+    ["Votre compte a été crédité d'un virement de 1 200,00 MAD.", 1200],
+    ["Virement en votre faveur de 4 000,00 MAD.", 4000],
+    ["Virement entrant de 2 500,00 MAD.", 2500],
+    ["Réception d'un virement de 900,00 MAD.", 900],
+    ["Un virement de 750,00 MAD a été reçue.", 750]
+  ];
+  for (const [text, amt] of incoming) {
+    const r = parseMail(cihMail(text));
+    t.eq("R3.1 credit: " + text.slice(0, 48), r && r.kind + " " + r.amount, "credit " + amt);
+  }
+  t.eq("R3.1 'Vous avez reçu un virement … de la part de X' names X", field(parseMail(cihMail(incoming[0][0])), "merchant"), "Samir Alami");
+  t.eq("R3.1 outgoing 'virement émis' stays a debit", field(parseMail(cihMail("Virement émis de 1 000,00 MAD au profit de KARIM.")), "kind"), "debit");
+
+  /* 2. failed payments, price changes, renewal reminders → null even from known senders */
+  const notYet = [
+    ["Netflix <info@mailer.netflix.com>", "Problème de paiement", "We couldn't process your payment of €13.49. Total: €13.49"],
+    ["Netflix <info@mailer.netflix.com>", "Votre facture", "Votre paiement a échoué. Montant total : 65,00 MAD"],
+    ["Spotify <no-reply@spotify.com>", "Votre abonnement", "Votre paiement a été refusé. Total 59,99 MAD"],
+    ["Spotify <no-reply@spotify.com>", "Changes to your plan", "Your price is changing to €15.99 per month. Total €15.99"],
+    ["inwi <factures@inwi.ma>", "Votre abonnement", "Votre abonnement sera renouvelé le 30/10/2026 pour 59 MAD. Montant total : 59 MAD"],
+    ["Apple <no_reply@email.apple.com>", "Your subscription will renew", "Your subscription will renew on 20 Oct 2026. Total $9.99"],
+    ["Spotify <no-reply@spotify.com>", "Upcoming payment", "Your upcoming payment of 59,99 MAD. Total 59,99 MAD"],
+    ["Orange <noreply@orange.ma>", "Rappel de paiement", "Facture à venir. Montant total : 199,00 DH"]
+  ];
+  for (const [from, subject, text] of notYet) t.eq("R3.2 null: " + subject + " / " + text.slice(0, 30), parseMail(mail({ from, subject, text })), null);
+  const appleRenews = parseMail(mail({ from: "Apple <no_reply@email.apple.com>", subject: "Your receipt from Apple",
+    text: "Receipt\niCloud+ 50 GB Monthly Renews 20 Nov 2026\nTotal $0.99" }));
+  t.eq("R3.2 a real receipt that prints 'Renews …' still counts", field(appleRenews, "amount"), 0.99);
+
+  /* 3. deposits: the amount paid, never what is still owed */
+  t.eq("R3.3 'Acompte versé' over 'Reste à payer'", field(parseMail(mail({ from: "Riad <contact@riad.example>", subject: "Votre réservation",
+    text: "Merci pour votre réservation\nAcompte versé : 500,00 MAD\nReste à payer : 1 500,00 MAD" })), "amount"), 500);
+  t.eq("R3.3 'Deposit paid' over 'Remaining balance' and 'Total'", field(parseMail(mail({ from: "Hotel <x@hotel.example>", subject: "Booking confirmation",
+    text: "Thank you for your booking\nDeposit paid: 500.00 MAD\nRemaining balance: 1,500.00 MAD\nTotal: 2,000.00 MAD" })), "amount"), 500);
+  t.eq("R3.3 'Montant payé' over 'Montant restant'", field(parseMail(mail({ from: "Ecole <x@ecole.example>", subject: "Reçu de paiement",
+    text: "Montant payé : 500,00 MAD\nMontant restant : 1 500,00 MAD" })), "amount"), 500);
+  t.eq("R3.3 only a remaining amount → null", parseMail(mail({ from: "Hotel <x@hotel.example>", subject: "Votre réservation",
+    text: "Merci pour votre réservation\nSolde restant : 1 500,00 MAD\nMontant restant à régler sur place" })), null);
+
+  /* 4. promo bonus excluded, the real price kept */
+  const recharge = parseMail(mail({ from: "inwi <noreply@inwi.ma>", subject: "Confirmation de recharge",
+    text: "Votre recharge de 50 DH a été effectuée avec succès. 10 DH offerts !" }));
+  t.eq("R3.4 inwi recharge with '10 DH offerts' → 50", recharge && recharge.amount + " " + recharge.merchant, "50 inwi");
+
   /* --- robustness --- */
   const weird = [undefined, null, 42, "x", {}, { from: null, subject: null, text: null, html: null },
     { html: "<" + "div>".repeat(50000) }, { text: "\u0000￿".repeat(1000) }, { from: {}, subject: [], date: "not a date", text: "Total 10 MAD" }];

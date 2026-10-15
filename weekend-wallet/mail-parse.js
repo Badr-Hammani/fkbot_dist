@@ -266,6 +266,17 @@
      commande", "gagnez 50 DH" */
   var PROMO_AMT_RE = /(?:^|[^\w-])off\b|r[eé]duction|remise|code\s+promo|\bpromo|bon\s+de\s+r[eé]duction|coupon|voucher|next\s+(?:ride|time|order|trip|purchase)|prochaine?s?\s+(?:commande|course|achat)|gagnez|offerte?s?|cashback|discount/i;
   /* "Virement de 3 000 MAD reçu": the direction is after the amount */
+  /* Incoming-transfer wording. "Vous avez reçu un virement de X", "un
+     virement de X a été reçu", "crédité d'un virement de X": the bare
+     "virement de" before the amount reads as a debit, so a credit word
+     anywhere in the same sentence wins, unless the sentence also says the
+     money went out. */
+  var INCOMING_RE = /re[cç]ue?s?(?![a-z])|cr[eé]dit[eé]e?s?(?![a-z])|en\s+votre\s+faveur|entrante?s?(?![a-z])|r[eé]ception|received|credited|incoming/i;
+  var OUTGOING_RE = /[eé]mise?s?(?![a-z])|sortante?s?(?![a-z])|au\s+profit\s+de|d[eé]bit[eé]|pr[eé]l[eè]v|paiement|achat|retrait|sent\s+to|transfer\s+sent/i;
+  /* what is still owed, never what was spent: "Reste à payer 1 500 MAD" */
+  var REMAIN_RE = /reste\s+[aà]\s+(?:payer|r[eé]gler)|reste\s+d[uû]|restante?s?(?![a-z])|remaining|due\s+later|balance\s+due|[aà]\s+r[eé]gler\s+sur\s+place|pay\s+at\s+the\s+(?:property|hotel)/i;
+  /* what was actually paid when the rest is still owed */
+  var PAID_RE = /acompte|deposit|arrhes|montant\s+pay[eé]|amount\s+paid|d[eé]j[aà]\s+(?:pay[eé]|r[eé]gl[eé])|already\s+paid|total\s+pay[eé]|vous\s+avez\s+pay[eé]|you\s+paid|paid\s+today|vers[eé]e?(?![a-z])/i;
   var CREDIT_AFTER_RE = /^\s*(?:re[cç]ue?s?(?![a-z])|cr[eé]dit[eé]|received|credited)/i;
 
   /* end position of the last match of re in s, or -1 */
@@ -345,6 +356,10 @@
           hit.label = labelOf(pre, post);
           hit.verb = hit.label === "bal" || hit.label === "promo" ? "" : verbOf(pre);
           if (hit.verb && CREDIT_AFTER_RE.test(post)) hit.verb = "credit";
+          if (hit.verb === "debit" && /virement|transfer/i.test(clause) && INCOMING_RE.test(clause) && !OUTGOING_RE.test(clause)) hit.verb = "credit";
+          hit.remain = REMAIN_RE.test(pre.slice(-80));
+          hit.paid = !hit.remain && PAID_RE.test(pre.slice(-80));
+          if (hit.remain) hit.label = "bal";
           /* "Frais de virement de 5,00 MAD": the nearest word is the transfer,
              but the sum is the bank's fee for it, not the transfer itself */
           hit.fee = FEE_WORD_RE.test(pre.slice(-60));
@@ -606,9 +621,11 @@
      so, or a line pairs that wording with the code itself. */
   var OTP_RE = /code\s+(?:de\s+)?(?:v[eé]rification|confirmation|s[eé]curit[eé]|d'activation|otp|3d\s*secure)|verification\s+code|security\s+code|\botp\b|one[\s-]?time\s+(?:password|code|passcode|pin)|code\s+[aà]\s+usage\s+unique|mot\s+de\s+passe\s+(?:unique|temporaire)|3d\s*secure/i;
   var SECURITY_SUBJ_RE = /mot\s+de\s+passe|password|passcode|sign[\s-]?in|log[\s-]?in|connexion|nouvel\s+appareil|new\s+device|identifiants?|verify\s+your|v[eé]rifiez\s+votre\s+(?:adresse|email|e-mail|identit)/i;
+  /* notices about a charge that has not happened (yet) */
+  var REMINDER_RE = /price\s+(?:is\s+)?chang|prix\s+(?:va\s+)?chang|changement\s+de\s+(?:prix|tarif)|nouveaux?\s+(?:prix|tarifs?)|new\s+price|sera\s+renouvel|will\s+(?:auto[\s-]?)?renew|renewal\s+reminder|upcoming\s+(?:payment|charge|renewal|bill)|prochain\s+(?:paiement|pr[eé]l[eè]vement)|rappel\s+de\s+paiement|payment\s+reminder|facture\s+[aà]\s+venir|will\s+be\s+charged|sera\s+(?:d[eé]bit[eé]|pr[eé]lev[eé])|trial\s+(?:ends|is\s+ending)|essai\s+(?:se\s+termine|prend\s+fin)/i;
   var STATEMENT_SUBJ_RE = /relev[eé]|statement|extrait\s+de\s+compte/i;
   var PROMO_RE = /promo|\boffre|\boffer|%\s?off|-\s?\d+\s?%|\d+\s?%\s+(?:de\s+)?(?:r[eé]duction|off|discount)|newsletter|unsubscribe|d[eé]sabonn|d[eé]sinscri|profitez|bon\s+plan|\bdeals?\b|black\s+friday|[eé]conomisez|\bsave\s+(?:up|\d)|gratuit|free\s+delivery|nouveaut[eé]s/i;
-  var FAILED_RE = /[eé]chec|[eé]chou[eé]|failed|declined|refus[eé]|unsuccessful|n'a\s+pas\s+(?:pu\s+)?(?:[eé]t[eé]\s+)?(?:effectu|accept|trait|abouti)|could\s+not\s+be\s+(?:processed|charged|completed)|insufficient|insuffisant|update\s+your\s+payment|mettre\s+[aà]\s+jour\s+votre\s+(?:moyen|mode)\s+de\s+paiement/i;
+  var FAILED_RE = /[eé]chec|[eé]chou[eé]|failed|declined|refus[eé]|unsuccessful|couldn'?t\s+(?:process|charge|complete)|could\s+not\s+(?:process|charge|complete)|unable\s+to\s+(?:process|charge)|n'avons\s+pas\s+pu|impossible\s+de\s+(?:traiter|d[eé]biter|pr[eé]lever)|payment\s+(?:didn'?t|did\s+not)\s+go\s+through|n'a\s+pas\s+(?:pu\s+)?(?:[eé]t[eé]\s+)?(?:effectu|accept|trait|abouti)|could\s+not\s+be\s+(?:processed|charged|completed)|insufficient|insuffisant|update\s+your\s+payment|mettre\s+[aà]\s+jour\s+votre\s+(?:moyen|mode)\s+de\s+paiement/i;
   var RECEIPT_RE = /re[cç]u(?![a-z])|receipt|facture|invoice|\bcommande\b|\border\b|achat|purchase|paiement|payment|merci\s+pour\s+votre|thank\s+you\s+for\s+your|thanks\s+for\s+(?:riding|your)|your\s+trip|votre\s+course|confirmation|abonnement|subscription|recharge|total\s+pay[eé]|you\s+paid|amount\s+paid|billets?|e-?tickets?|r[eé]servation|booking/i;
   /* shipping and delivery notices repeat the order total; only the order or
      receipt mail itself counts */
@@ -645,6 +662,19 @@
     };
   }
 
+  /* A mail that says what is still owed ("Reste à payer") is a deposit or
+     part payment: the only trustworthy amount is the one marked as paid.
+     Returns undefined when there is no remaining line, null when there is
+     one but nothing is marked paid. */
+  function paidOf(cands) {
+    var remain = false, paid = null;
+    for (var i = 0; i < cands.length; i++) {
+      if (cands[i].remain) remain = true;
+      else if (cands[i].paid && cands[i].label !== "promo") paid = cands[i];
+    }
+    return remain ? paid : undefined;
+  }
+
   function lastOf(cands, label) {
     var hit = null;
     for (var i = 0; i < cands.length; i++) if (cands[i].label === label) hit = cands[i];
@@ -653,6 +683,8 @@
 
   function parseReceipt(known, sender, subject, all, cands, base) {
     var c = lastOf(cands, "total"), conf = 0.9, why = "total line";
+    var pd = paidOf(cands);
+    if (pd !== undefined) { c = pd; why = "amount paid (rest still owed)"; if (!c) return null; }
     if (!c) { c = lastOf(cands, "amount"); conf = 0.8; why = "amount line"; }
     if (!c) {
       /* no label at all: only a mail that names one single sum is trusted */
@@ -739,7 +771,8 @@
 
   function parseGeneric(sender, subject, all, cands, base) {
     if (!RECEIPT_RE.test(all)) return null;
-    var c = lastOf(cands, "total");
+    var c = lastOf(cands, "total"), pd = paidOf(cands);
+    if (pd !== undefined) c = pd;
     if (!c || FAILED_RE.test(c.clause)) return null;
     base.merchant = sender.name || "Unknown";
     base.cat = guessCat(sender.name + " " + subject);
@@ -771,6 +804,12 @@
     if (STATEMENT_SUBJ_RE.test(subject) || SECURITY_SUBJ_RE.test(subject) || OTP_RE.test(subject)) return null;
     for (var b = 0; b < body.length; b++) if (OTP_RE.test(body[b]) && /(?:^|[^\d,.])\d{4,8}(?![\d,]|\.\d)/.test(body[b])) return null;
 
+    /* failed payments anywhere in the mail; reminders/price changes in the
+       subject, or in the body unless the subject says it is a receipt
+       (Apple receipts print "Renews 20 Nov") */
+    if (FAILED_RE.test(all)) return null;
+    if (REMINDER_RE.test(subject) || (!RECEIPT_STRONG_RE.test(subject) && REMINDER_RE.test(all))) return null;
+
     var cands = collect(lines);
     if (!cands.length) return null;
 
@@ -778,7 +817,7 @@
     var bd = bodyDate(all, ref);
     var base = { date: ymd(bd || ref || new Date()) };
 
-    var hasTotal = !!lastOf(cands, "total") && RECEIPT_RE.test(all);
+    var hasTotal = !!(lastOf(cands, "total") || lastOf(cands, "amount")) && RECEIPT_RE.test(all);
     var hasVerbAmt = false;
     for (var i = 0; i < cands.length; i++) if (cands[i].verb && cands[i].label !== "bal" && cands[i].label !== "sub" && cands[i].label !== "promo") hasVerbAmt = true;
     var bankish = hasVerbAmt && BANK_CTX_RE.test(all);
