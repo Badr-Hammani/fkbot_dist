@@ -4807,10 +4807,13 @@
      answer to OUR request, and wipe it from the address bar at once. */
   function readGmailReturn(){
     var h = location.hash || "";
-    if(!/(^|[#&])(access_token|error|state)=/.test(h) || !window.GmailSync) return "";
+    if(!/(^|[#&])(access_token|error|state)=/.test(h)) return "";
+    /* off the address bar and out of history before anything else -- even
+       if the Gmail code failed to load, a token must not linger there */
+    try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){ location.hash = ""; }
     var saved = null;
     try{ saved = JSON.parse(localStorage.getItem(GMAIL_OAUTH_KEY) || "null"); localStorage.removeItem(GMAIL_OAUTH_KEY); }catch(e){}
-    try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){ location.hash = ""; }
+    if(!window.GmailSync) return "Gmail couldn’t load — sign in again when you’re online";
     var expected = saved && saved.state && Date.now() - (+saved.at || 0) < 15 * 60 * 1000 ? saved.state : "";
     var r = GmailSync.readRedirect(h, expected, Date.now());
     if(!r) return "";
@@ -4824,10 +4827,15 @@
     gmailToken = { token:r.token, expiresAt:r.expiresAt };
     return "ok";
   }
+  /* the display name only -- "Glovo", not no-reply@glovoapp.com; with no
+     name, just the domain */
   function senderName(from){
-    var m = String(from || "").match(/^\s*"?([^"<]*?)"?\s*</);
-    var n = m && m[1].trim() ? m[1].trim() : String(from || "").replace(/[<>]/g, "");
-    return n.slice(0, 60);
+    var f = String(from || "").slice(0, 300);
+    var lt = f.indexOf("<");
+    var name = (lt > 0 ? f.slice(0, lt) : "").replace(/["']/g, "").trim();
+    if(name) return name.slice(0, 60);
+    var at = f.lastIndexOf("@");
+    return at >= 0 ? f.slice(at + 1).replace(/[>\s].*$/, "").slice(0, 60) : "Email";
   }
   function checkGmail(){
     if(gmailBusy) return;
@@ -4856,10 +4864,18 @@
     GmailSync.fetchNew(gmailToken.token, { query:query, max:60, knownIds:known }).then(function(msgs){
       gmailBusy = false;
       var found = 0, today = todayIso();
+      /* Written down as seen BEFORE any parsing: if one hostile email ever
+         made the parser hang, it must not be fetched -- and hang the app --
+         again on every check. */
+      msgs.forEach(function(m){ state.mailSeen[m.id] = Date.now(); });
+      if(!save()) return;
       msgs.forEach(function(m){
-        state.mailSeen[m.id] = Date.now();
         var t = null;
-        try{ t = MailParse.parseMail(m); }catch(e){ t = null; }
+        try{
+          t = MailParse.parseMail({ id:m.id, date:m.date, authResults:String(m.authResults || "").slice(0, 2048),
+            from:String(m.from || "").slice(0, 1024), subject:String(m.subject || "").slice(0, 1024),
+            text:String(m.text || "").slice(0, 50000), html:String(m.html || "").slice(0, 300000) });
+        }catch(e){ t = null; }
         if(!t || !(t.amount > 0) || !(t.confidence >= 0.5) || inboxItem(m.id)) return;
         state.inbox.push({ id:m.id, amount:Math.round(t.amount * 100) / 100, currency:t.currency || "MAD",
           kind:t.kind || "debit", merchant:String(t.merchant || senderName(m.from)).slice(0, 40),
@@ -5015,7 +5031,7 @@
     var cfg = gmailCfg();
     return '<div class="panel"><h3>'+IC.receipt+'Gmail receipts</h3>' +
       '<p>Reads receipt and bank emails (Glovo, Jumia, Careem, CIH…) and puts each payment in an inbox for you to confirm. ' +
-      'Gmail is only read when you tap Check Gmail, read-only, on this phone. Only the amount, shop and date are kept — never the email. ' +
+      'Gmail is only read when you tap Check Gmail, read-only, on this phone. For each transaction the app keeps the amount, shop, date, sender’s name and subject line — never the email itself — plus the Gmail message ids it has looked at, so nothing is offered twice. ' +
       'The Google sign-in lasts about an hour and is never saved.</p>' +
       '<details class="gmail-steps"'+(cfg.clientId ? '' : ' open')+'><summary>One-time setup (about 10 minutes, easier on a computer)</summary><ol>' +
         '<li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a>, sign in with the Gmail you want to read, and create a project (any name).</li>' +

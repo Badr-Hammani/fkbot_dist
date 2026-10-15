@@ -36,7 +36,7 @@ exports.run = async function (t) {
   t.eq("authUrl endpoint", au.origin + au.pathname, "https://accounts.google.com/o/oauth2/v2/auth");
   t.eq("authUrl response_type=token", au.searchParams.get("response_type"), "token");
   t.eq("authUrl scope", au.searchParams.get("scope"), G.SCOPE);
-  t.eq("authUrl include_granted_scopes", au.searchParams.get("include_granted_scopes"), "true");
+  t.eq("authUrl asks for nothing beyond Gmail read-only", au.searchParams.get("include_granted_scopes"), null);
   t.eq("authUrl redirect_uri round-trips", au.searchParams.get("redirect_uri"), "https://badr-hammani.github.io/fkbot_dist/weekend-wallet/");
   t.eq("authUrl state with & and = encoded", au.searchParams.get("state"), "st&ate=1");
   t.eq("authUrl login_hint with + encoded", au.searchParams.get("login_hint"), "me+x@gmail.com");

@@ -271,4 +271,42 @@ exports.run = async function (t, env) {
     t.no("so Home stops asking", /from Gmail to review/.test(await app.shellText()));
     await app.close();
   }
+
+  /* ---- security round ---- */
+  {
+    /* an email that breaks the parser is still written down as seen, so it
+       cannot be fetched -- and break things -- on every check */
+    const app = await boot(browser, connected(), { now: NOW });
+    await fakeGoogle(app);
+    await app.page.addInitScript(() => {
+      const iv = setInterval(() => {
+        if (window.MailParse) { const real = window.MailParse.parseMail;
+          window.MailParse.parseMail = m => {
+            if (m.id === "o1") {
+              /* what is already ON DISK when the parser starts -- a hang here
+                 must not have lost the record that this email was seen */
+              const disk = JSON.parse(localStorage.getItem("weekend-wallet-v1") || "{}");
+              window.__seenOnDisk = !!(disk.mailSeen && disk.mailSeen.o1);
+              throw new Error("boom");
+            }
+            return real(m); }; clearInterval(iv); }
+      }, 1);
+    });
+    await returnFromGoogle(app, "f".repeat(40));
+    const s = await app.stored();
+    t.ok("an email the parser chokes on is still marked seen", !!s.mailSeen.o1);
+    t.ok("and that was saved BEFORE parsing began", await app.page.evaluate(() => window.__seenOnDisk === true));
+    t.ok("and the rest still arrive", s.inbox.some(x => x.id === "g1"));
+    t.ok("senders are kept by name, never by address", s.inbox.every(x => !/@/.test(x.sender)));
+    await app.close();
+  }
+  {
+    /* the Gmail code failed to load (offline first launch): the token must
+       still be wiped from the address */
+    const app = await boot(browser, connected(), { now: NOW });
+    await app.page.route("**/gmail.js*", r => r.abort());
+    await returnFromGoogle(app, "g".repeat(40));
+    t.no("a token in the address is wiped even without the Gmail code", /access_token/.test(app.page.url()), app.page.url());
+    await app.close();
+  }
 };

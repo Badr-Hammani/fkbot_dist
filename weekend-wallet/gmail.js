@@ -23,12 +23,14 @@
     return e;
   }
 
+  /* Taken once, when this file loads: a script injected later that wraps
+     window.fetch must not get to see the Bearer token. */
+  var nativeFetch = root && typeof root.fetch === "function" ? root.fetch.bind(root)
+                  : (typeof fetch === "function" ? fetch : null);
   function pickFetch(opts) {
     var f = opts && opts.fetch;
     if (typeof f === "function") return f;
-    if (root && typeof root.fetch === "function") return root.fetch;
-    if (typeof fetch === "function") return fetch;
-    return null;
+    return nativeFetch;
   }
 
   function getCrypto() {
@@ -48,7 +50,6 @@
       ["client_id", o.clientId],
       ["redirect_uri", o.redirectUri],
       ["scope", SCOPE],
-      ["include_granted_scopes", "true"],
       ["state", o.state == null ? "" : o.state]
     ];
     if (o.loginHint) p.push(["login_hint", o.loginHint]);
@@ -341,10 +342,21 @@
       var d = new Date(h.date);
       if (!isNaN(d.getTime())) date = d.toISOString();
     }
+    /* Google's own verdict on who really sent it: the first
+       Authentication-Results header stamped by mx.google.com. A forged one
+       written by the sender sits below it, or carries another authserv-id. */
+    var authResults = "";
+    (payload.headers || []).some(function (x) {
+      if (!x || String(x.name || "").toLowerCase() !== "authentication-results") return false;
+      var v = String(x.value == null ? "" : x.value);
+      if (/^\s*mx\.google\.com\s*;/i.test(v)) { authResults = v.slice(0, 2048); return true; }
+      return false;
+    });
     return {
       id: j.id || "",
       threadId: j.threadId || "",
       from: h.from || "",
+      authResults: authResults,
       subject: h.subject || "",
       date: date,
       text: acc.text.join("\n"),
