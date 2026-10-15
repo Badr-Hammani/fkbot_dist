@@ -338,6 +338,20 @@ exports.run = async function (t) {
     text: "Receipt\niCloud+ 50 GB Monthly Renews 20 Nov 2026\nTotal $0.99" }));
   t.eq("R3.2 a real receipt that prints 'Renews …' still counts", field(appleRenews, "amount"), 0.99);
 
+  /* failed-payment wording counts only as the mail's own statement */
+  t.eq("R3.2b conditional 'En cas de paiement refusé…' keeps a real Glovo receipt", field(parseMail(mail({ from: "Glovo <no-reply@glovoapp.com>",
+    subject: "Votre commande Glovo", text: "Total : 94,00 MAD\nMerci ! En cas de paiement refusé par votre banque, contactez le support." })), "amount"), 94);
+  t.eq("R3.2b French conditional 'Si votre paiement échoue…' keeps the receipt", field(parseMail(mail({ from: "Jumia <noreply@jumia.ma>",
+    subject: "Confirmation de commande", text: "Merci pour votre commande\nTotal payé : 250,00 Dhs\nSi votre paiement a échoué, aucun montant ne sera débité." })), "amount"), 250);
+  t.eq("R3.2b English conditional 'If your payment is declined…' keeps the receipt", field(parseMail(mail({ from: "Uber Receipts <noreply@uber.com>",
+    subject: "Your Thursday trip with Uber", text: "Thanks for riding\nTotal MAD 42.50\nIf your payment is declined, we will retry your card." })), "amount"), 42.5);
+  t.eq("R3.2b typographic apostrophe: 'We couldn’t process your payment' → null", parseMail(mail({ from: "Netflix <info@mailer.netflix.com>",
+    subject: "Problème de paiement", text: "We couldn’t process your payment of €13.49." })), null);
+  t.eq("R3.2b 'Payment issue' subject → null", parseMail(mail({ from: "Spotify <no-reply@spotify.com>",
+    subject: "Payment issue with your account", text: "Total 59,99 MAD" })), null);
+  t.eq("R3.2b failed wording on the amount's own sentence → null", parseMail(mail({ from: "CIH Bank <alertes@cihbank.ma>", subject: "Alerte",
+    text: "Paiement par carte de 300,00 MAD chez ZARA refusé." })), null);
+
   /* 3. deposits: the amount paid, never what is still owed */
   t.eq("R3.3 'Acompte versé' over 'Reste à payer'", field(parseMail(mail({ from: "Riad <contact@riad.example>", subject: "Votre réservation",
     text: "Merci pour votre réservation\nAcompte versé : 500,00 MAD\nReste à payer : 1 500,00 MAD" })), "amount"), 500);

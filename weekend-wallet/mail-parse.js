@@ -81,6 +81,7 @@
     });
   }
 
+  var APOS_RE = /[\u2018\u2019\u02bc\u00b4`]/g;
   var SPACE_RE = /[ \t\f\v  -   　]+/g;
   var ZW_RE = /[​-‍⁠﻿]/g;
 
@@ -621,6 +622,37 @@
      so, or a line pairs that wording with the code itself. */
   var OTP_RE = /code\s+(?:de\s+)?(?:v[eé]rification|confirmation|s[eé]curit[eé]|d'activation|otp|3d\s*secure)|verification\s+code|security\s+code|\botp\b|one[\s-]?time\s+(?:password|code|passcode|pin)|code\s+[aà]\s+usage\s+unique|mot\s+de\s+passe\s+(?:unique|temporaire)|3d\s*secure/i;
   var SECURITY_SUBJ_RE = /mot\s+de\s+passe|password|passcode|sign[\s-]?in|log[\s-]?in|connexion|nouvel\s+appareil|new\s+device|identifiants?|verify\s+your|v[eé]rifiez\s+votre\s+(?:adresse|email|e-mail|identit)/i;
+  var PAY_PROBLEM_SUBJ_RE = /probl[eè]me\s+de\s+paiement|payment\s+(?:problem|issue|failed|declined)|[eé]chec\s+(?:de|du)\s+paiement/i;
+  /* "En cas de paiement refusé, contactez…" describes a what-if, not this mail */
+  var CONDITIONAL_RE = /(?:^|[^a-z])(?:en\s+cas\s+d|si\s|s'il|if\s|in\s+case|should\s+(?:your|a|the)\s|unless\s|lorsqu|when\s+a\s)/i;
+  var ASSERT_RE = /(?:^|[^a-z])(?:votre|vos|your|we|nous|vous)\s/i;
+
+  /* Failed-payment wording counts only as the mail's own statement: not in a
+     conditional, and either on the amount's sentence or said of this payment
+     ("votre paiement a échoué", "we couldn't process your payment"). */
+  function failedSentence(sent) {
+    if (!FAILED_RE.test(sent) || CONDITIONAL_RE.test(sent)) return false;
+    return ASSERT_RE.test(sent) || scanClause(scrub(sent)).length > 0;
+  }
+
+  function failedMail(subject, body) {
+    if (FAILED_RE.test(subject) || PAY_PROBLEM_SUBJ_RE.test(subject)) return true;
+    for (var i = 0; i < body.length; i++) {
+      var sents = clausesOf(body[i]);
+      for (var j = 0; j < sents.length; j++) if (failedSentence(sents[j])) return true;
+    }
+    return false;
+  }
+
+  /* a reminder sentence that is not a what-if ("si…, aucun montant ne sera débité") */
+  function reminderBody(body) {
+    for (var i = 0; i < body.length; i++) {
+      var sents = clausesOf(body[i]);
+      for (var j = 0; j < sents.length; j++) if (REMINDER_RE.test(sents[j]) && !CONDITIONAL_RE.test(sents[j])) return true;
+    }
+    return false;
+  }
+
   /* notices about a charge that has not happened (yet) */
   var REMINDER_RE = /price\s+(?:is\s+)?chang|prix\s+(?:va\s+)?chang|changement\s+de\s+(?:prix|tarif)|nouveaux?\s+(?:prix|tarifs?)|new\s+price|sera\s+renouvel|will\s+(?:auto[\s-]?)?renew|renewal\s+reminder|upcoming\s+(?:payment|charge|renewal|bill)|prochain\s+(?:paiement|pr[eé]l[eè]vement)|rappel\s+de\s+paiement|payment\s+reminder|facture\s+[aà]\s+venir|will\s+be\s+charged|sera\s+(?:d[eé]bit[eé]|pr[eé]lev[eé])|trial\s+(?:ends|is\s+ending)|essai\s+(?:se\s+termine|prend\s+fin)/i;
   var STATEMENT_SUBJ_RE = /relev[eé]|statement|extrait\s+de\s+compte/i;
@@ -701,7 +733,7 @@
       for (var q = 0; q < cands.length; q++) if (cands[q].label === "credit" && cands[q].verb === "credit") { c = cands[q]; break; }
       if (c) { credit = true; conf = 0.8; why = "money received"; }
     }
-    if (!c || FAILED_RE.test(c.clause)) return null;
+    if (!c || failedSentence(c.clause)) return null;
     var merchant = known.name, cat = known.cat;
     if (known.slug === "uber" && /uber\s*eats|ubereats/i.test(all + " " + sender.domain)) { merchant = "Uber Eats"; cat = "food"; }
     if (known.slug === "careem" && /careem\s*pay/i.test(all)) merchant = "Careem Pay";
@@ -742,7 +774,7 @@
     }
     /* a bare "votre virement de X" does not say which way the money went */
     if (c && c.verb === "debit" && /virement/i.test(c.pre) && !/[eé]mis|sortant|effectu|paiement|achat|retrait|d[eé]bit|pr[eé]l[eè]v/i.test(c.pre)) conf = Math.min(conf, 0.7);
-    if (!c || FAILED_RE.test(c.clause) || FAILED_RE.test(lines[c.line] || "")) return null;
+    if (!c || failedSentence(c.clause)) return null;
     var verb = c.verb || globalVerb;
     var ctx = subject + " " + c.clause;
     var kind = verb === "credit" ? "credit" : "debit";
@@ -773,7 +805,7 @@
     if (!RECEIPT_RE.test(all)) return null;
     var c = lastOf(cands, "total"), pd = paidOf(cands);
     if (pd !== undefined) c = pd;
-    if (!c || FAILED_RE.test(c.clause)) return null;
+    if (!c || failedSentence(c.clause)) return null;
     base.merchant = sender.name || "Unknown";
     base.cat = guessCat(sender.name + " " + subject);
     base.kind = REFUND_RE.test(subject + " " + c.clause) ? "refund" : "debit";
@@ -785,12 +817,13 @@
 
   function parseMailInner(mail) {
     if (!mail || typeof mail !== "object") return null;
-    var subject = str(mail.subject).slice(0, MAX_SUBJECT).replace(SPACE_RE, " ").trim();
+    var subject = str(mail.subject).slice(0, MAX_SUBJECT).replace(SPACE_RE, " ").replace(APOS_RE, "'").trim();
     var text = str(mail.text).slice(0, MAX_TEXT), html = str(mail.html).slice(0, MAX_HTML);
     if (text.replace(/\s/g, "").length < 20 && html) text = htmlToText(html);
     else if (/^\s*<(?:!doctype|html|body|div|table|p)\b/i.test(text)) text = htmlToText(text);
     else text = tidyLines(text);
     if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT);
+    text = text.replace(APOS_RE, "'");   /* "couldn’t" must match "couldn'?t" */
     var body = text.split("\n");
     for (var L = 0; L < body.length; L++) if (body[L].length > MAX_LINE) body[L] = body[L].slice(0, MAX_LINE);
     if (!subject && !text) return null;
@@ -807,8 +840,8 @@
     /* failed payments anywhere in the mail; reminders/price changes in the
        subject, or in the body unless the subject says it is a receipt
        (Apple receipts print "Renews 20 Nov") */
-    if (FAILED_RE.test(all)) return null;
-    if (REMINDER_RE.test(subject) || (!RECEIPT_STRONG_RE.test(subject) && REMINDER_RE.test(all))) return null;
+    if (failedMail(subject, body)) return null;
+    if (REMINDER_RE.test(subject) || (!RECEIPT_STRONG_RE.test(subject) && reminderBody(body))) return null;
 
     var cands = collect(lines);
     if (!cands.length) return null;
