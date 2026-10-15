@@ -60,6 +60,10 @@ exports.run = async function (t) {
   t.eq("structured alert: 'Montant :' line wins over balance", field(pay2, "amount"), 89.9);
   t.eq("structured alert: 'Commerçant :' merchant", field(pay2, "merchant"), "KFC Maarif");
 
+  const comma = parseMail(mail({ from: "CIH Bank <noreply@cihbank.ma>", subject: "Alerte débit",
+    text: "Votre compte a été débité de 250,00 MAD, solde disponible 3 450,00 MAD" }));
+  t.eq("debit and balance in one sentence split by a comma → the debit", field(comma, "amount"), 250);
+
   const onlyBal = parseMail(mail({ from: "CIH Bank <noreply@cihbank.ma>", subject: "Information",
     text: "Votre solde disponible au 14/10/2026 est de 12 300,00 MAD." }));
   t.eq("balance-only mail → null", onlyBal, null);

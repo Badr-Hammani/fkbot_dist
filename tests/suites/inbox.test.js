@@ -158,7 +158,7 @@ exports.run = async function (t, env) {
     await fakeGoogle(app, { status: 401 });
     await returnFromGoogle(app, "c".repeat(40));
     t.has("a 401 asks to sign in again", await app.toast(), "sign-in expired");
-    t.eq("and changes nothing", (await app.stored()).inbox.length, 0);
+    t.eq("and changes nothing", ((await app.stored()).inbox || []).length, 0);
     await app.close();
   }
 

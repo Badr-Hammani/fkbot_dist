@@ -233,7 +233,9 @@
      it (since the previous amount) or right after it disqualifies it. */
   function labelOf(pre, post) {
     var tail = pre.slice(-80);
-    if (BAL_RE.test(tail) || BAL_RE.test(post.slice(0, 30))) return "bal";
+    /* only the words glued to the amount ("3 450 MAD de solde"), not the
+       next clause after a comma ("débité de 250 MAD, solde 3 450 MAD") */
+    if (BAL_RE.test(tail) || BAL_RE.test(post.split(/[,;:]/)[0].slice(0, 30))) return "bal";
     tail = tail.replace(INCLUDED_RE, " ");
     var fams = [["sub", SUB_RE], ["total", TOTAL_RE], ["credit", CREDIT_RE], ["debit", DEBIT_RE], ["amount", AMOUNT_RE]];
     var best = "", bestEnd = -1;
@@ -418,7 +420,7 @@
     return words.join(" ").slice(0, 40).trim();
   }
 
-  var MERCH_LABEL_RE = /(^|[^A-Za-zÀ-ÿ])(chez|aupr[eè]s\s+d(?:e\s|u\s|')|marchand\s*:|commer[cç]ant\s*:|merchant(?:\s+name)?\s*:|b[eé]n[eé]ficiaire\s*:|payee\s*:|de\s+la\s+part\s+de|[eé]metteur\s*:|donneur\s+d'ordre\s*:)\s*/gi;
+  var MERCH_LABEL_RE = /(^|[^A-Za-zÀ-ÿ])(chez|aupr[eè]s\s+d(?:e\s|u\s|')|marchand\s*:|commer[cç]ant\s*:|merchant(?:\s+name)?\s*:|b[eé]n[eé]ficiaire\s*:|payee\s*:|de\s+la\s+part\s+de|au\s+profit\s+de|[eé]metteur\s*:|donneur\s+d'ordre\s*:)\s*/gi;
   var MERCH_AT_RE = /\s(?:at|@)\s+(?=[A-Z0-9])/g;
   var MERCH_STOP_RE = /\s+(?:le|on|du|pour|for|avec|with|via|par|by|d'un|d'une|dated|using|en\s+date|ce|this|au|aux|à|a|is|est|was|a\s+[eé]t[eé])(?=\s|$)[\s\S]*$/i;
   var MERCH_BAD_RE = /^(?:vous|votre|vos|nous|notre|your|you|the|un|une|le|la|les|ce|cette|this|our|carte|card|compte|account)(?![A-Za-zÀ-ÿ])/i;
