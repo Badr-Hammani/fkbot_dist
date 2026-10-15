@@ -251,6 +251,7 @@
   /* ---------- labels ---------- */
 
   var BAL_RE = /solde|balance|available|disponible|plafond|encours|\blimite?s?\b/i;
+  var FEE_WORD_RE = /\b(?:frais|commissions?|fees?)\b/i;
   var SUB_RE = /sous[\s-]*total|sub[\s-]*total|frais|\bfees?\b|\btips?\b|pourboire|discount|r[eé]duction|remise|\bpromo|coupon|voucher|\btaxe?s?\b|\btva\b|\bvat\b|\bh\.?t\.?(?![a-z])|livraison|delivery|commission|[eé]conomis|saved|cashback|\bpoints?\b|wallet|cr[eé]dits?\s+(?:glovo|careem|uber)/i;
   /* longer forms first: alternation is leftmost-first, and "Total payé" must
      end after "payé" so it outranks the payment verb */
@@ -344,6 +345,9 @@
           hit.label = labelOf(pre, post);
           hit.verb = hit.label === "bal" || hit.label === "promo" ? "" : verbOf(pre);
           if (hit.verb && CREDIT_AFTER_RE.test(post)) hit.verb = "credit";
+          /* "Frais de virement de 5,00 MAD": the nearest word is the transfer,
+             but the sum is the bank's fee for it, not the transfer itself */
+          hit.fee = FEE_WORD_RE.test(pre.slice(-60));
           hit.pre = pre;
           hit.clause = clause;
           hit.line = i;
@@ -685,7 +689,7 @@
     var c = null, conf = 0;
     for (var i = 0; i < cands.length; i++) {
       var k = cands[i];
-      if (k.label === "bal" || k.label === "sub" || k.label === "promo") continue;
+      if (k.label === "bal" || k.label === "sub" || k.label === "promo" || k.fee) continue;
       if (k.verb) { c = k; conf = isCih ? 0.85 : bank ? 0.8 : 0.75; break; }
     }
     var globalVerb = verbOf(all);
@@ -693,6 +697,15 @@
     if (!c && bank && globalVerb) {
       for (var j = 0; j < cands.length; j++) {
         if (cands[j].label === "amount" || cands[j].label === "total") { c = cands[j]; conf = isCih ? 0.75 : 0.7; break; }
+      }
+    }
+    /* nothing but a fee in the mail: that is the money that left */
+    var feeOnly = false;
+    if (!c) {
+      for (var f = 0; f < cands.length; f++) {
+        if (cands[f].fee && cands[f].label !== "bal" && cands[f].label !== "promo" && cands[f].verb !== "credit") {
+          c = cands[f]; conf = isCih ? 0.7 : 0.65; feeOnly = true; break;
+        }
       }
     }
     /* a bare "votre virement de X" does not say which way the money went */
@@ -703,7 +716,11 @@
     var kind = verb === "credit" ? "credit" : "debit";
     if (REFUND_RE.test(ctx)) kind = "refund";
     var merchant, cat = "";
-    if (kind === "debit" && CASH_RE.test(ctx)) {
+    if (feeOnly) {
+      kind = "debit";
+      merchant = (isCih ? "CIH Bank" : (sender.name || "Bank")) + " fees";
+      cat = "bills";
+    } else if (kind === "debit" && CASH_RE.test(ctx)) {
       merchant = "Cash withdrawal";
     } else {
       merchant = extractMerchant(lines, c.line);

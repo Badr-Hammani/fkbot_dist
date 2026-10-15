@@ -319,4 +319,18 @@ exports.run = async function (t) {
   t.ok("every result has the full contract shape", outputs.every(r => r && r.amount > 0 && /^(MAD|EUR|USD)$/.test(r.currency) &&
     /^(debit|credit|refund)$/.test(r.kind) && r.merchant && r.merchant.length <= 40 && /^\d{4}-\d{2}-\d{2}$/.test(r.date) &&
     typeof r.cat === "string" && r.source && r.confidence >= 0 && r.confidence <= 1 && r.reason));
+
+  /* ---- loop round 1: bank fees are not the payment (synthetic) ---- */
+  const cih = (subject, text) => M.parseMail({ id: "fx", from: "CIH Bank <alertes@cihbank.ma>", subject, date: "2026-10-14T10:00:00Z", text });
+  const feeFirst = cih("Virement émis", "Frais de virement de 5,00 MAD. Votre virement de 2 000,00 MAD au profit de AHMED a été effectué.");
+  t.eq("a fee sentence before the transfer: the transfer is the amount", feeFirst && feeFirst.amount, 2000);
+  const feeAfter = cih("Virement émis", "Votre virement de 2 000,00 MAD au profit de AHMED a été effectué. Frais de virement : 5,00 MAD.");
+  t.eq("a fee sentence after it: still the transfer", feeAfter && feeAfter.amount, 2000);
+  const feeOnly = cih("Frais bancaires", "Frais de virement de 5,00 MAD prélevés sur votre compte.");
+  t.ok("a mail that is only a fee is that fee, filed as a bank fee", feeOnly && feeOnly.amount === 5 && feeOnly.kind === "debit" &&
+    feeOnly.merchant === "CIH Bank fees" && feeOnly.cat === "bills", JSON.stringify(feeOnly));
+  const atmFee = cih("Retrait", "Retrait GAB de 500,00 MAD. Frais de retrait : 6,00 MAD. Solde disponible : 1 200,00 MAD");
+  t.eq("a withdrawal with its fee: the withdrawal", atmFee && atmFee.amount, 500);
+  const cardComm = cih("Paiement par carte", "Paiement par carte ****4521 d'un montant de 120,00 EUR chez AMAZON.FR. Commission : 3,50 MAD.");
+  t.ok("a card payment with a commission: the payment", cardComm && cardComm.amount === 120 && cardComm.currency === "EUR");
 };
