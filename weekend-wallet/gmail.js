@@ -325,6 +325,8 @@
     }
     var data = part.body && part.body.data;
     if (!data) return; /* empty, or a large body held by attachmentId */
+    /* a 14 MB body is not a receipt: only the first ~450 KB is ever decoded */
+    if (data.length > 600000) data = data.slice(0, 600000);
     if (mt === "text/plain") acc.text.push(decodeBody(data, charsetOf(part)));
     else if (mt === "text/html") acc.html.push(decodeBody(data, charsetOf(part)));
   }
@@ -363,6 +365,15 @@
       html: acc.html.join("\n"),
       snippet: j.snippet || ""
     };
+  }
+
+  /* the signed-in address, so the app can pass it back to Google as a
+     login_hint and skip the account chooser next time */
+  function getProfile(token, opts) {
+    return getJson(token, API.replace(/\/messages$/, "/profile"), opts || {}).then(function (j) {
+      var e = String((j && j.emailAddress) || "");
+      return { email: /^[^\s@<>"]{1,64}@[^\s@<>"]{1,190}$/.test(e) ? e : "" };
+    });
   }
 
   function getMessage(token, id, opts) {
@@ -478,6 +489,7 @@
     readRedirect: readRedirect,
     buildQuery: buildQuery,
     listIds: listIds,
+    getProfile: getProfile,
     getMessage: getMessage,
     fetchNew: fetchNew,
     /* internals, exposed for tests */
@@ -486,5 +498,11 @@
     _b64ToBytes: b64ToBytes
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
-  else root.GmailSync = api;
+  else {
+    /* locked: no script that runs later can swap fetchNew for a copy that
+       reads the token on its way through */
+    Object.freeze(api);
+    try { Object.defineProperty(root, "GmailSync", { value: api, writable: false, configurable: false, enumerable: true }); }
+    catch (e) { root.GmailSync = api; }
+  }
 })(typeof window !== "undefined" ? window : this);

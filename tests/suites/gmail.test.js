@@ -289,4 +289,16 @@ exports.run = async function (t) {
   t.eq("http error keeps .status", e502.status, 502);
   t.ok("errors are Error instances", e401 instanceof Error && eNet instanceof Error);
   t.no("token not leaked in error messages", [e401, e403, e429, eNet, e502].some(e => String(e.message).indexOf(TOKEN) >= 0));
+
+  /* getProfile: the address for login_hint, validated */
+  {
+    let seen = "";
+    const f = (url, init) => { seen = url + " " + (init && init.headers && init.headers.Authorization);
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ emailAddress: "badr@gmail.com" }) }); };
+    const p = await G.getProfile("tok", { fetch: f });
+    t.eq("getProfile returns the address", p.email, "badr@gmail.com");
+    t.ok("from users/me/profile, token in the header only", /\/users\/me\/profile Bearer tok$/.test(seen), seen);
+    const bad = await G.getProfile("tok", { fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ emailAddress: "<x>@y" }) }) });
+    t.eq("a malformed address is dropped", bad.email, "");
+  }
 };
