@@ -182,6 +182,126 @@ exports.run = async function (t) {
     gen && JSON.stringify(gen));
   t.eq("generic sender: merchant from display name", field(gen, "merchant"), "Librairie Atlas");
 
+  /* ===== round 2: QA regressions ===== */
+
+  /* 1. promo amounts are vouchers, never spending */
+  t.eq("R2.1 Careem '10 MAD off your next ride' → null", parseMail(mail({ from: "Careem <noreply@careem.com>", subject: "How was your ride?",
+    text: "Get 10 MAD off your next ride with code RIDE10.\nRate your trip" })), null);
+  t.eq("R2.1 Glovo on-its-way with '20 MAD off next time' → null", parseMail(mail({ from: "Glovo <no-reply@glovoapp.com>", subject: "Glovo",
+    text: "Your order is on its way!\nEnjoy 20 MAD off next time with code YUMMY" })), null);
+  const withPromo = parseMail(mail({ from: "Careem <receipts@careem.com>", subject: "Your ride receipt",
+    text: "Thanks for riding with Careem\nTotal MAD 33.00\nGagnez 15 MAD sur votre prochaine course !" }));
+  t.eq("R2.1 receipt with a promo footer keeps the total", field(withPromo, "amount"), 33);
+  t.eq("R2.1 '50 DH offerts' alone → null", parseMail(mail({ from: "Jumia <noreply@jumia.ma>", subject: "Votre commande",
+    text: "50 DH offerts sur votre prochaine commande avec le code JUMIA50" })), null);
+
+  /* 2. total-family wording */
+  const jt = parseMail(mail({ from: "Jumia <noreply@jumia.ma>", subject: "Confirmation de votre commande",
+    text: "Merci pour votre commande\nArticle 399,00 Dhs\nLivraison 20,00 Dhs\nTotal à payer 419,00 Dhs" }));
+  t.ok("R2.2 'Total à payer' is the total (419, ≥0.85)", jt && jt.amount === 419 && jt.confidence >= 0.85, jt && JSON.stringify(jt));
+  t.eq("R2.2 'Total payé' (unknown sender)", field(parseMail(mail({ from: "Guichet <noreply@guichet.example>", subject: "Vos billets",
+    text: "Vos billets pour le concert\nTotal payé : 300,00 MAD" })), "amount"), 300);
+  t.eq("R2.2 'Montant TTC' beats 'Montant HT'", field(parseMail(mail({ from: "Lydec <facture@lydec.example>", subject: "Votre facture d'électricité",
+    text: "Facture n° 123456\nMontant HT : 250,00 MAD\nMontant TTC : 287,50 MAD" })), "amount"), 287.5);
+  t.eq("R2.2 'Montant à régler'", field(parseMail(mail({ from: "Orange <noreply@orange.ma>", subject: "Votre facture",
+    text: "Votre facture est disponible\nMontant à régler : 149,00 DH" })), "amount"), 149);
+
+  /* 3. bank phrasings */
+  const ecom = parseMail(mail({ from: "Alertes <alertes@banque-exemple.example>", subject: "Alerte opération",
+    text: "Paiement e-commerce de 120,00 EUR chez AMAZON.FR le 13/10/2026." }));
+  t.eq("R2.3 e-commerce payment without carte/compte", ecom && [ecom.amount, ecom.currency, ecom.kind, ecom.merchant].join(" "), "120 EUR debit Amazon.fr");
+  const ecom2 = parseMail(mail({ from: "Alertes <alertes@notif.example>", subject: "Alerte",
+    text: "Paiement e-commerce de 89,00 MAD chez DECATHLON le 13/10/2026." }));
+  t.eq("R2.3 e-commerce payment from a sender with no bank in its domain", field(ecom2, "amount"), 89);
+  const vir = parseMail(mail({ from: "Alertes <alertes@banque-exemple.example>", subject: "Virement",
+    text: "Votre virement de 2 000,00 MAD au profit de YOUSSEF BENNANI a été exécuté." }));
+  t.eq("R2.3 'votre virement … au profit de X' → debit to X", vir && [vir.amount, vir.kind, vir.merchant].join(" "), "2000 debit Youssef Bennani");
+  t.ok("R2.3 ambiguous virement scored ≈0.7", vir && vir.confidence >= 0.6 && vir.confidence <= 0.75, vir && vir.confidence);
+  const awb = parseMail(mail({ from: "Attijariwafa bank <alertes@attijariwafabank.com>", subject: "Avis d'opération",
+    html: "<table><tr><td>Opération</td><td>Paiement par carte</td></tr><tr><td>Montant</td><td>350,00 MAD</td></tr>" +
+      "<tr><td>Commerçant</td><td>PHARMACIE AL AMAL</td></tr><tr><td>Date</td><td>13/10/2026</td></tr>" +
+      "<tr><td>Solde disponible</td><td>4 200,00 MAD</td></tr></table>" }));
+  t.eq("R2.3 table-layout alert: amount from 'Montant | …' cell", field(awb, "amount"), 350);
+  t.eq("R2.3 table-layout alert: health merchant", awb && awb.merchant + "/" + awb.cat, "Pharmacie Al Amal/health");
+  const cpay = parseMail(mail({ from: "Careem <noreply@careem.com>", subject: "Careem Pay",
+    text: "You have received 150.00 MAD from Youssef via Careem Pay." }));
+  t.eq("R2.3 Careem Pay 'You have received' → credit", cpay && [cpay.amount, cpay.kind, cpay.merchant].join(" "), "150 credit Careem Pay");
+  const virIn = parseMail(mail({ from: "CIH Bank <alertes@cihbank.ma>", subject: "Alerte",
+    text: "Virement de 3 000,00 MAD reçu de la part de SARA ALAOUI." }));
+  t.eq("R2.3 'Virement de X reçu' → credit", field(virIn, "kind"), "credit");
+
+  /* 4. merchant extraction */
+  const cell = parseMail(mail({ from: "CIH Bank <alertes@cihbank.ma>", subject: "Alerte",
+    html: "<table><tr><td>Opération</td><td>Achat par carte</td></tr><tr><td>Montant</td><td>350,00 MAD</td></tr><tr><td>Commerçant</td><td>PHARMACIE AL AMAL</td></tr></table>" }));
+  t.eq("R2.4 'Commerçant | X' table cell", field(cell, "merchant"), "Pharmacie Al Amal");
+  const soit = parseMail(mail({ from: "CIH Bank <alertes@cihbank.ma>", subject: "Alerte",
+    text: "Paiement par carte de 5,00 USD chez NETFLIX.COM soit 55,30 MAD le 13/10/2026." }));
+  t.eq("R2.4 merchant stops at 'soit'", field(soit, "merchant"), "Netflix.com");
+  t.eq("R2.4 merchant stops at \"d'un montant\"", field(parseMail(mail({ from: "CIH Bank <alertes@cihbank.ma>", subject: "Alerte",
+    text: "Achat chez CARREFOUR MARKET d'un montant de 412,30 MAD." })), "merchant"), "Carrefour Market");
+
+  /* 5. shipping / delivery notices repeat the total → null */
+  const amzOrder = parseMail(mail({ from: "Amazon.fr <auto-confirm@amazon.fr>", subject: "Votre commande Amazon.fr",
+    text: "Merci pour votre commande\nTotal de la commande : EUR 25,99" }));
+  t.eq("R2.5 Amazon order confirmation counts", field(amzOrder, "amount"), 25.99);
+  t.eq("R2.5 Amazon 'expédiée' notice with the same total → null", parseMail(mail({ from: "Amazon.fr <shipment-tracking@amazon.fr>",
+    subject: "Votre commande a été expédiée", text: "Votre colis est en route\nTotal de la commande : EUR 25,99" })), null);
+  t.eq("R2.5 'out for delivery' → null", parseMail(mail({ from: "Amazon <shipment-tracking@amazon.com>", subject: "Out for delivery: your package",
+    text: "Your package is out for delivery today.\nOrder total: $19.99" })), null);
+  t.eq("R2.5 'delivered' notice → null", parseMail(mail({ from: "Jumia <noreply@jumia.ma>", subject: "Votre commande a été livrée",
+    text: "Votre commande a été livrée. Total : 299,00 Dhs" })), null);
+
+  /* 6. a footer mentioning 3D Secure / OTP does not kill a real receipt */
+  const foot = parseMail(mail({ from: "Netflix <info@mailer.netflix.com>", subject: "Votre facture Netflix",
+    text: "Merci pour votre abonnement.\nTotal TTC : 65,00 MAD\nVos paiements sont protégés par 3D Secure. Netflix ne vous demandera jamais votre mot de passe ou un code OTP." }));
+  t.eq("R2.6 receipt with a 3D Secure / OTP footer still parses", field(foot, "amount"), 65);
+  t.eq("R2.6 a 3D Secure code message is still null", parseMail(mail({ from: "CIH Bank <alertes@cihbank.ma>", subject: "Alerte",
+    text: "Votre code 3D Secure pour l'achat de 120,00 EUR chez AMAZON.FR est 739201." })), null);
+  t.eq("R2.6 OTP in the subject is still null", parseMail(mail({ from: "CIH Bank <alertes@cihbank.ma>", subject: "Votre code OTP",
+    text: "Paiement par carte de 120,00 MAD chez ZARA." })), null);
+
+  /* ===== security: regex DoS (H1, M1) — each call must stay under 200 ms ===== */
+  const timed = (fn) => { const t0 = Date.now(); let r; try { r = fn(); } catch (e) { r = "threw"; } return { ms: Date.now() - t0, r }; };
+  const run1 = timed(() => parseMail(mail({ from: "CIH Bank <a@cihbank.ma>", subject: "Paiement", text: "Paiement " + "*x·".repeat(134) + " de 10 MAD" })));
+  t.ok("DoS: 400-char '*x·' mask run < 200 ms", run1.ms < 200 && run1.r !== "threw", run1.ms + " ms");
+  const run2 = timed(() => parseMail(mail({ from: "Shop <a@shop.example>", subject: "Votre reçu", text: "Total " + "123 ".repeat(51200) })));
+  t.ok("DoS: 200 KB digit-group line < 200 ms", run2.ms < 200 && run2.r !== "threw", run2.ms + " ms");
+  const run3 = timed(() => parseMail(mail({ from: "Glovo <a@glovoapp.com>", subject: "Reçu", html: "<br".repeat(27307) })));
+  t.ok("DoS: 80 KB unclosed '<br' blob < 200 ms", run3.ms < 200 && run3.r !== "threw", run3.ms + " ms");
+  const run3b = timed(() => htmlToText("<head <!-- <style ".repeat(16000)));
+  t.ok("DoS: unclosed <head/<!--/<style blocks < 200 ms", run3b.ms < 200, run3b.ms + " ms");
+  const run4 = timed(() => parseMail(mail({ from: "<".repeat(40000) + "a ".repeat(20000), subject: "Votre reçu", text: "Total 10 MAD" })));
+  t.ok("DoS: 80 KB From header < 200 ms", run4.ms < 200 && run4.r !== "threw", run4.ms + " ms");
+  const masked = parseMail(mail({ from: "CIH Bank <a@cihbank.ma>", subject: "Paiement",
+    text: "Paiement par carte XXXX XXXX XXXX 4321 de 75,00 MAD chez ZARA. Carte **** 9876, carte ****5555." }));
+  t.eq("card masks are still scrubbed after the regex fix", field(masked, "amount"), 75);
+
+  /* ===== security: sender verification (L2) ===== */
+  const glovoMail = (auth, from) => mail({ from: from || "Glovo <no-reply@glovoapp.com>", subject: "Votre reçu Glovo",
+    text: "Merci pour votre commande\nTotal : 85,00 MAD", authResults: auth });
+  const conf = (r) => (r ? r.confidence : -1);
+  t.ok("DKIM absent: score unchanged (0.9)", conf(parseMail(glovoMail(undefined))) === 0.9, conf(parseMail(glovoMail(undefined))));
+  t.ok("DKIM empty string: score unchanged", conf(parseMail(glovoMail(""))) === 0.9);
+  t.ok("DKIM pass, header.i=@glovoapp.com: 0.9",
+    conf(parseMail(glovoMail("mx.google.com; dkim=pass header.i=@glovoapp.com header.s=s1 header.b=AbC; spf=neutral"))) === 0.9);
+  t.ok("DKIM pass, header.d=glovoapp.com: 0.9",
+    conf(parseMail(glovoMail("mx.google.com; dkim=pass header.d=glovoapp.com header.s=s1"))) === 0.9);
+  const sub = parseMail(mail({ from: "Netflix <info@mailer.netflix.com>", subject: "Votre facture Netflix", text: "Total TTC : 65,00 MAD",
+    authResults: "mx.google.com; dkim=pass header.i=@netflix.com header.s=x" }));
+  t.ok("DKIM pass on the parent of a subdomain sender (mailer.netflix.com / netflix.com): 0.9", conf(sub) === 0.9, conf(sub));
+  const spf = conf(parseMail(glovoMail("mx.google.com; dkim=none; spf=pass (google.com: domain of bounce@mail.glovoapp.com designates 1.2.3.4) smtp.mailfrom=bounce@mail.glovoapp.com")));
+  t.ok("SPF pass on a matching subdomain counts as verified: 0.9", spf === 0.9, spf);
+  const forged = parseMail(glovoMail("mx.google.com; dkim=pass header.i=@evil.com header.s=s1; spf=pass smtp.mailfrom=evil.com"));
+  t.ok("forged From (dkim=pass for evil.com): −0.3 → 0.6", conf(forged) === 0.6, conf(forged));
+  t.has("forged From: reason says so", forged && forged.reason, "not verified");
+  const failed = conf(parseMail(glovoMail("mx.google.com; dkim=fail header.i=@glovoapp.com; spf=softfail smtp.mailfrom=glovoapp.com")));
+  t.ok("dkim=fail on the right domain: −0.3", failed === 0.6, failed);
+  const suffix = conf(parseMail(glovoMail("mx.google.com; dkim=pass header.d=com")));
+  t.ok("a pass for a bare public suffix ('com') is not a match", suffix === 0.6, suffix);
+  const cihForged = conf(parseMail(mail({ from: "CIH Bank <alertes@cihbank.ma>", subject: "Alerte",
+    text: "Paiement par carte de 250,00 MAD chez ZARA.", authResults: "mx.google.com; dkim=pass header.i=@phish.example" })));
+  t.ok("forged CIH alert: 0.85 − 0.3", cihForged === 0.55, cihForged);
+
   /* --- robustness --- */
   const weird = [undefined, null, 42, "x", {}, { from: null, subject: null, text: null, html: null },
     { html: "<" + "div>".repeat(50000) }, { text: "\u0000￿".repeat(1000) }, { from: {}, subject: [], date: "not a date", text: "Total 10 MAD" }];
