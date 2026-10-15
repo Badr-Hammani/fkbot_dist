@@ -796,6 +796,27 @@
   .place-main{flex:1; min-width:0; display:flex; flex-direction:column}
   .place-main span{font-size:12.5px; color:var(--ink2)}
   .linkish.danger{color:var(--bad)}
+  .inbox-nudge{width:100%; text-align:left; display:flex; align-items:center; gap:10px}
+  .inbox-nudge .txt{flex:1; display:flex; align-items:center; gap:8px}
+  .inbox-nudge svg, .inbox-cat svg{width:17px; height:17px; flex:none}
+  .inbox-nudge .go svg{width:16px; height:16px; color:var(--ink3)}
+  .inbox-bar{display:flex; align-items:center; justify-content:space-between; gap:10px; margin:6px 0 10px}
+  .inbox-item{padding:12px 0; border-top:1px solid var(--line)}
+  .inbox-top{display:flex; justify-content:space-between; gap:10px; align-items:baseline}
+  .inbox-merchant{font-size:15.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .inbox-top .good{color:var(--good)}
+  .inbox-sub, .inbox-subject{font-size:12.5px; color:var(--ink2); margin-top:2px; overflow-wrap:anywhere}
+  .inbox-subject{color:var(--ink3)}
+  .warn-txt{color:var(--warn)}
+  .inbox-actions{display:flex; align-items:center; gap:8px; margin-top:10px}
+  .inbox-cat{flex:1; min-width:0; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:600}
+  .inbox-cat.muted{color:var(--ink3); font-weight:500}
+  .btn.sm{width:auto; flex:none; min-height:40px; padding:8px 16px; font-size:14px}
+  .gmail-steps{margin:10px 0 12px; font-size:13.5px; color:var(--ink2)}
+  .gmail-steps summary{cursor:pointer; font-weight:700; color:var(--ink); min-height:32px}
+  .gmail-steps ol{padding-left:20px; margin:8px 0 0; display:grid; gap:6px}
+  .gmail-steps code{font-size:12px; overflow-wrap:anywhere; background:var(--card2); padding:1px 5px; border-radius:6px}
+  .empty-mini{padding:18px 0; text-align:center; color:var(--ink3); font-size:14px}
   .bud-hist{display:block; min-height:44px; margin-top:6px; text-align:left; color:var(--accent-deep)}
   .bud-inputs{display:flex; flex-direction:column; gap:8px; margin-bottom:6px}
   .bud-input{display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--line); border-radius:14px; background:var(--card)}
@@ -950,6 +971,8 @@
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
 <script src="scan.js?v=9.4"></script>
+<script src="mail-parse.js?v=9.4"></script>
+<script src="gmail.js?v=9.4"></script>
 <script>
 (function(){
   "use strict";
@@ -1106,13 +1129,17 @@
         if(!s.wkWeightFlat){ s.wkWeight = 1; s.wkWeightFlat = 1; }
         s.setupHidden = s.setupHidden ? 1 : 0;
         s.places = cleanPlaces(s.places);
+        s.inbox = cleanInbox(s.inbox);
+        s.mailSeen = cleanMailSeen(s.mailSeen);
+        s.gmail = cleanGmailCfg(s.gmail);
         s.placesOn = s.placesOn ? 1 : 0;
         loadFailedWithData = false;              /* read it fine after all */
         return s;
       }
     }catch(e){}
     return { setup:false, budget:0, currency:"USD", expenses:[], apiKey:"", geminiApiKey:"", agentRouterApiKey:"", agentRouterModel:"gpt-5.5", scanProvider:"free", scanModel:"claude-opus-4-8",
-             salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:1 };
+             salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:1,
+             inbox:[], mailSeen:{}, gmail:cleanGmailCfg(null) };
   }
   function isPaydayDay(n){
     return typeof n === "number" && isFinite(n) && Math.floor(n) === n && n >= 1 && n <= 31;
@@ -1196,8 +1223,45 @@
                /* where it was bought, and for a fuel fill-up how much went in */
                placeId: typeof e.placeId === "string" ? e.placeId : "",
                fuelLiters: +e.fuelLiters > 0 && +e.fuelLiters < 1000 ? Math.round((+e.fuelLiters)*100)/100 : 0,
-               odometer: +e.odometer > 0 && +e.odometer < 5e6 ? Math.round(+e.odometer) : 0 };
+               odometer: +e.odometer > 0 && +e.odometer < 5e6 ? Math.round(+e.odometer) : 0,
+               /* the Gmail message it came from, so the same email is never offered twice */
+               mailId: typeof e.mailId === "string" ? e.mailId.slice(0, 64) : "" };
     });
+  }
+  /* Transactions read from Gmail, waiting for you to confirm. Only what is
+     needed to show and add one is kept -- never the email itself. */
+  var INBOX_CATS = ["food","drinks","out","transport","shop","bills","health","home","personal","education","gifts","travel","other"];
+  function cleanInbox(list){
+    if(!Array.isArray(list)) return [];
+    var seen = {};
+    return list.filter(function(x){
+      return x && typeof x === "object" && typeof x.id === "string" && x.id && !seen[x.id] && (seen[x.id] = 1) &&
+             +x.amount > 0 && ISO_RE.test(String(x.date || ""));
+    }).map(function(x){
+      return { id:x.id.slice(0, 64), amount:Math.round(+x.amount * 100) / 100,
+               currency: /^[A-Z]{3}$/.test(String(x.currency || "")) ? x.currency : "MAD",
+               kind: x.kind === "credit" || x.kind === "refund" ? x.kind : "debit",
+               merchant:String(x.merchant || "").slice(0, 40) || "Email", sender:String(x.sender || "").slice(0, 60),
+               subject:String(x.subject || "").slice(0, 120), date:x.date,
+               cat: INBOX_CATS.indexOf(x.cat) >= 0 ? x.cat : "", source:String(x.source || "").slice(0, 20),
+               confidence: Math.min(Math.max(+x.confidence || 0, 0), 1),
+               status: x.status === "added" || x.status === "dismissed" ? x.status : "new",
+               expenseId: typeof x.expenseId === "string" ? x.expenseId : "", ts:+x.ts || 0 };
+    });
+  }
+  function cleanMailSeen(m){
+    var out = {};
+    if(m && typeof m === "object" && !Array.isArray(m)){
+      Object.keys(m).slice(-1500).forEach(function(k){ if(k.length <= 64) out[k] = +m[k] || 1; });
+    }
+    return out;
+  }
+  function cleanGmailCfg(g){
+    g = g && typeof g === "object" ? g : {};
+    var id = String(g.clientId || "").trim();
+    return { clientId: /^[\w.-]{10,200}\.apps\.googleusercontent\.com$/.test(id) ? id : "",
+             lastSec: +g.lastSec > 0 ? Math.floor(+g.lastSec) : 0,
+             email: String(g.email || "").slice(0, 120) };
   }
   /* Places you saved yourself. A coordinate pair and a name, nothing else --
      what you buy there is read from the expenses filed under it. */
@@ -2212,6 +2276,11 @@
     var h = "";
 
     h += setupChecklist();
+    var waiting = inboxNew().length;
+    if(waiting){
+      h += '<button class="suggest inbox-nudge" id="h-inbox"><span class="txt">'+IC.receipt+'<b>'+waiting+'</b> transaction'+(waiting === 1 ? '' : 's')+
+        ' from Gmail to review</span><span class="go">'+IC.chev+'</span></button>';
+    }
     h += catBudgetNudge();
     h += safeSpendCard();
     h += debtEscapeCard();
@@ -3698,6 +3767,7 @@
     var beforeBalances = state.commitments.map(function(c){ return { ref:c, remaining:c.remaining }; });
     var beforeDebts = state.debts.map(function(d){ return { ref:d, balance:d.balance, log:(d.log||[]).slice() }; });
     var beforeLastCat = state.lastCat;
+    var inboxBefore = null;
     var pos = existing ? state.expenses.indexOf(existing) : -1;
     try{
       /* "keep" means the funding is not being changed -- a note or a date
@@ -3715,6 +3785,7 @@
       e.placeId = candidate.placeId || "";
       e.fuelLiters = candidate.fuelLiters > 0 ? candidate.fuelLiters : 0;
       e.odometer = candidate.odometer > 0 ? candidate.odometer : 0;
+      e.mailId = candidate.mailId || "";
       if(!keep){
         e.loanId = ""; e.loanAdded = 0; e.fundingType = ""; e.fundingPersonId = "";
         e.fundingPersonName = ""; e.fundingAmount = 0; e.fundingLogId = "";
@@ -3747,6 +3818,11 @@
         applied = applyExpenseFunding(e, funding);
       }
       if(!applied) throw new Error("funding source disappeared");
+      var item = e.mailId ? inboxItem(e.mailId) : null;
+      if(item){
+        inboxBefore = { ref:item, status:item.status, expenseId:item.expenseId };
+        item.status = "added"; item.expenseId = e.id;
+      }
       if(!save({retryWithoutPhoto:e})) throw new Error("storage unavailable");
       return { ok:true, expense:e, funding:applied };
     }catch(err){
@@ -3755,6 +3831,7 @@
       beforeDebts.forEach(function(x){ x.ref.balance = x.balance; x.ref.log = x.log; });
       state.debts = beforeDebts.map(function(x){ return x.ref; });
       state.lastCat = beforeLastCat;
+      if(inboxBefore){ inboxBefore.ref.status = inboxBefore.status; inboxBefore.ref.expenseId = inboxBefore.expenseId; }
       return { ok:false, error:err };
     }
   }
@@ -4676,6 +4753,236 @@
     return PICK_CATS.map(function(c){ return c.custom ? c.id+" ("+c.name+")" : c.id; }).join(", ");
   }
 
+  /* ================= Gmail inbox ================= */
+  /* The sign-in token lives in memory only: it is never written to storage,
+     never put in a backup, and is gone when the app closes. Google issues it
+     for about an hour. */
+  var gmailToken = null;
+  var GMAIL_OAUTH_KEY = "weekend-wallet-gmail-oauth";
+  var gmailBusy = false;
+  function gmailCfg(){ if(!state.gmail) state.gmail = cleanGmailCfg(null); return state.gmail; }
+  function gmailLoaded(){ return !!(window.GmailSync && window.MailParse); }
+  function gmailReady(){ return !!(gmailToken && gmailToken.expiresAt > Date.now()); }
+  /* what Google must have on file, character for character */
+  function gmailRedirectUri(){ return location.origin + location.pathname.replace(/index\.html$/, ""); }
+  function inboxItem(id){
+    var hit = null;
+    (state.inbox || []).forEach(function(x){ if(x.id === id) hit = x; });
+    return hit;
+  }
+  function inboxNew(){
+    return (state.inbox || []).filter(function(x){ return x.status === "new"; })
+      .sort(function(a, b){ return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+  }
+  function connectGmail(){
+    var cfg = gmailCfg();
+    if(!gmailLoaded()){ toast("Gmail isn’t available offline — connect once you’re online"); return; }
+    if(!cfg.clientId){ tab = "settings"; closeSheet(); render(); toast("Paste your Google Client ID in Settings first"); return; }
+    var nonce = GmailSync.newState();
+    try{ localStorage.setItem(GMAIL_OAUTH_KEY, JSON.stringify({ state:nonce, at:Date.now() })); }
+    catch(e){ toast("Could not start the sign-in — storage is unavailable"); return; }
+    location.href = GmailSync.authUrl({ clientId:cfg.clientId, redirectUri:gmailRedirectUri(), state:nonce,
+                                        loginHint:cfg.email || "" });
+  }
+  /* Back from Google: the token is in the address. Read it, check it is the
+     answer to OUR request, and wipe it from the address bar at once. */
+  function readGmailReturn(){
+    var h = location.hash || "";
+    if(!/(^|[#&])(access_token|error|state)=/.test(h) || !window.GmailSync) return "";
+    var saved = null;
+    try{ saved = JSON.parse(localStorage.getItem(GMAIL_OAUTH_KEY) || "null"); localStorage.removeItem(GMAIL_OAUTH_KEY); }catch(e){}
+    try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){ location.hash = ""; }
+    var expected = saved && saved.state && Date.now() - (+saved.at || 0) < 15 * 60 * 1000 ? saved.state : "";
+    var r = GmailSync.readRedirect(h, expected, Date.now());
+    if(!r) return "";
+    if(r.error){
+      gmailToken = null;
+      return r.error === "access_denied" ? "Gmail access was not given — nothing was read"
+           : r.error === "state" ? "That sign-in didn’t come from this app, so it was ignored"
+           : r.error === "scope" ? "Gmail read access wasn’t granted — tick the Gmail box when Google asks"
+           : "Google sign-in failed (" + String(r.error).slice(0, 40) + ")";
+    }
+    gmailToken = { token:r.token, expiresAt:r.expiresAt };
+    return "ok";
+  }
+  function senderName(from){
+    var m = String(from || "").match(/^\s*"?([^"<]*?)"?\s*</);
+    var n = m && m[1].trim() ? m[1].trim() : String(from || "").replace(/[<>]/g, "");
+    return n.slice(0, 60);
+  }
+  function checkGmail(){
+    if(gmailBusy) return;
+    if(!gmailLoaded()){ toast("Gmail isn’t available offline"); return; }
+    if(!gmailReady()){ connectGmail(); return; }
+    var cfg = gmailCfg(), nowSec = Math.floor(Date.now() / 1000);
+    /* first time: the last 30 days; after that from the last check, with two
+       days of overlap for late emails -- ids already seen are skipped */
+    var after = cfg.lastSec ? cfg.lastSec - 2 * 86400 : nowSec - 30 * 86400;
+    var known = {};
+    Object.keys(state.mailSeen || {}).forEach(function(k){ known[k] = 1; });
+    (state.inbox || []).forEach(function(x){ known[x.id] = 1; });
+    state.expenses.forEach(function(e){ if(e.mailId) known[e.mailId] = 1; });
+    var query = GmailSync.buildQuery({ afterSec:after, senders:MailParse.SENDERS, keywords:MailParse.KEYWORDS });
+    gmailBusy = true; drawInboxStatus("Checking Gmail…");
+    GmailSync.fetchNew(gmailToken.token, { query:query, max:60, knownIds:known }).then(function(msgs){
+      gmailBusy = false;
+      var found = 0, today = todayIso();
+      msgs.forEach(function(m){
+        state.mailSeen[m.id] = Date.now();
+        var t = null;
+        try{ t = MailParse.parseMail(m); }catch(e){ t = null; }
+        if(!t || !(t.amount > 0) || !(t.confidence >= 0.5) || inboxItem(m.id)) return;
+        state.inbox.push({ id:m.id, amount:Math.round(t.amount * 100) / 100, currency:t.currency || "MAD",
+          kind:t.kind || "debit", merchant:String(t.merchant || senderName(m.from)).slice(0, 40),
+          sender:senderName(m.from), subject:String(m.subject || "").slice(0, 120),
+          date: ISO_RE.test(String(t.date || "")) && t.date <= today ? t.date : today,
+          cat: INBOX_CATS.indexOf(t.cat) >= 0 ? t.cat : "", source:t.source || "", confidence:t.confidence,
+          status:"new", expenseId:"", ts:Date.now() });
+        found++;
+      });
+      cfg.lastSec = nowSec;
+      /* keep the list short: settled entries older than 90 days go (their
+         ids stay in mailSeen, so they are never offered again) */
+      var cutoff = Date.now() - 90 * 86400000;
+      state.inbox = state.inbox.filter(function(x){ return x.status === "new" || (x.ts || 0) > cutoff; });
+      var seenIds = Object.keys(state.mailSeen);
+      if(seenIds.length > 1500){
+        seenIds.sort(function(a, b){ return state.mailSeen[a] - state.mailSeen[b]; })
+          .slice(0, seenIds.length - 1500).forEach(function(k){ delete state.mailSeen[k]; });
+      }
+      if(!save()) return;
+      render();
+      if(sheet.classList.contains("show") && $("#inbox-list")) openInbox();
+      else if(found) openInbox();
+      toast(found ? found + " new transaction" + (found === 1 ? "" : "s") + " from Gmail"
+                  : "Gmail checked — nothing new" + (msgs.length ? " (" + msgs.length + " email" + (msgs.length === 1 ? "" : "s") + " weren’t transactions)" : ""));
+    }).catch(function(err){
+      gmailBusy = false;
+      var code = err && err.code;
+      if(code === "auth"){ gmailToken = null; drawInboxStatus(""); toast("Gmail sign-in expired — tap Check Gmail to sign in again"); return; }
+      drawInboxStatus("");
+      toast(code === "forbidden" ? "Google refused: " + String(err.message || "").slice(0, 90) + " — is the Gmail API enabled in your Cloud project?"
+          : code === "rate" ? "Google says too many requests — try again in a minute"
+          : code === "network" ? "No connection — try again when you’re online"
+          : "Gmail check failed" + (err && err.status ? " (" + err.status + ")" : ""));
+    });
+  }
+  function drawInboxStatus(msg){
+    var el = $("#inbox-status");
+    if(el) el.textContent = msg;
+    var b = $("#inbox-check");
+    if(b) b.disabled = !!gmailBusy;
+  }
+  function inboxCatChip(x){
+    if(!x.cat) return '<span class="inbox-cat muted">no category yet</span>';
+    var c = cat(x.cat);
+    return '<span class="inbox-cat"><span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+esc(c.name)+'</span>';
+  }
+  function openInbox(){
+    var items = inboxNew(), cfg = gmailCfg();
+    var rows = items.map(function(x){
+      var foreign = x.currency !== state.currency;
+      var moneyIn = x.kind !== "debit";
+      return '<div class="inbox-item">' +
+        '<div class="inbox-top"><b class="inbox-merchant">'+esc(x.merchant)+'</b>' +
+        '<b class="money'+(moneyIn ? ' good' : '')+'">'+(moneyIn ? '+' : '')+(foreign ? esc(x.currency)+' '+x.amount.toFixed(2) : fmt(x.amount))+'</b></div>' +
+        '<div class="inbox-sub">'+esc(fromIso(x.date).toLocaleDateString(undefined, { weekday:"short", day:"numeric", month:"short" }))+
+          ' · '+esc(x.sender || x.source || "Gmail")+(x.confidence < 0.7 ? ' · <span class="warn-txt">check this one</span>' : '')+'</div>' +
+        (x.subject ? '<div class="inbox-subject">'+esc(x.subject)+'</div>' : '') +
+        (foreign ? '<div class="inbox-subject warn-txt">In '+esc(x.currency)+' — change the amount to '+esc(state.currency)+' when you add it</div>' : '') +
+        '<div class="inbox-actions">' + (moneyIn
+          ? '<span class="inbox-cat muted">Money in — not an expense</span>'
+          : inboxCatChip(x) + '<button class="btn primary sm" data-inbox-add="'+esc(x.id)+'">Add</button>') +
+          '<button class="btn ghost sm" data-inbox-skip="'+esc(x.id)+'">'+(moneyIn ? 'OK' : 'Skip')+'</button></div></div>';
+    }).join("");
+    var last = cfg.lastSec ? new Date(cfg.lastSec * 1000) : null;
+    openSheet(
+      '<h2>From Gmail</h2>' +
+      '<p class="hint" style="margin-top:0">Nothing here counts until you add it. “Add” opens the usual form so you can fix the amount or category first.</p>' +
+      '<div class="inbox-bar"><span id="inbox-status" class="hint" style="margin:0">'+
+        (last ? 'Last checked '+esc(last.toLocaleString(undefined, { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })) : 'Not checked yet')+'</span>' +
+        '<button class="btn sm" id="inbox-check">'+(gmailReady() ? 'Check Gmail' : (cfg.clientId ? 'Sign in & check' : 'Set up Gmail'))+'</button></div>' +
+      '<div id="inbox-list">' + (rows || '<div class="empty-mini">No transactions waiting.</div>') + '</div>'
+    );
+    if(gmailBusy) drawInboxStatus("Checking Gmail…");
+    $("#inbox-check").addEventListener("click", function(){
+      if(!cfg.clientId){ closeSheet(); tab = "settings"; render(); setTimeout(function(){ var g = $("#s-gmail-client"); if(g) g.scrollIntoView({ block:"center" }); }, 50); return; }
+      checkGmail();
+    });
+    sheet.querySelectorAll("[data-inbox-add]").forEach(function(b){
+      b.addEventListener("click", function(){
+        var x = inboxItem(b.getAttribute("data-inbox-add"));
+        if(!x) return;
+        openAdd(null, { amount:x.amount, note:x.merchant, date:x.date, cat:x.cat || state.lastCat || "other",
+                        catManual:!!x.cat, mailId:x.id });
+      });
+    });
+    sheet.querySelectorAll("[data-inbox-skip]").forEach(function(b){
+      b.addEventListener("click", function(){
+        var x = inboxItem(b.getAttribute("data-inbox-skip"));
+        if(!x) return;
+        x.status = "dismissed";
+        if(!save()){ x.status = "new"; return; }
+        render(); openInbox();
+      });
+    });
+  }
+  function gmailPanel(){
+    var cfg = gmailCfg();
+    return '<div class="panel"><h3>'+IC.receipt+'Gmail receipts</h3>' +
+      '<p>Reads receipt and bank emails (Glovo, Jumia, Careem, CIH…) and puts each payment in an inbox for you to confirm. ' +
+      'Gmail is only read when you tap Check Gmail, read-only, on this phone. Only the amount, shop and date are kept — never the email. ' +
+      'The Google sign-in lasts about an hour and is never saved.</p>' +
+      '<details class="gmail-steps"'+(cfg.clientId ? '' : ' open')+'><summary>One-time setup (about 5 minutes)</summary><ol>' +
+        '<li>Open <b>console.cloud.google.com</b> and create a project.</li>' +
+        '<li>APIs &amp; Services → Library → enable <b>Gmail API</b>.</li>' +
+        '<li>OAuth consent screen → External → add your Gmail address as a <b>test user</b>.</li>' +
+        '<li>Credentials → Create credentials → OAuth client ID → <b>Web application</b>.<br>' +
+          'Authorized JavaScript origin: <code>'+esc(location.origin)+'</code><br>' +
+          'Authorized redirect URI: <code id="s-gmail-redirect">'+esc(gmailRedirectUri())+'</code></li>' +
+        '<li>Copy the Client ID (ends in <code>.apps.googleusercontent.com</code>) and paste it below.</li>' +
+        '<li>Google will warn that the app isn’t verified — that is your own project; tap Continue.</li>' +
+      '</ol></details>' +
+      '<div class="field"><label class="micro" for="s-gmail-client">Google Client ID</label>' +
+      '<input id="s-gmail-client" type="text" autocomplete="off" spellcheck="false" placeholder="1234-abc.apps.googleusercontent.com" value="'+esc(cfg.clientId)+'"></div>' +
+      '<div class="row2"><button class="btn" id="s-gmail-save">Save</button>' +
+      '<button class="btn primary" id="s-gmail-check"'+(cfg.clientId ? '' : ' disabled')+'>'+(gmailReady() ? 'Check Gmail' : 'Connect Gmail')+'</button></div>' +
+      (cfg.clientId ? '<button class="btn ghost" id="s-gmail-forget" style="margin-top:8px">Disconnect Gmail</button>' : '') +
+      '</div>';
+  }
+  function bindGmail(){
+    var save_ = $("#s-gmail-save");
+    if(save_) save_.addEventListener("click", function(){
+      var v = String($("#s-gmail-client").value || "").trim();
+      var clean = cleanGmailCfg({ clientId:v }).clientId;
+      if(v && !clean){ toast("That doesn’t look like a Client ID — it ends in .apps.googleusercontent.com"); return; }
+      var cfg = gmailCfg(), old = cfg.clientId;
+      cfg.clientId = clean;
+      if(!save()){ cfg.clientId = old; return; }
+      if(clean !== old) gmailToken = null;
+      render(); toast(clean ? "Saved — tap Connect Gmail" : "Client ID removed");
+    });
+    var chk = $("#s-gmail-check");
+    if(chk) chk.addEventListener("click", function(){ checkGmail(); });
+    var fg = $("#s-gmail-forget");
+    if(fg) fg.addEventListener("click", function(){
+      if(!window.confirm("Disconnect Gmail? The app forgets the Client ID and sign-in. Transactions you already added stay.")) return;
+      var tok = gmailToken;
+      var cfg = gmailCfg(), before = { clientId:cfg.clientId, lastSec:cfg.lastSec };
+      cfg.clientId = ""; cfg.lastSec = 0;
+      if(!save()){ cfg.clientId = before.clientId; cfg.lastSec = before.lastSec; return; }
+      gmailToken = null;
+      /* tell Google too, so the token stops working now rather than in an hour */
+      if(tok && tok.token && window.fetch){
+        try{
+          fetch("https://oauth2.googleapis.com/revoke", { method:"POST",
+            headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body:"token=" + encodeURIComponent(tok.token) }).catch(function(){});
+        }catch(e){}
+      }
+      render(); toast("Gmail disconnected");
+    });
+  }
+
   /* ================= places ================= */
   /* Location is read once, when you open Add expense, and only while you
      have it switched on. Nothing is sent anywhere: matching is a distance
@@ -5513,6 +5820,7 @@
       '<p>In Safari tap the <b>Share</b> button, then <b>Add to Home Screen</b>. Weekend Wallet opens full-screen like a normal app — your data stays on this phone.</p></div>' +
 
       placesPanel() +
+      gmailPanel() +
       '<div class="panel"><h3>'+IC.download+'Backup</h3><p>Your expenses live in this browser. Download a backup before switching phones.</p>' +
       '<button class="btn" id="s-export">Download backup file</button>' +
       '<div style="height:10px"></div>' +
@@ -5588,7 +5896,9 @@ function importBackupFile(input){
                     catBudgets:cleanCatBudgets(d.catBudgets),
                     places:cleanPlaces(d.places),
                     /* location permission belongs to this phone, not the file */
-                    placesOn:state.placesOn ? 1 : 0 };
+                    placesOn:state.placesOn ? 1 : 0,
+                    /* so does the Gmail link and what it has already offered */
+                    inbox:state.inbox || [], mailSeen:state.mailSeen || {}, gmail:cleanGmailCfg(state.gmail) };
           cleanRows();
           retireStalePool(state);
           /* draw BEFORE writing: a backup with one bad row used to be saved
@@ -6511,6 +6821,8 @@ function importBackupFile(input){
       '<button class="qa-tile" id="qa-friend">'+IC.person+'Friend money</button>' +
       '<button class="qa-tile" id="qa-fuel">'+IC.fuel+'Fuel fill-up</button>' +
       '<button class="qa-tile" id="qa-cash">'+IC.wallet+'Check my cash</button>' +
+      (gmailCfg().clientId ? '<button class="qa-tile qa-wide" id="qa-gmail">'+IC.receipt+'From Gmail'+
+        (inboxNew().length ? ' · '+inboxNew().length : '')+'</button>' : '') +
       '</div>'
     );
     $("#qa-expense").addEventListener("click", function(){ openAdd(); });
@@ -6522,6 +6834,8 @@ function importBackupFile(input){
     $("#qa-friend").addEventListener("click", function(){ openBorrowSheet(0); });
     $("#qa-cash").addEventListener("click", openCashSheet);
     $("#qa-fuel").addEventListener("click", function(){ openAdd(null, { cat:"transport", fuel:true, catManual:true }); });
+    var qg = $("#qa-gmail");
+    if(qg) qg.addEventListener("click", openInbox);
   }
 
   function setupChecklist(){
@@ -6570,6 +6884,7 @@ function importBackupFile(input){
               note: source.note || "",
               date: source.date || todayIso(),
               placeId: source.placeId || "", pos: source.pos || null, newPlace: source.newPlace || "",
+              mailId: source.mailId || "",
               fuel: !!(source.fuel || source.fuelLiters > 0),
               fuelLiters: source.fuelLiters > 0 ? source.fuelLiters : "",
               odometer: source.odometer > 0 ? source.odometer : "" };
@@ -6652,7 +6967,8 @@ function importBackupFile(input){
   function fundingSeed(candidate, existing){
     return { editId: existing ? existing.id : null, amount:candidate.amount, cat:candidate.cat,
              note:candidate.note, date:candidate.date, photo:candidate.photo, catManual:true,
-             placeId:candidate.placeId, fuelLiters:candidate.fuelLiters, odometer:candidate.odometer };
+             placeId:candidate.placeId, fuelLiters:candidate.fuelLiters, odometer:candidate.odometer,
+             mailId:candidate.mailId };
   }
   function openFundingSheet(candidate, existing, proposal){
     /* Nothing is added to any debt until you confirm below. */
@@ -6795,7 +7111,8 @@ function importBackupFile(input){
       amount: Math.round(amt*100)/100, cat: draft.cat,
       note: $("#f-note").value.trim(), date: $("#f-date").value || todayIso(), photo: draft.photo,
       loanId:"", loanAdded:0, fundingType:"", fundingPersonId:"", fundingPersonName:"", fundingAmount:0, fundingLogId:"",
-      placeId: draft.placeId || "", fuelLiters:0, odometer:0
+      placeId: draft.placeId || "", fuelLiters:0, odometer:0,
+      mailId: draft.mailId || (existing ? existing.mailId || "" : "")
     };
     /* a fill-up is only a fill-up while it is filed as Transport */
     if(draft.fuel && draft.cat === "transport"){
@@ -6868,7 +7185,9 @@ function importBackupFile(input){
     var added = existing ? "Updated" : (wk ? (isLiveWeekend(wk) ? "Added to this weekend — "+fmt(e.amount)
                                                             : "Added to the "+weekendLabel(wk)+" weekend")
                                        : "Added — "+fmt(e.amount));
-    toast(madePlace ? added + " · saved " + madePlace.name : added);
+    var more = e.mailId ? inboxNew().length : 0;
+    if(more) toastAction(added + " · " + more + " more from Gmail", "Review", openInbox, 6000);
+    else toast(madePlace ? added + " · saved " + madePlace.name : added);
   }
 
   camera.addEventListener("change", function(){
@@ -6984,6 +7303,8 @@ function importBackupFile(input){
   function bindView(){
     var add = $("#open-add");
     if(add) add.addEventListener("click", openQuickAdd);
+    var ib = $("#h-inbox");
+    if(ib) ib.addEventListener("click", openInbox);
     shell.querySelectorAll("[data-task]").forEach(function(b){
       b.addEventListener("click", function(){
         var go = b.getAttribute("data-task");
@@ -7263,6 +7584,7 @@ function importBackupFile(input){
       });
       $("#s-import").addEventListener("click", function(){ $("#s-import-file").click(); });
       bindPlaces();
+      bindGmail();
       var undoRestore = $("#s-undo-restore");
       if(undoRestore){
         var undoArmed = false;
@@ -7290,7 +7612,8 @@ function importBackupFile(input){
         snapshot("before erasing everything");
         state = { setup:false, budget:0, currency:state.currency, expenses:[], apiKey:"", geminiApiKey:"", agentRouterApiKey:"", agentRouterModel:"gpt-5.5", scanProvider:"free", scanModel:"claude-opus-4-8",
                   salary:0, commitments:[], goals:[], swept:{}, payday:0, paydayEnd:0, salaryReceived:{}, debts:[], restAmount:0, restFrom:"", restTs:0, cashTs:0, wkPlan:{}, wkWeight:1,
-                  customCats:[], catBudgets:{}, places:[], placesOn:0 };
+                  customCats:[], catBudgets:{}, places:[], placesOn:0, inbox:[], mailSeen:{}, gmail:cleanGmailCfg(null) };
+        gmailToken = null;
         rebuildCats([]);
         try{ localStorage.removeItem(KEY); }catch(e){}
         render();
@@ -7306,7 +7629,10 @@ function importBackupFile(input){
     }
   }
 
+  var gmailReturn = readGmailReturn();
   render();
+  if(gmailReturn === "ok") setTimeout(checkGmail, 50);
+  else if(gmailReturn) setTimeout(function(){ toast(gmailReturn); }, 50);
 
   /* ---------- auto-update check ----------
      This checked only on load and on returning to the app, behind a five

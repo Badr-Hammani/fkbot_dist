@@ -4,6 +4,8 @@ const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './scan.js',
+  './mail-parse.js',
+  './gmail.js',
   './manifest.webmanifest',
   './icon-180.png',
   './icon-512.png',
