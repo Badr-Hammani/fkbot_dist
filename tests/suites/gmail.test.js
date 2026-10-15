@@ -199,6 +199,73 @@ exports.run = async function (t) {
   t.eq("fetchNew aborts on 401 with code auth", abort && abort.code, "auth");
   t.eq("fetchNew with nothing new → []", (await G.fetchNew(TOKEN, { query: "q", knownIds: ids10, fetch: makeFetch(ids10).fetch })).length, 0);
 
+  /* ---------- fetchNew: failures are reported, not lost ---------- */
+  const ids5 = ["a0", "a1", "a2", "a3", "a4"];
+  const f4 = makeFetch(ids5, id => id === "a2" ? jsonRes(500, { error: { code: 500, message: "Backend Error" } }) : null);
+  const r4 = await G.fetchNew(TOKEN, { query: "q", fetch: f4.fetch });
+  t.eq("one 500 among 5 → other 4 returned", r4.map(m => m.id).join(","), "a0,a1,a3,a4");
+  t.eq("one 500 among 5 → failed lists it", (r4.failed || []).join(","), "a2");
+  t.eq("result.listed = unknown ids listed", r4.listed, 5);
+  t.eq("result.more false when listing exhausted", r4.more, false);
+  t.ok("result still a real array (forEach/length)", Array.isArray(r4) && typeof r4.forEach === "function" && r4.length === 4);
+  const r4k = await G.fetchNew(TOKEN, { query: "q", knownIds: ["a0", "a1"], fetch: makeFetch(ids5).fetch });
+  t.eq("listed excludes knownIds", r4k.listed, 3);
+  t.eq("failed is [] when all succeed", JSON.stringify(r4k.failed), "[]");
+  const f5 = makeFetch(ids5, id => jsonRes(503, { error: { code: 503, message: "Unavailable" } }));
+  let allFail = null;
+  try { await G.fetchNew(TOKEN, { query: "q", fetch: f5.fetch }); } catch (e) { allFail = e; }
+  t.eq("all downloads fail → rejects with first error (http)", allFail && allFail.code, "http");
+  const f6 = makeFetch(ids5, id => Promise.reject(new TypeError("Failed to fetch")));
+  let allNet = null;
+  try { await G.fetchNew(TOKEN, { query: "q", fetch: f6.fetch }); } catch (e) { allNet = e; }
+  t.eq("all downloads offline → rejects network", allNet && allNet.code, "network");
+  const none = await G.fetchNew(TOKEN, { query: "q", knownIds: ids5, fetch: makeFetch(ids5).fetch });
+  t.ok("nothing new is a success with empty failed", none.length === 0 && none.failed.length === 0 && none.listed === 0);
+
+  /* ---------- fetchNew pages past known mail ---------- */
+  function pagedFetch(total, perPageCap) {
+    const st = { pages: 0, sizes: [], got: [] };
+    st.fetch = (url) => {
+      const u = new URL(url);
+      if (/\/messages$/.test(u.pathname)) {
+        st.pages++;
+        const size = Math.min(+u.searchParams.get("maxResults"), perPageCap || 1e9);
+        st.sizes.push(+u.searchParams.get("maxResults"));
+        const start = +(u.searchParams.get("pageToken") || 0);
+        const msgs = [];
+        for (let i = start; i < Math.min(total, start + size); i++) msgs.push({ id: "g" + i });
+        const body = { messages: msgs };
+        if (start + size < total) body.nextPageToken = String(start + size);
+        return Promise.resolve(jsonRes(200, body));
+      }
+      const id = u.pathname.split("/").pop();
+      st.got.push(id);
+      return Promise.resolve(jsonRes(200, { id, payload: { mimeType: "text/plain", body: { data: b64u(id) } } }));
+    };
+    return st;
+  }
+  const known60 = {};
+  for (let i = 0; i < 60; i++) known60["g" + i] = true;
+  const pf = pagedFetch(250, 50);
+  const older = await G.fetchNew(TOKEN, { query: "q", max: 60, knownIds: known60, fetch: pf.fetch });
+  t.eq("250 ids, newest 60 known → next 60 unknown", older.map(m => m.id).join(","),
+    Array.from({ length: 60 }, (_, i) => "g" + (60 + i)).join(","));
+  t.eq("… with more=true", older.more, true);
+  t.no("… never downloads a known id", pf.got.some(id => known60[id]));
+  t.ok("listing asks ≤100 per page", pf.sizes.every(n => n > 0 && n <= 100), pf.sizes.join(","));
+  t.eq("… listed counts unknown ids seen", older.listed, 90);
+  const known250 = {};
+  for (let i = 0; i < 2000; i++) known250["g" + i] = true;
+  const cap = pagedFetch(2000);
+  const capped10 = await G.fetchNew(TOKEN, { query: "q", max: 60, knownIds: known250, fetch: cap.fetch });
+  t.eq("page cap: stops after 10 listing pages", cap.pages, 10);
+  t.ok("page cap: empty result, more=true", capped10.length === 0 && capped10.more === true);
+  const cap2 = pagedFetch(1050);
+  const k2 = {};
+  for (let i = 0; i < 1000; i++) k2["g" + i] = true;
+  const after10 = await G.fetchNew(TOKEN, { query: "q", max: 60, knownIds: k2, fetch: cap2.fetch });
+  t.ok("page cap: unknown ids beyond page 10 not reached", after10.length === 0 && after10.more === true && cap2.pages === 10, cap2.pages);
+
   /* ---------- error mapping ---------- */
   async function codeFor(res) {
     try { await G.listIds(TOKEN, "q", { fetch: () => res }); return "resolved"; } catch (e) { return e; }

@@ -77,12 +77,13 @@ exports.run = async function (t, env) {
     t.has("a wrong Client ID is refused", await app.toast(), "doesn’t look like a Client ID");
     await app.page.fill("#s-gmail-client", CLIENT);
     await app.page.click("#s-gmail-save");
-    await app.page.waitForTimeout(300);
+    await app.page.waitForTimeout(800);
+    t.eq("and the first save connects: one trip to Google", calls.auth.length, 1);
+    const authUrl = calls.auth[0];
+    await app.page.goBack();                  /* back from (fake) Google to read our storage */
+    await app.page.waitForTimeout(500);
     t.eq("a real-looking one is saved", (await app.stored()).gmail.clientId, CLIENT);
-    await app.page.click("#s-gmail-check");
-    await app.page.waitForTimeout(700);
-    t.eq("Connect goes to Google once", calls.auth.length, 1);
-    const u = new URL(calls.auth[0] || "https://x/");
+    const u = new URL(authUrl || "https://x/");
     t.eq("read-only Gmail access only", u.searchParams.get("scope"), "https://www.googleapis.com/auth/gmail.readonly");
     t.eq("with our Client ID", u.searchParams.get("client_id"), CLIENT);
     t.ok("and a random state to check the answer against", (u.searchParams.get("state") || "").length >= 32);
@@ -118,7 +119,8 @@ exports.run = async function (t, env) {
     const e = s.expenses.find(x => x.mailId === "g1");
     t.ok("the expense remembers its email", e && e.amount === 94 && e.cat === "food");
     t.eq("and the inbox entry is settled in the same save", s.inbox.find(x => x.id === "g1").status, "added");
-    t.has("the next one is offered", norm(await app.toast()), "1 more from Gmail");
+    t.has("the next one is offered", norm(await app.toast()), "1 more to review");
+    t.ok("back in the inbox, not on Home", await app.page.evaluate(() => !!document.querySelector("#inbox-list")));
 
     await app.page.reload();
     await app.page.waitForTimeout(500);
@@ -179,6 +181,94 @@ exports.run = async function (t, env) {
     const s = await app.stored();
     t.eq("a restore keeps this phone's Gmail link", s.gmail.clientId, CLIENT);
     t.eq("and its inbox", s.inbox.length, 1);
+    await app.close();
+  }
+
+  /* ---- QA round: a failed download must not hide an email for good ---- */
+  {
+    const app = await boot(browser, connected({ gmail: { clientId: CLIENT, lastSec: 1790000000 } }), { now: NOW });
+    const calls = await fakeGoogle(app);
+    await app.page.route("https://gmail.googleapis.com/**/messages/c1?**", r => r.fulfill({ status: 500, body: "{}" }));
+    await returnFromGoogle(app, "d".repeat(40));
+    const s = await app.stored();
+    t.eq("the checkpoint stays put when a download failed", s.gmail.lastSec, 1790000000);
+    t.no("the failed email is not marked as seen", !!s.mailSeen.c1);
+    t.has("and it says so where it stays visible", norm(await app.page.evaluate(() => document.querySelector("#inbox-error").innerText)), "couldn’t be downloaded");
+    t.ok("the others still arrive", s.inbox.some(x => x.id === "g1"));
+    await app.close();
+  }
+
+  /* ---- QA round: one purchase, two emails ---- */
+  {
+    const twins = Object.assign({}, MAILS, {
+      c2: msg("c2", "CIH Bank <alertes@cihbank.ma>", "Paiement par carte",
+        "<p>Paiement par carte ****4521 d'un montant de 94,00 MAD chez GLOVO le 14/10/2026.</p>")
+    });
+    const app = await boot(browser, connected(), { now: NOW });
+    const keep = Object.assign({}, MAILS); Object.assign(MAILS, twins);
+    await fakeGoogle(app, { ids: ["g1", "c2"] });
+    await returnFromGoogle(app, "e".repeat(40));
+    Object.keys(MAILS).forEach(k => delete MAILS[k]); Object.assign(MAILS, keep);
+    const txt = norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText));
+    t.has("the bank alert and the receipt are flagged as one purchase", txt, "Possibly the same purchase");
+    t.has("with what to do", txt, "add only one");
+    await app.close();
+  }
+
+  /* ---- QA round: a EUR receipt is not saved as dirhams ---- */
+  {
+    const app = await boot(browser, connected({ inbox: [{ id: "n1", amount: 13.49, currency: "EUR", date: "2026-10-12",
+      merchant: "Netflix", sender: "Netflix", status: "new", kind: "debit", cat: "bills", confidence: 0.9 }] }), { now: NOW });
+    await app.page.click("#h-inbox");
+    await app.page.waitForTimeout(300);
+    await app.page.click('[data-inbox-add="n1"]');
+    await app.page.waitForTimeout(350);
+    t.eq("the amount is left for you to enter in MAD", await app.page.inputValue("#f-amount"), "");
+    t.has("the original is kept in the note", await app.page.inputValue("#f-note"), "Netflix (EUR 13.49)");
+    t.has("the form says where it came from", norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText)), "From Gmail · Netflix");
+    await app.close();
+  }
+
+  /* ---- QA round: restoring an older backup re-offers what it no longer holds ---- */
+  {
+    const app = await boot(browser, connected({
+      inbox: [{ id: "g1", amount: 94, date: "2026-10-14", merchant: "Glovo", status: "added", expenseId: "m1", kind: "debit", confidence: 0.9 },
+              { id: "c1", amount: 250, date: "2026-10-13", merchant: "Marjane", status: "new", kind: "debit", confidence: 0.85 }],
+      expenses: [expense({ id: "m1", amount: 94, date: "2026-10-14", cat: "food", mailId: "g1" })] }), { now: NOW });
+    app.page.on("dialog", d => d.accept());
+    await app.tab("settings");
+    const older = baseState({ salary: 1, expenses: [expense({ id: "z9", amount: 250, date: "2026-10-13", cat: "food", mailId: "c1" })] });
+    await app.page.setInputFiles("#s-import-file", { name: "b.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(older)) });
+    await app.page.waitForTimeout(600);
+    const s = await app.stored();
+    t.eq("an email whose expense the backup lacks is offered again", s.inbox.find(x => x.id === "g1").status, "new");
+    t.eq("an email the backup already holds is not", s.inbox.find(x => x.id === "c1").status, "added");
+    await app.close();
+  }
+
+  /* ---- QA round: offline, and disconnecting ---- */
+  {
+    const app = await boot(browser, connected({ inbox: [{ id: "x1", amount: 10, date: "2026-10-10", merchant: "Shop", status: "new", kind: "debit", confidence: 0.9 }] }), { now: NOW });
+    const calls = await fakeGoogle(app);
+    app.page.on("dialog", d => d.accept());
+    await app.ctx.setOffline(true);
+    await app.page.click("#h-inbox");
+    await app.page.waitForTimeout(300);
+    await app.page.click("#inbox-check");
+    await app.page.waitForTimeout(400);
+    t.eq("offline: no trip to Google that would strand you", calls.auth.length, 0);
+    t.has("it says why instead", norm(await app.page.evaluate(() => document.querySelector("#inbox-error").innerText)), "offline");
+    await app.ctx.setOffline(false);
+    await app.page.evaluate(() => document.querySelector(".sheet-x").click());
+    await app.page.waitForTimeout(400);
+    await app.tab("settings");
+    await app.page.click("#s-gmail-forget");
+    await app.page.waitForTimeout(400);
+    const s = await app.stored();
+    t.eq("Disconnect forgets the Client ID", s.gmail.clientId, "");
+    t.eq("and what was waiting in the inbox", s.inbox.length, 0);
+    await app.tab("home");
+    t.no("so Home stops asking", /from Gmail to review/.test(await app.shellText()));
     await app.close();
   }
 };

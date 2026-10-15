@@ -365,26 +365,74 @@
     return Object.prototype.hasOwnProperty.call(known, id) && !!known[id];
   }
 
+  var PAGE_SIZE = 100;
+  var MAX_PAGES = 10;
+
+  /* Page through the listing newest-first, dropping known ids AS IT GOES, until
+     max unknown ids are collected or the pages run out (hard stop: MAX_PAGES).
+     Without this, once the newest max were known every check re-listed the
+     same page and never reached older unknown mail. */
+  function listUnknown(token, query, max, known, opts) {
+    var ids = [], seen = {}, unknownSeen = 0, pages = 0;
+    function page(pageToken) {
+      pages++;
+      var url = API + "?q=" + encodeURIComponent(query || "") + "&maxResults=" + PAGE_SIZE;
+      if (pageToken) url += "&pageToken=" + encodeURIComponent(pageToken);
+      return getJson(token, url, opts).then(function (j) {
+        ((j && j.messages) || []).forEach(function (m) {
+          var id = m && m.id;
+          if (!id || seen[id]) return;
+          seen[id] = 1;
+          if (isKnown(known, id)) return;
+          unknownSeen++;
+          if (ids.length < max) ids.push(id);
+        });
+        var nextTok = j && j.nextPageToken && j.nextPageToken !== pageToken ? j.nextPageToken : null;
+        if (nextTok && ids.length < max && pages < MAX_PAGES) return page(nextTok);
+        return { ids: ids, listed: unknownSeen, more: unknownSeen > ids.length || !!nextTok };
+      });
+    }
+    return page(null);
+  }
+
   function fetchNew(token, opts) {
     opts = opts || {};
     var conc = Math.floor(Number(opts.concurrency));
     if (!(conc > 0)) conc = 4;
     if (conc > 10) conc = 10;
+    var max = Math.floor(Number(opts.max));
+    if (!(max > 0)) max = DEFAULT_MAX;
+    if (max > HARD_MAX) max = HARD_MAX;
     var known = opts.knownIds;
     if (Array.isArray(known)) {
       var km = {};
       known.forEach(function (k) { km[k] = true; });
       known = km;
     }
-    return listIds(token, opts.query, { max: opts.max, fetch: opts.fetch }).then(function (ids) {
-      var todo = ids.filter(function (id) { return !isKnown(known, id); });
+    function decorate(arr, failed, scan) {
+      arr.failed = failed;
+      arr.listed = scan.listed;
+      arr.more = scan.more;
+      return arr;
+    }
+    return listUnknown(token, opts.query, max, known, { fetch: opts.fetch }).then(function (scan) {
+      var todo = scan.ids;
       var results = new Array(todo.length);
-      if (!todo.length) return [];
+      if (!todo.length) return decorate([], [], scan);
       return new Promise(function (resolve, reject) {
-        var next = 0, active = 0, done = false;
+        var next = 0, active = 0, done = false, firstErr = null;
+        var failedAt = {};
         function finish() {
           done = true;
-          resolve(results.filter(function (m) { return !!m; }));
+          var failed = [], got = [];
+          for (var i = 0; i < todo.length; i++) {
+            if (failedAt[i]) failed.push(todo[i]);
+            else if (results[i]) got.push(results[i]);
+          }
+          /* every download failed: that is an outage, not "nothing new" --
+             reject so the caller does not advance its last-checked time */
+          if (!got.length && failed.length) { reject(firstErr); return; }
+          resolve(decorate(got, failed, scan));
         }
         function launch() {
           while (!done && active < conc && next < todo.length) {
@@ -394,7 +442,9 @@
                 results[idx] = m;
               }, function (e) {
                 if (e && e.code === "auth") { if (!done) { done = true; reject(e); } return; }
-                results[idx] = null; /* one bad message never sinks the batch */
+                /* one bad message never sinks the batch, but it is reported */
+                failedAt[idx] = true;
+                if (!firstErr) firstErr = e && e.code ? e : err("network", (e && e.message) || "Download failed");
               }).then(function () {
                 active--;
                 if (done) return;
