@@ -823,6 +823,9 @@
   .copy-row{display:flex; align-items:center; gap:8px; margin:4px 0 6px}
   .copy-row code{flex:1; min-width:0}
   .gmail-steps a{color:var(--accent-deep); font-weight:700}
+  .toggle-row{display:flex; gap:12px; align-items:flex-start; margin:12px 0 4px; font-size:14px; cursor:pointer}
+  .toggle-row input{width:22px; height:22px; flex:none; margin-top:2px; accent-color:var(--accent)}
+  .inbox-cat .learned{margin-left:6px; font-size:11px; font-weight:700; color:var(--ink3); text-transform:uppercase; letter-spacing:.05em}
   .gmail-steps{margin:10px 0 12px; font-size:13.5px; color:var(--ink2)}
   .gmail-steps summary{cursor:pointer; font-weight:700; color:var(--ink); min-height:32px}
   .gmail-steps ol{padding-left:20px; margin:8px 0 0; display:grid; gap:6px}
@@ -1257,7 +1260,8 @@
                kind: x.kind === "credit" || x.kind === "refund" ? x.kind : "debit",
                merchant:String(x.merchant || "").slice(0, 40) || "Email", sender:String(x.sender || "").slice(0, 60),
                subject:String(x.subject || "").slice(0, 120), date:x.date,
-               cat: INBOX_CATS.indexOf(x.cat) >= 0 ? x.cat : "", source:String(x.source || "").slice(0, 20),
+               cat: INBOX_CATS.indexOf(x.cat) >= 0 || /^u[a-z0-9]{3,20}$/.test(String(x.cat || "")) ? x.cat : "",
+               learned: x.learned ? 1 : 0, source:String(x.source || "").slice(0, 20),
                confidence: Math.min(Math.max(+x.confidence || 0, 0), 1),
                status: x.status === "added" || x.status === "dismissed" ? x.status : "new",
                expenseId: typeof x.expenseId === "string" ? x.expenseId : "", ts:+x.ts || 0 };
@@ -1275,7 +1279,8 @@
     var id = String(g.clientId || "").trim();
     return { clientId: /^[\w.-]{10,200}\.apps\.googleusercontent\.com$/.test(id) ? id : "",
              lastSec: +g.lastSec > 0 ? Math.floor(+g.lastSec) : 0,
-             email: String(g.email || "").slice(0, 120) };
+             email: String(g.email || "").slice(0, 120),
+             auto: g.auto ? 1 : 0, autoTs: +g.autoTs > 0 ? Math.floor(+g.autoTs) : 0 };
   }
   /* Places you saved yourself. A coordinate pair and a name, nothing else --
      what you buy there is read from the expenses filed under it. */
@@ -4791,17 +4796,20 @@
     return (state.inbox || []).filter(function(x){ return x.status === "new"; })
       .sort(function(a, b){ return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
   }
-  function connectGmail(){
+  function connectGmail(silent){
     var cfg = gmailCfg();
+    if(silent === true && (!gmailLoaded() || navigator.onLine === false || !cfg.clientId)) return;
     if(!gmailLoaded()){ toast("Gmail isn’t available offline — connect once you’re online"); return; }
     /* leaving for Google with no connection strands you on a browser error page */
     if(navigator.onLine === false){ gmailError = "You’re offline — Gmail can be checked once you’re back online."; drawInboxStatus(""); toast("You’re offline"); return; }
     if(!cfg.clientId){ tab = "settings"; closeSheet(); render(); toast("Paste your Google Client ID in Settings first"); return; }
     var nonce = GmailSync.newState();
-    try{ localStorage.setItem(GMAIL_OAUTH_KEY, JSON.stringify({ state:nonce, at:Date.now() })); }
-    catch(e){ toast("Could not start the sign-in — storage is unavailable"); return; }
+    try{ localStorage.setItem(GMAIL_OAUTH_KEY, JSON.stringify({ state:nonce, at:Date.now(), silent:silent === true ? 1 : 0 })); }
+    catch(e){ if(silent !== true) toast("Could not start the sign-in — storage is unavailable"); return; }
+    /* prompt=none: Google answers straight back without showing anything
+       when you are still signed in, or with an error when it would need you */
     location.href = GmailSync.authUrl({ clientId:cfg.clientId, redirectUri:gmailRedirectUri(), state:nonce,
-                                        loginHint:cfg.email || "" });
+                                        loginHint:cfg.email || "", prompt: silent === true ? "none" : "" });
   }
   /* Back from Google: the token is in the address. Read it, check it is the
      answer to OUR request, and wipe it from the address bar at once. */
@@ -4819,6 +4827,12 @@
     if(!r) return "";
     if(r.error){
       gmailToken = null;
+      /* an automatic try that needs you is not an error to shout about --
+         it waits in the inbox for the next time you look */
+      if(saved && saved.silent && /^(interaction_required|login_required|consent_required|account_selection_required)$/.test(r.error)){
+        gmailError = "The automatic check needs you to sign in to Google again — tap Sign in & check.";
+        return "quiet";
+      }
       return r.error === "access_denied" ? "Gmail access was not given — nothing was read"
            : r.error === "state" ? "That sign-in didn’t come from this app, so it was ignored"
            : r.error === "scope" ? "Gmail read access wasn’t granted — tick the Gmail box when Google asks"
@@ -4881,7 +4895,8 @@
           kind:t.kind || "debit", merchant:String(t.merchant || senderName(m.from)).slice(0, 40),
           sender:senderName(m.from), subject:String(m.subject || "").slice(0, 120),
           date: ISO_RE.test(String(t.date || "")) && t.date <= today ? t.date : today,
-          cat: INBOX_CATS.indexOf(t.cat) >= 0 ? t.cat : "", source:t.source || "", confidence:t.confidence,
+          cat: learnedCat(t.merchant) || (INBOX_CATS.indexOf(t.cat) >= 0 ? t.cat : ""),
+          learned: learnedCat(t.merchant) ? 1 : 0, source:t.source || "", confidence:t.confidence,
           status:"new", expenseId:"", ts:Date.now() });
         found++;
       });
@@ -4921,6 +4936,40 @@
       toast(code === "auth" ? "Gmail sign-in expired" : "Gmail check failed");
       if(!(sheet.classList.contains("show") && $("#inbox-list"))) openInbox();
     });
+  }
+  /* Opt-in, and at most every six hours: on opening the app, check Gmail if
+     signed in, otherwise try Google's silent sign-in once. The attempt is
+     written down BEFORE leaving, so a failed return can never loop. */
+  var GMAIL_AUTO_GAP = (window.__GMAIL_AUTO_GAP || 6 * 3600 * 1000);
+  function autoCheckGmail(){
+    var cfg = gmailCfg();
+    if(!cfg.auto || !cfg.clientId || gmailBusy || !gmailLoaded() || navigator.onLine === false) return;
+    if(sheet.classList.contains("show")) return;              /* never yank you out of something */
+    if(Date.now() - (cfg.autoTs || 0) < GMAIL_AUTO_GAP) return;
+    var before = cfg.autoTs;
+    cfg.autoTs = Date.now();
+    if(!save()){ cfg.autoTs = before; return; }
+    if(gmailReady()) checkGmail();
+    else connectGmail(true);
+  }
+  /* What you usually file a shop under, from the expenses you kept: two
+     agreeing choices beat the parser's guess, so "Glovo" can be Going out
+     for you even though most Glovo is food. */
+  function normMerchant(s){
+    return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, " ").trim();
+  }
+  function learnedCat(merchant){
+    var key = normMerchant(merchant);
+    if(key.length < 2) return "";
+    var n = {}, best = "", bestN = 0;
+    state.expenses.forEach(function(e){
+      if(isReconciliation(e) || normMerchant(e.note) !== key) return;
+      if(!PICK_CATS.some(function(c){ return c.id === e.cat; })) return;
+      n[e.cat] = (n[e.cat] || 0) + 1;
+      if(n[e.cat] > bestN){ bestN = n[e.cat]; best = e.cat; }
+    });
+    return bestN >= 2 ? best : "";
   }
   function drawInboxStatus(msg){
     var el = $("#inbox-status");
@@ -4962,7 +5011,8 @@
   function inboxCatChip(x){
     if(!x.cat) return '<span class="inbox-cat muted">no category yet</span>';
     var c = cat(x.cat);
-    return '<span class="inbox-cat"><span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+esc(c.name)+'</span>';
+    return '<span class="inbox-cat"><span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+esc(c.name)+
+      (x.learned ? '<small class="learned">your usual</small>' : '')+'</span>';
   }
   function openInbox(){
     var items = inboxNew(), cfg = gmailCfg();
@@ -5049,6 +5099,8 @@
       '<input id="s-gmail-client" type="text" autocomplete="off" spellcheck="false" placeholder="1234-abc.apps.googleusercontent.com" value="'+esc(cfg.clientId)+'"></div>' +
       '<div class="row2"><button class="btn'+(cfg.clientId ? '' : ' primary')+'" id="s-gmail-save">'+(cfg.clientId ? 'Save' : 'Save &amp; connect')+'</button>' +
       '<button class="btn'+(cfg.clientId ? ' primary' : '')+'" id="s-gmail-check"'+(cfg.clientId ? '' : ' disabled')+'>'+(gmailReady() ? 'Check Gmail' : 'Connect Gmail')+'</button></div>' +
+      (cfg.clientId ? '<label class="toggle-row"><input type="checkbox" id="s-gmail-auto"'+(cfg.auto ? ' checked' : '')+'>' +
+        '<span><b>Check automatically when I open the app</b><br><span class="hint" style="margin:0">At most every 6 hours. If Google still has you signed in it takes a second; if not, you’ll see “Sign in & check” in the inbox.</span></span></label>' : '') +
       (cfg.clientId ? '<button class="btn ghost" id="s-gmail-forget" style="margin-top:8px">Disconnect Gmail</button>' : '') +
       '</div>';
   }
@@ -5082,6 +5134,13 @@
           navigator.clipboard.writeText(text).then(done, function(){ selectText(el); });
         }else selectText(el);
       });
+    });
+    var au = $("#s-gmail-auto");
+    if(au) au.addEventListener("change", function(){
+      var cfg = gmailCfg(), old = cfg.auto;
+      cfg.auto = this.checked ? 1 : 0;
+      if(!save()){ cfg.auto = old; this.checked = !!old; return; }
+      toast(cfg.auto ? "Gmail will be checked when you open the app" : "Automatic Gmail check off");
     });
     var chk = $("#s-gmail-check");
     if(chk) chk.addEventListener("click", function(){ checkGmail(); });
@@ -7763,7 +7822,9 @@ function importBackupFile(input){
   var gmailReturn = readGmailReturn();
   render();
   if(gmailReturn === "ok") setTimeout(checkGmail, 50);
+  else if(gmailReturn === "quiet") render();
   else if(gmailReturn) setTimeout(function(){ gmailError = gmailReturn; openInbox(); toast(gmailReturn); }, 50);
+  else setTimeout(autoCheckGmail, 1500);
 
   /* ---------- auto-update check ----------
      This checked only on load and on returning to the app, behind a five
@@ -7824,6 +7885,7 @@ function importBackupFile(input){
     if(document.visibilityState === "visible"){
       refreshForNewDay();
       checkForUpdate(true); startUpdatePolling();
+      setTimeout(autoCheckGmail, 1500);
     }
     else stopUpdatePolling();
   });

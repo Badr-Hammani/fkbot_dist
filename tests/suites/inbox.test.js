@@ -309,4 +309,69 @@ exports.run = async function (t, env) {
     t.no("a token in the address is wiped even without the Gmail code", /access_token/.test(app.page.url()), app.page.url());
     await app.close();
   }
+
+  /* ---- round 1: checking by itself on open (opt-in, throttled) ---- */
+  const autoState = extra => connected(Object.assign({ gmail: Object.assign({ clientId: CLIENT, lastSec: 0, auto: 1, autoTs: 0 }, extra || {}) }));
+  {
+    const app = await boot(browser, connected(), { now: NOW });
+    const calls = await fakeGoogle(app);
+    await app.page.reload(); await app.page.waitForTimeout(2600);
+    t.eq("switched off (the default): opening the app never leaves for Google", calls.auth.length, 0);
+    await app.close();
+  }
+  {
+    const app = await boot(browser, autoState(), { now: NOW });
+    const calls = await fakeGoogle(app);
+    await app.page.reload(); await app.page.waitForTimeout(2600);
+    t.eq("switched on: one silent trip to Google on opening", calls.auth.length, 1);
+    t.eq("asking Google to show nothing", new URL(calls.auth[0] || "https://x/").searchParams.get("prompt"), "none");
+    await app.page.goBack(); await app.page.waitForTimeout(2600);
+    t.ok("the try is written down before leaving", (await app.stored()).gmail.autoTs > 0);
+    t.eq("so coming straight back does not go again", calls.auth.length, 1);
+    await app.close();
+  }
+  {
+    const app = await boot(browser, autoState(), { now: NOW });
+    const calls = await fakeGoogle(app);
+    await app.ctx.setOffline(true);
+    await app.page.evaluate(() => window.dispatchEvent(new Event("offline")));
+    await app.page.reload().catch(() => {}); await app.page.waitForTimeout(2600);
+    t.eq("offline: no trip to Google", calls.auth.length, 0);
+    await app.ctx.setOffline(false);
+    await app.close();
+  }
+  {
+    /* Google could not do it silently: no alarm, a note in the inbox */
+    const app = await boot(browser, autoState({ autoTs: Date.parse(NOW) }), { now: NOW });
+    const calls = await fakeGoogle(app);
+    const url = app.page.url().split("#")[0];
+    await app.page.evaluate(() => localStorage.setItem("weekend-wallet-gmail-oauth", JSON.stringify({ state: "q".repeat(40), at: Date.now(), silent: 1 })));
+    await app.page.goto("about:blank");
+    await app.page.goto(url + "#error=interaction_required&state=" + "q".repeat(40));
+    await app.page.waitForTimeout(1500);
+    t.no("a silent miss opens nothing by itself", await app.page.evaluate(() => document.querySelector("#sheet").classList.contains("show")));
+    t.no("and the token address is gone", /error=/.test(app.page.url()));
+    t.eq("Gmail is not touched", calls.list, 0);
+    await app.close();
+  }
+
+  /* ---- round 1: merchant memory ---- */
+  {
+    const app = await boot(browser, connected({ expenses: [
+      expense({ id: "h1", amount: 80, date: "2026-10-01", cat: "out", note: "Glovo" }),
+      expense({ id: "h2", amount: 60, date: "2026-10-05", cat: "out", note: "glovo" }) ] }), { now: NOW });
+    await fakeGoogle(app, { ids: ["g1"] });
+    await returnFromGoogle(app, "m".repeat(40));
+    const it = (await app.stored()).inbox.find(x => x.id === "g1");
+    t.eq("two Glovos you filed as Going out beat the parser's Food", it && it.cat, "out");
+    t.has("and the inbox says it is your usual", norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText)).toLowerCase(), "going out your usual");
+    await app.close();
+  }
+  {
+    const app = await boot(browser, connected({ expenses: [ expense({ id: "h1", amount: 80, date: "2026-10-01", cat: "out", note: "Glovo" }) ] }), { now: NOW });
+    await fakeGoogle(app, { ids: ["g1"] });
+    await returnFromGoogle(app, "n".repeat(40));
+    t.eq("one choice is not yet a habit: the parser's category stands", (await app.stored()).inbox.find(x => x.id === "g1").cat, "food");
+    await app.close();
+  }
 };
