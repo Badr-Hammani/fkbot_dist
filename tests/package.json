@@ -1,0 +1,19 @@
+{
+  "name": "weekend-wallet-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Test suite for Weekend Wallet. The app itself has no dependencies and no build step — only these tests do.",
+  "scripts": {
+    "test": "node run.js",
+    "test:scan": "node run.js scan",
+    "test:money": "node run.js money",
+    "test:ledger": "node run.js ledger",
+    "test:storage": "node run.js storage",
+    "test:security": "node run.js security",
+    "test:flows": "node run.js flows",
+    "setup": "npm install && npx playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.47.0"
+  }
+}
