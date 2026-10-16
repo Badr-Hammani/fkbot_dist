@@ -711,4 +711,15 @@ exports.run = async function (t, env) {
     t.ok("and the window reached back a month for it", calls.urls.some(u => { const m = decodeURIComponent(u).match(/after:(\d+)/); return m && +m[1] < Date.parse(NOW) / 1000 - 20 * 86400; }));
     await app.close();
   }
+
+  /* ---- loop 3 UX: the button says what it will do ---- */
+  {
+    const app = await boot(browser, connected({ inbox: [
+      { id: "r1", amount: 89.9, currency: "MAD", date: "2026-10-13", merchant: "KFC Maarif", sender: "KFC", status: "new", kind: "debit", cat: "food", confidence: 0.75 },
+      { id: "r2", amount: 32, currency: "MAD", date: "2026-10-13", merchant: "Careem", sender: "Careem", status: "new", kind: "debit", cat: "transport", confidence: 0.9 } ] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    t.eq("a row the app is unsure of says Review", (await app.page.textContent('[data-inbox-add="r1"]')).trim(), "Review");
+    t.eq("a confident row says Add", (await app.page.textContent('[data-inbox-add="r2"]')).trim(), "Add");
+    await app.close();
+  }
 };

@@ -827,13 +827,14 @@
   .mail-fx{margin:-6px 0 12px; padding:8px 10px; border-radius:12px; font-size:13px; line-height:1.4;
     background:color-mix(in srgb, var(--warn) 14%, var(--card2)); color:var(--ink)}
   .gmail-status{margin:10px 0 0}
-  .inbox-error a{color:var(--accent-deep); font-weight:700}
+  .inbox-error a{color:var(--accent-deep); font-weight:700; display:inline-flex; align-items:center; min-height:44px; padding:0 4px}
   .inbox-actions .btn.sm{padding:8px 13px}
   .copy-row code{flex:1; min-width:0}
   .gmail-steps a{color:var(--accent-deep); font-weight:700}
   .toggle-row{display:flex; gap:12px; align-items:flex-start; margin:12px 0 4px; font-size:14px; cursor:pointer}
   .toggle-row input{width:22px; height:22px; flex:none; margin-top:2px; accent-color:var(--accent)}
-  .inbox-cat .learned{margin-left:6px; font-size:11px; font-weight:700; color:var(--ink3); text-transform:uppercase; letter-spacing:.05em}
+  .inbox-cat .cat-nm{min-width:0; overflow:hidden; text-overflow:ellipsis}
+  .inbox-cat .learned{flex:none; margin-left:6px; font-size:11px; font-weight:700; color:var(--ink3); text-transform:uppercase; letter-spacing:.05em}
   .gmail-steps{margin:10px 0 12px; font-size:13.5px; color:var(--ink2)}
   .gmail-steps summary{cursor:pointer; font-weight:700; color:var(--ink); min-height:32px}
   .gmail-steps ol{padding-left:20px; margin:8px 0 0; display:grid; gap:6px}
@@ -5139,14 +5140,17 @@
   function inboxCatChip(x){
     if(!liveCat(x.cat)) return '<span class="inbox-cat muted">no category yet</span>';
     var c = cat(x.cat);
-    return '<span class="inbox-cat"><span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+esc(c.name)+
+    return '<span class="inbox-cat"><span style="color:var('+c.v+'); display:inline-flex; flex:none">'+catIcon(c.id)+'</span><span class="cat-nm">'+esc(c.name)+'</span>'+
       (x.learned ? '<small class="learned">your usual</small>' : '')+'</span>';
   }
   /* set by Add/Skip/Undo just before they redraw: where you were, so the
      list does not jump back to the top after every row */
   var inboxKeep = null;
-  function keepInboxPlace(){
-    if(sheet.classList.contains("show") && $("#inbox-list")) inboxKeep = { top: sheet.scrollTop };
+  function keepInboxPlace(actedId){
+    if(!(sheet.classList.contains("show") && $("#inbox-list"))) return;
+    var rows = [].slice.call(sheet.querySelectorAll(".inbox-item")), idx = -1;
+    rows.forEach(function(r, i){ if(actedId && r.querySelector('[data-inbox-add="'+actedId+'"], [data-inbox-skip="'+actedId+'"]')) idx = i; });
+    inboxKeep = { top: sheet.scrollTop, index: idx };
   }
   function openInbox(){
     var items = inboxNew(), cfg = gmailCfg();
@@ -5172,15 +5176,16 @@
           ? '<span class="inbox-cat muted">Money in — not an expense</span>'
           : inboxCatChip(x) +
             /* one tap when everything is known; otherwise Add opens the form */
-            '<button class="btn primary sm" data-inbox-add="'+esc(x.id)+'" aria-label="Add '+esc(x.merchant)+' '+esc(foreign ? x.currency+' '+x.amount.toFixed(2) : fmt(x.amount))+
-              (liveCat(x.cat) && !foreign ? ' as '+esc(cat(x.cat).name) : '')+'">Add</button>' +
+            (oneTapOK(x)
+              ? '<button class="btn primary sm" data-inbox-add="'+esc(x.id)+'" aria-label="Add '+esc(x.merchant)+' '+esc(fmt(x.amount))+' as '+esc(cat(x.cat).name)+'">Add</button>'
+              : '<button class="btn primary sm" data-inbox-add="'+esc(x.id)+'" aria-label="Review '+esc(x.merchant)+' '+esc(foreign ? x.currency+' '+x.amount.toFixed(2) : fmt(x.amount))+' before adding">Review</button>') +
             '<button class="btn ghost sm" data-inbox-edit="'+esc(x.id)+'" aria-label="Edit '+esc(x.merchant)+' before adding">Edit</button>') +
           '<button class="btn ghost sm" data-inbox-skip="'+esc(x.id)+'" aria-label="'+(moneyIn ? 'Dismiss' : 'Skip')+' '+esc(x.merchant)+'">'+(moneyIn ? 'OK' : 'Skip')+'</button></div></div>';
     }).join("");
     var last = cfg.lastSec ? new Date(cfg.lastSec * 1000) : null;
     openSheet(
       '<h2>From Gmail</h2>' +
-      '<p class="hint" style="margin-top:0">Nothing here counts until you add it. “Add” saves it as shown (you can undo); “Edit” lets you change it first.</p>' +
+      '<p class="hint" style="margin-top:0">Nothing here counts until you add it. “Add” saves it as shown (you can undo); “Review” and “Edit” open it first.</p>' +
       '<div class="inbox-error" id="inbox-error" role="status"'+(gmailError ? '' : ' hidden')+'>'+errorBoxHtml()+'</div>' +
       '<div class="inbox-bar"><span id="inbox-status" class="hint" style="margin:0">'+
         (last ? 'Last checked '+esc(last.toLocaleString(undefined, { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })) : 'Not checked yet')+'</span>' +
@@ -5193,8 +5198,10 @@
          the next row's first button rather than the Check button at the top */
       requestAnimationFrame(function(){ requestAnimationFrame(function(){
         sheet.scrollTop = keep.top;
-        var nextBtn = null;
-        sheet.querySelectorAll(".inbox-item .btn").forEach(function(b){
+        /* the row that slid into the acted row's place, else the first on screen */
+        var rows = sheet.querySelectorAll(".inbox-item"), nextBtn = null;
+        if(keep.index >= 0 && rows.length) nextBtn = rows[Math.min(keep.index, rows.length - 1)].querySelector(".btn");
+        if(!nextBtn) sheet.querySelectorAll(".inbox-item .btn").forEach(function(b){
           if(!nextBtn && b.getBoundingClientRect().top >= 0) nextBtn = b;
         });
         if(nextBtn) nextBtn.focus({ preventScroll:true });
@@ -5220,6 +5227,7 @@
     inboxSkipBind();
   }
   function editFromInbox(x){
+        keepInboxPlace(x.id);            /* Save brings you back here */
         var foreign = x.currency !== state.currency;
         /* a EUR receipt must not be saved as the same number of dirhams */
         openAdd(null, { amount: foreign ? "" : x.amount,
@@ -5229,6 +5237,10 @@
   /* Add in one tap: same expense the form would save, same funding check --
      anything that needs a decision (a foreign amount, no category, money
      you do not have) goes to the form instead. */
+  /* one tap only when nothing needs a second look */
+  function oneTapOK(x){
+    return !!liveCat(x.cat) && x.currency === state.currency && x.kind === "debit" && x.verified !== 0 && x.confidence >= 0.8;
+  }
   function quickAddFromInbox(x){
     var catId = liveCat(x.cat);
     /* anything the app is unsure of goes through the form: no category, a
@@ -5242,7 +5254,7 @@
     var result = commitExpense(e, null, { type:"none", amount:0 });
     if(!result.ok){ if(!save.explained) toast("Could not save — your money data was not changed"); return; }
     inboxDrawnAt = Date.now();
-    keepInboxPlace();
+    keepInboxPlace(x.id);
     render(); openInbox();
     var more = inboxNew().length;
     toastAction("Added " + fmt(e.amount) + " · " + cat(catId).name + (more ? " · " + more + " left" : ""), "Undo", function(){
@@ -5269,7 +5281,7 @@
         x.status = "dismissed";
         if(!save()){ x.status = "new"; return; }
         inboxDrawnAt = Date.now();
-        keepInboxPlace();
+        keepInboxPlace(x.id);
         render(); openInbox();
         toastAction("Skipped " + x.merchant, "Undo", function(){
           var it = inboxItem(x.id);
@@ -7332,6 +7344,7 @@ function importBackupFile(input){
         var fx = src.currency !== state.currency;
         return '<div class="mail-src">'+IC.receipt+'<span>From Gmail · '+esc(src.sender || src.merchant)+(src.subject ? ' — '+esc(src.subject) : '')+'</span></div>' +
           '<span data-prefilled hidden></span>' +
+          (src.verified === 0 ? '<div class="mail-fx" role="note">Gmail could not verify this sender — check it really comes from '+esc(src.sender || src.merchant)+' before saving.</div>' : '') +
           (fx ? '<div class="mail-fx" role="note">The receipt says <b>'+esc(src.currency)+' '+src.amount.toFixed(2)+'</b> — type what it cost in '+esc(state.currency)+' (your bank alert shows it).</div>' : '');
       })() +
       '<button class="photo-btn" id="f-photo"><span class="ic" id="f-photo-ic">'+IC.camera+'</span>' +
