@@ -536,7 +536,7 @@
 
   function isBankDomain(domain) {
     if (!domain) return false;
-    if (/bank|banque/.test(domain)) return true;
+    /* no "contains bank" shortcut: anyone can register cihbank-notif.com */
     for (var i = 0; i < BANK_DOMAINS.length; i++) {
       var d = BANK_DOMAINS[i];
       if (domain === d || domain.slice(-(d.length + 1)) === "." + d) return true;

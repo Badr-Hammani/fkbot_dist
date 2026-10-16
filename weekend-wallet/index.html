@@ -993,15 +993,15 @@
 <div id="toast" role="status"></div>
 <input type="file" accept="image/*" capture="environment" id="camera" hidden>
 
-<script src="scan.js?v=9.8"></script>
-<script src="mail-parse.js?v=9.8"></script>
-<script src="gmail.js?v=9.8"></script>
+<script src="scan.js?v=9.9"></script>
+<script src="mail-parse.js?v=9.9"></script>
+<script src="gmail.js?v=9.9"></script>
 <script>
 (function(){
   "use strict";
 
   /* ---------- data ---------- */
-  var APP_VERSION = "9.8";
+  var APP_VERSION = "9.9";
   var KEY = "weekend-wallet-v1";
   var BASE_CATS = [
     {id:"food",      name:"Food",      v:"--c-food"},
@@ -4871,17 +4871,32 @@
      name, just the domain */
   /* 1 = Gmail checked the sender's domain (DKIM or SPF pass), 0 = it checked
      and it did not pass, -1 = nothing to go on */
+  /* 1 = a KNOWN shop or bank domain (Glovo, CIH ...) that Gmail checked and
+     that passed for that exact domain; 0 = something to warn about: a known
+     domain that failed the check, or a display name claiming a known brand
+     ("CIH Bank" <x@gmail.com>, cihbank-notif.com); -1 = an ordinary sender
+     we know nothing about. A domain vouching for itself proves nothing. */
   function senderVerified(from, auth){
     auth = String(auth || "");
-    if(!auth) return -1;
     var f = String(from || "").slice(0, 300), at = f.lastIndexOf("@");
     var dom = at >= 0 ? f.slice(at + 1).replace(/[>\s].*$/, "").toLowerCase() : "";
-    if(!dom) return 0;
-    function same(d){ d = String(d || "").toLowerCase(); return d === dom || dom.slice(-(d.length + 1)) === "." + d || d.slice(-(dom.length + 1)) === "." + dom; }
+    var display = normMerchant(f.indexOf("<") > 0 ? f.slice(0, f.indexOf("<")) : "");
+    var brands = (window.MailParse && MailParse.SENDERS) || [];
+    function under(d, base){ return d === base || d.slice(-(base.length + 1)) === "." + base; }
+    var brand = null, claimed = null;
+    brands.forEach(function(b){
+      (b.domains || []).forEach(function(d){ if(!brand && dom && under(dom, String(d).toLowerCase())) brand = b; });
+      var nm = normMerchant(b.name || "");
+      if(!claimed && nm.length >= 4 && display && (" " + display + " ").indexOf(" " + nm + " ") >= 0) claimed = b;
+    });
+    if(!brand) return claimed ? 0 : -1;
+    if(!auth) return -1;
+    var bases = (brand.domains || []).map(function(d){ return String(d).toLowerCase(); });
+    function ok(d){ d = String(d || "").toLowerCase(); return bases.some(function(b){ return under(d, b); }); }
     var m, re = /dkim=pass[^;]{0,300}?header\.(?:i=@?|d=)([a-z0-9.-]{1,190})/gi;
-    while((m = re.exec(auth))) if(same(m[1])) return 1;
+    while((m = re.exec(auth))) if(ok(m[1])) return 1;
     re = /spf=pass[^;]{0,300}?smtp\.mailfrom=(?:[^@\s;]{0,64}@)?([a-z0-9.-]{1,190})/gi;
-    while((m = re.exec(auth))) if(same(m[1])) return 1;
+    while((m = re.exec(auth))) if(ok(m[1])) return 1;
     return 0;
   }
   function senderName(from){

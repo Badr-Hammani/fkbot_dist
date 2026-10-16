@@ -646,4 +646,26 @@ exports.run = async function (t, env) {
     t.eq("nothing saved yet", (await app.stored()).expenses.length, 0);
     await app.close();
   }
+
+  /* ---- loop 2 security: "verified" means a known brand, checked by Gmail ---- */
+  {
+    const mk = (id, from, auth, html) => {
+      const m = msg(id, from, "Paiement par carte", html || "<p>Paiement par carte ****4521 d'un montant de 77,00 MAD chez MARJANE le 13/10/2026.</p>");
+      if (auth) m.payload.headers.push({ name: "Authentication-Results", value: auth });
+      return m;
+    };
+    MAILS.v1 = mk("v1", "CIH Bank <alerts@gmail.com>", "mx.google.com; dkim=pass header.i=@gmail.com; spf=pass smtp.mailfrom=gmail.com");
+    MAILS.v2 = mk("v2", "CIH Bank <alertes@cihbank-notif.com>", "mx.google.com; dkim=pass header.i=@cihbank-notif.com");
+    MAILS.v3 = msg("v3", "Glovo <no-reply@glovoapp.com>", "Votre commande Glovo", "<p>Total : 61,00 MAD</p>");
+    MAILS.v3.payload.headers.push({ name: "Authentication-Results", value: "mx.google.com; dkim=pass header.i=@glovoapp.com" });
+    const app = await boot(browser, connected(), { now: NOW });
+    await fakeGoogle(app, { ids: ["v1", "v2", "v3"] });
+    await returnFromGoogle(app, "k".repeat(40));
+    ["v1", "v2", "v3"].forEach(k => delete MAILS[k]);
+    const inbox = (await app.stored()).inbox, ver = id => (inbox.find(x => x.id === id) || {}).verified;
+    t.eq("“CIH Bank” sending from gmail.com is flagged, though gmail.com checks out", ver("v1"), 0);
+    t.eq("a lookalike domain signing for itself is flagged", ver("v2"), 0);
+    t.eq("the real Glovo, checked by Gmail, is verified", ver("v3"), 1);
+    await app.close();
+  }
 };
