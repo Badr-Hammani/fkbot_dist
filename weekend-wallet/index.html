@@ -810,7 +810,7 @@
   .inbox-subject{color:var(--ink3)}
   .warn-txt{color:color-mix(in srgb, var(--warn) 75%, var(--ink)); font-weight:600}
   .inbox-actions{display:flex; align-items:center; gap:8px; margin-top:10px}
-  .inbox-cat{flex:1; min-width:0; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:600}
+  .inbox-cat{flex:1; min-width:0; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .inbox-cat.muted{color:var(--ink3); font-weight:500}
   .btn.sm{width:auto; flex:none; min-height:44px; padding:8px 18px; font-size:14px}
   .inbox-error{margin:6px 0 10px; padding:10px 12px; border-radius:14px; font-size:13.5px; line-height:1.45; overflow-wrap:anywhere;
@@ -958,9 +958,10 @@
   #toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
   #toast.action{pointer-events:auto; display:flex; align-items:center; gap:12px}
   #toast.action button{
-    background:var(--accent); color:var(--on-accent); font-weight:800; font-size:13px;
-    padding:6px 14px; border-radius:999px; flex:none;
+    background:var(--accent); color:var(--on-accent); font-weight:800; font-size:14px;
+    min-height:44px; min-width:64px; padding:6px 16px; border-radius:999px; flex:none;
   }
+  #toast.action{padding:4px 6px 4px 18px}
 
   #updatebar{
     position:fixed; top:0; left:0; right:0; z-index:200;
@@ -4979,7 +4980,8 @@
       if(sheet.classList.contains("show") && $("#inbox-list")) openInbox();
       else if(!auto && !sheet.classList.contains("show") && (found || failed || more)) openInbox();
       if(auto && !found) return;
-      toast(found ? found + " new transaction" + (found === 1 ? "" : "s") + " from Gmail" + (auto ? " — see Home" : "")
+      if(auto){ toastAction(found + " new from Gmail", "Review", openInbox, 10000); return; }
+      toast(found ? found + " new transaction" + (found === 1 ? "" : "s") + " from Gmail"
                   : failed || more ? "Gmail check not finished"
                   : "Gmail checked — nothing new" + (msgs.length ? " (" + msgs.length + " email" + (msgs.length === 1 ? "" : "s") + " weren’t transactions)" : ""));
     }).catch(function(err){
@@ -5113,8 +5115,15 @@
     return '<span class="inbox-cat"><span style="color:var('+c.v+'); display:inline-flex">'+catIcon(c.id)+'</span>'+esc(c.name)+
       (x.learned ? '<small class="learned">your usual</small>' : '')+'</span>';
   }
+  /* set by Add/Skip/Undo just before they redraw: where you were, so the
+     list does not jump back to the top after every row */
+  var inboxKeep = null;
+  function keepInboxPlace(){
+    if(sheet.classList.contains("show") && $("#inbox-list")) inboxKeep = { top: sheet.scrollTop };
+  }
   function openInbox(){
     var items = inboxNew(), cfg = gmailCfg();
+    var keep = inboxKeep; inboxKeep = null;
     if(!gmailError && cfg.autoNote) gmailError = cfg.autoNote + " Tap Sign in & check.";
     var rows = items.map(function(x){
       var foreign = x.currency !== state.currency;
@@ -5152,6 +5161,18 @@
       '<div id="inbox-list">' + (rows || '<div class="empty-mini">No transactions waiting.</div>') + '</div>'
     );
     if(gmailBusy) drawInboxStatus("Checking Gmail…");
+    if(keep){
+      /* after openSheet's own focus pass: back to where you were, focus on
+         the next row's first button rather than the Check button at the top */
+      requestAnimationFrame(function(){ requestAnimationFrame(function(){
+        sheet.scrollTop = keep.top;
+        var nextBtn = null;
+        sheet.querySelectorAll(".inbox-item .btn").forEach(function(b){
+          if(!nextBtn && b.getBoundingClientRect().top >= 0) nextBtn = b;
+        });
+        if(nextBtn) nextBtn.focus({ preventScroll:true });
+      }); });
+    }
     $("#inbox-check").addEventListener("click", function(){
       if(!inboxTapOK()) return;
       if(!cfg.clientId){ closeSheet(); tab = "settings"; render(); setTimeout(function(){ var g = $("#s-gmail-client"); if(g) g.scrollIntoView({ block:"center" }); }, 50); return; }
@@ -5183,7 +5204,9 @@
      you do not have) goes to the form instead. */
   function quickAddFromInbox(x){
     var catId = liveCat(x.cat);
-    if(!catId || x.currency !== state.currency || x.kind !== "debit"){ editFromInbox(x); return; }
+    /* anything the app is unsure of goes through the form: no category, a
+       foreign amount, a sender Gmail did not verify, a low-confidence read */
+    if(!catId || x.currency !== state.currency || x.kind !== "debit" || x.verified === 0 || x.confidence < 0.7){ editFromInbox(x); return; }
     var e = { id:uid(), ts:Date.now(), amount:x.amount, cat:catId, note:x.merchant, date:x.date, photo:null,
               loanId:"", loanAdded:0, fundingType:"", fundingPersonId:"", fundingPersonName:"", fundingAmount:0, fundingLogId:"",
               placeId:"", fuelLiters:0, odometer:0, mailId:x.id };
@@ -5191,6 +5214,7 @@
     var result = commitExpense(e, null, { type:"none", amount:0 });
     if(!result.ok){ if(!save.explained) toast("Could not save — your money data was not changed"); return; }
     inboxDrawnAt = Date.now();
+    keepInboxPlace();
     render(); openInbox();
     var more = inboxNew().length;
     toastAction("Added " + fmt(e.amount) + " · " + cat(catId).name + (more ? " · " + more + " left" : ""), "Undo", function(){
@@ -5201,7 +5225,7 @@
       render();
       if(sheet.classList.contains("show") && $("#inbox-list")) openInbox();
       toast("Undone — it’s back in the inbox");
-    }, 6000);
+    }, 10000);
   }
   /* a list that just redrew ignores taps for a moment: the second half of a
      double-tap otherwise lands on whatever button moved under the finger */
@@ -5216,6 +5240,7 @@
         x.status = "dismissed";
         if(!save()){ x.status = "new"; return; }
         inboxDrawnAt = Date.now();
+        keepInboxPlace();
         render(); openInbox();
         toastAction("Skipped " + x.merchant, "Undo", function(){
           var it = inboxItem(x.id);
@@ -5223,8 +5248,8 @@
           it.status = "new";
           if(!save()){ it.status = "dismissed"; return; }
           render();
-          if(sheet.classList.contains("show") && $("#inbox-list")) openInbox();
-        }, 6000);
+          if(sheet.classList.contains("show") && $("#inbox-list")){ keepInboxPlace(); openInbox(); }
+        }, 10000);
       });
     });
   }
@@ -5236,7 +5261,7 @@
     var cfg = gmailCfg();
     return '<div class="panel"><h3>'+IC.receipt+'Gmail receipts</h3>' +
       '<p>Reads receipt and bank emails (Glovo, Jumia, Careem, CIH…) and puts each payment in an inbox for you to confirm. ' +
-      'Gmail is read only when you tap Check Gmail (or when you open the app, if you switch that on below), read-only, on this phone. For each transaction the app keeps the amount, shop, date, sender’s name and subject line — never the email itself — plus the Gmail message ids it has looked at, so nothing is offered twice, and your Gmail address, so Google can skip the account chooser. ' +
+      'Gmail is read only when you ask it to check (or when you open the app, if you switch that on below), read-only, on this phone. For each transaction the app keeps the amount, shop, date, sender’s name and subject line — never the email itself — plus the Gmail message ids it has looked at, so nothing is offered twice, and your Gmail address, so Google can skip the account chooser. ' +
       'The Google sign-in lasts about an hour and is never saved.</p>' +
       '<details class="gmail-steps"'+(cfg.clientId ? '' : ' open')+'><summary>One-time setup (about 10 minutes, easier on a computer)</summary><ol>' +
         '<li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a>, sign in with the Gmail you want to read, and create a project (any name).</li>' +
@@ -5301,7 +5326,8 @@
     var sh = $("#s-gmail-share");
     if(sh) sh.addEventListener("click", function(){
       var text = "Weekend Wallet — Google Cloud client setup\nAuthorized JavaScript origin: " + location.origin +
-                 "\nAuthorized redirect URI: " + gmailRedirectUri();
+                 "\nAuthorized redirect URI: " + gmailRedirectUri() +
+                 "\n\nWhen Google shows the Client ID, send it back to your phone (e.g. message it to yourself) and paste it in Weekend Wallet → Settings → Gmail receipts.";
       if(navigator.share){ navigator.share({ title:"Weekend Wallet Gmail setup", text:text }).catch(function(){}); return; }
       if(navigator.clipboard && navigator.clipboard.writeText){
         navigator.clipboard.writeText(text).then(function(){ toast("Copied both — paste them into a message to yourself"); }, function(){ toast("Copy them one by one above"); });
@@ -5321,7 +5347,7 @@
       if(!window.confirm("Disconnect Gmail? The app forgets the Client ID, the sign-in and anything still waiting in the inbox. Expenses you already added stay.")) return;
       var tok = gmailToken;
       var cfg = gmailCfg(), before = { clientId:cfg.clientId, lastSec:cfg.lastSec, inbox:state.inbox, seen:state.mailSeen };
-      cfg.clientId = ""; cfg.lastSec = 0; cfg.auto = 0; cfg.autoFails = 0; cfg.autoNote = "";
+      cfg.clientId = ""; cfg.lastSec = 0; cfg.auto = 0; cfg.autoFails = 0; cfg.autoNote = ""; cfg.email = "";
       /* what came from the mailbox goes with it; the added expenses keep
          their mail ids, so reconnecting never offers them again */
       state.inbox = []; state.mailSeen = {};

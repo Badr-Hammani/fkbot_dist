@@ -611,4 +611,39 @@ exports.run = async function (t, env) {
     t.has("you can see it in the inbox", norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText)), "sender not verified by Gmail");
     await app.close();
   }
+
+  /* ---- loop 2 UX polish ---- */
+  {
+    const app = await boot(browser, connected({ inbox: [ { id: "L0", amount: 10, currency: "MAD", date: "2026-10-14", merchant: "Shop 0", sender: "S0", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+{ id: "L1", amount: 11, currency: "MAD", date: "2026-10-13", merchant: "Shop 1", sender: "S1", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+{ id: "L2", amount: 12, currency: "MAD", date: "2026-10-12", merchant: "Shop 2", sender: "S2", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+{ id: "L3", amount: 13, currency: "MAD", date: "2026-10-11", merchant: "Shop 3", sender: "S3", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+{ id: "L4", amount: 14, currency: "MAD", date: "2026-10-10", merchant: "Shop 4", sender: "S4", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+{ id: "L5", amount: 15, currency: "MAD", date: "2026-10-09", merchant: "Shop 5", sender: "S5", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+{ id: "L6", amount: 16, currency: "MAD", date: "2026-10-08", merchant: "Shop 6", sender: "S6", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+{ id: "L7", amount: 17, currency: "MAD", date: "2026-10-07", merchant: "Shop 7", sender: "S7", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+{ id: "L8", amount: 18, currency: "MAD", date: "2026-10-06", merchant: "Shop 8", sender: "S8", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+{ id: "L9", amount: 19, currency: "MAD", date: "2026-10-05", merchant: "Shop 9", sender: "S9", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+{ id: "L10", amount: 20, currency: "MAD", date: "2026-10-14", merchant: "Shop 10", sender: "S10", status: "new", kind: "debit", cat: "food", confidence: 0.9 },
+{ id: "L11", amount: 21, currency: "MAD", date: "2026-10-13", merchant: "Shop 11", sender: "S11", status: "new", kind: "debit", cat: "food", confidence: 0.9 } ] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    await app.page.evaluate(() => { const sh = document.querySelector("#sheet"); sh.scrollTop = 700; });
+    await app.page.waitForTimeout(100);
+    const id = await app.page.evaluate(() => { const b = [...document.querySelectorAll("[data-inbox-add]")].find(b => b.getBoundingClientRect().top > 0); return b.getAttribute("data-inbox-add"); });
+    await app.page.evaluate(i => document.querySelector('[data-inbox-add="' + i + '"]').click(), id);
+    await app.page.waitForTimeout(500);
+    t.ok("the list keeps your place after an Add", await app.page.evaluate(() => document.querySelector("#sheet").scrollTop > 300));
+    const h = await app.page.evaluate(() => { const b = document.querySelector("#toast button"); return b ? b.getBoundingClientRect().height : 0; });
+    t.ok("Undo is a full-size target", h >= 44, "height " + h);
+    await app.close();
+  }
+  {
+    const app = await boot(browser, connected({ inbox: [
+      { id: "nv", amount: 40, currency: "MAD", date: "2026-10-13", merchant: "Glovo", sender: "Glovo", status: "new", kind: "debit", cat: "food", confidence: 0.9, verified: 0 } ] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    await app.page.click('[data-inbox-add="nv"]'); await app.page.waitForTimeout(400);
+    t.ok("a sender Gmail did not verify is never saved in one tap", await app.page.evaluate(() => !!document.querySelector("#f-save")));
+    t.eq("nothing saved yet", (await app.stored()).expenses.length, 0);
+    await app.close();
+  }
 };
