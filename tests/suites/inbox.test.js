@@ -722,4 +722,53 @@ exports.run = async function (t, env) {
     t.eq("a confident row says Add", (await app.page.textContent('[data-inbox-add="r2"]')).trim(), "Add");
     await app.close();
   }
+
+  /* ---- loop 4: the safety net -- whatever the parser says ---- */
+  {
+    /* the parser may (wrongly) accept these; the app must still not one-tap them */
+    MAILS.n1 = msg("n1", "CIH Bank <alertes@cihbank.ma>", "Alerte carte", "<p>Paiement par carte ****4521 d'un montant de 899,00 MAD chez AMAZON le 13/10/2026. Transaction non autorisée.</p>");
+    MAILS.n2 = msg("n2", "Glovo <no-reply@glovoapp.com>", "Votre commande Glovo", "<p>Total : 78,00 MAD</p><p>Your order has been cancelled. You will not be charged.</p>");
+    MAILS.n3 = msg("n3", "inwi <facturation@inwi.ma>", "Votre facture inwi", "<p>Votre facture est disponible. Total : 199,00 DH. Date limite de paiement : 30/10/2026.</p>");
+    const app = await boot(browser, connected(), { now: NOW });
+    await fakeGoogle(app, { ids: ["n1", "n2", "n3"] });
+    await returnFromGoogle(app, "q".repeat(40));
+    ["n1", "n2", "n3"].forEach(k => delete MAILS[k]);
+    const s = await app.stored();
+    for (const id of ["n1", "n2", "n3"]) {
+      const it = s.inbox.find(x => x.id === id);
+      if (!it) { t.ok("“" + id + "” not offered at all (also safe)", true); continue; }
+      t.ok("“" + id + "” is marked for a second look (" + it.caution + ")", !!it.caution);
+      const label = (await app.page.textContent('[data-inbox-add="' + id + '"]').catch(() => "")).trim();
+      t.eq("and its button says Review, not Add", label, "Review");
+    }
+    await app.close();
+  }
+  {
+    /* money in is never a dead end */
+    const app = await boot(browser, connected({ inbox: [
+      { id: "mi", amount: 900, currency: "MAD", date: "2026-10-13", merchant: "Rachid", sender: "CIH Bank", status: "new", kind: "credit", cat: "", confidence: 0.85 } ] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    await app.page.click('[data-inbox-edit="mi"]'); await app.page.waitForTimeout(400);
+    t.eq("“It was an expense” opens it as one", await app.page.inputValue("#f-amount"), "900");
+    await app.close();
+  }
+  {
+    /* security lows: lookalike letters in a display name, a pass hidden in a comment */
+    const v = await (async () => {
+      const app = await boot(browser, connected(), { now: NOW });
+      const r = await app.page.evaluate(() => 0);
+      await app.close(); return r;
+    })();
+    MAILS.w1 = msg("w1", "Gl\u043evo <orders@freemail.example>", "Votre commande", "<p>Total : 40,00 MAD</p>");
+    MAILS.w2 = msg("w2", "Glovo <no-reply@glovoapp.com>", "Votre commande Glovo", "<p>Total : 41,00 MAD</p>");
+    MAILS.w2.payload.headers.push({ name: "Authentication-Results", value: "mx.google.com; dkim=fail (dkim=pass header.i=@glovoapp.com) header.i=@evil.example" });
+    const app = await boot(browser, connected(), { now: NOW });
+    await fakeGoogle(app, { ids: ["w1", "w2"] });
+    await returnFromGoogle(app, "r".repeat(40));
+    ["w1", "w2"].forEach(k => delete MAILS[k]);
+    const inbox = (await app.stored()).inbox, ver = id => (inbox.find(x => x.id === id) || {}).verified;
+    t.eq("a Cyrillic “о” in “Glovo” is still caught as a claim", ver("w1"), 0);
+    t.eq("a pass written inside a comment does not count", ver("w2"), 0);
+    await app.close();
+  }
 };

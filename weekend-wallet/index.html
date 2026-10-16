@@ -1272,6 +1272,7 @@
                subject:String(x.subject || "").slice(0, 120), date:x.date,
                cat: INBOX_CATS.indexOf(x.cat) >= 0 || /^u[a-z0-9]{3,20}$/.test(String(x.cat || "")) ? x.cat : "",
                learned: x.learned ? 1 : 0, verified: x.verified === 1 ? 1 : x.verified === 0 ? 0 : -1,
+               caution: /^(declined|cancelled|pending|not paid yet)$/.test(String(x.caution || "")) ? x.caution : "",
                source:String(x.source || "").slice(0, 20),
                confidence: Math.min(Math.max(+x.confidence || 0, 0), 1),
                status: x.status === "added" || x.status === "dismissed" ? x.status : "new",
@@ -4878,18 +4879,35 @@
      domain that failed the check, or a display name claiming a known brand
      ("CIH Bank" <x@gmail.com>, cihbank-notif.com); -1 = an ordinary sender
      we know nothing about. A domain vouching for itself proves nothing. */
+  /* brand names spelled to fool the eye: compatibility forms, zero-width and
+     spacing, and the Cyrillic/Greek letters that look Latin */
+  var LOOKALIKE = { "\u0430":"a","\u0435":"e","\u043e":"o","\u0440":"p","\u0441":"c","\u0445":"x","\u0443":"y","\u0456":"i","\u0458":"j","\u043a":"k","\u043c":"m","\u0442":"t","\u0432":"b","\u043d":"h",
+                    "\u03bf":"o","\u03b1":"a","\u03b5":"e","\u03b9":"i","\u03ba":"k","\u03bd":"v","\u03c1":"p","\u03c4":"t","\u03c5":"u","\u03c7":"x" };
+  function plainName(s){
+    var t = String(s || "").slice(0, 120);
+    try{ t = t.normalize("NFKC"); }catch(e){}
+    t = t.toLowerCase().replace(/[\u200b-\u200f\u2060\ufeff]/g, "").replace(/./g, function(ch){ return LOOKALIKE[ch] || ch; });
+    return normMerchant(t);
+  }
   function senderVerified(from, auth){
-    auth = String(auth || "");
-    var f = String(from || "").slice(0, 300), at = f.lastIndexOf("@");
-    var dom = at >= 0 ? f.slice(at + 1).replace(/[>\s].*$/, "").toLowerCase() : "";
-    var display = normMerchant(f.indexOf("<") > 0 ? f.slice(0, f.indexOf("<")) : "");
+    /* Google's verdict without its comments: "(...)" can carry any text */
+    auth = String(auth || "").replace(/\([^()]{0,300}\)/g, " ");
+    var f = String(from || "").slice(0, 300).replace(/\([^()]{0,200}\)/g, " ");
+    /* the domain of the real address -- inside <...> when there is one */
+    var lt = f.lastIndexOf("<"), gt = f.indexOf(">", lt);
+    var addr = lt >= 0 && gt > lt ? f.slice(lt + 1, gt) : f;
+    var at = addr.lastIndexOf("@");
+    var dom = at >= 0 ? addr.slice(at + 1).replace(/[>\s].*$/, "").toLowerCase() : "";
+    var display = plainName(f.indexOf("<") > 0 ? f.slice(0, f.indexOf("<")) : "");
+    var displayTight = display.replace(/\s+/g, "");
     var brands = (window.MailParse && MailParse.SENDERS) || [];
     function under(d, base){ return d === base || d.slice(-(base.length + 1)) === "." + base; }
     var brand = null, claimed = null;
     brands.forEach(function(b){
       (b.domains || []).forEach(function(d){ if(!brand && dom && under(dom, String(d).toLowerCase())) brand = b; });
       var nm = normMerchant(b.name || "");
-      if(!claimed && nm.length >= 4 && display && (" " + display + " ").indexOf(" " + nm + " ") >= 0) claimed = b;
+      if(!claimed && nm.length >= 4 && display &&
+         ((" " + display + " ").indexOf(" " + nm + " ") >= 0 || displayTight.indexOf(nm.replace(/\s+/g, "")) >= 0)) claimed = b;
     });
     if(!brand) return claimed ? 0 : -1;
     if(!auth) return -1;
@@ -4967,12 +4985,14 @@
         var shop = String(t.merchant || senderName(m.from)).slice(0, 40);
         var fallbackName = !t.merchant || ((t.source === "cih" || t.source === "generic") && normMerchant(shop) === normMerchant(senderName(m.from)));
         var usual = ver !== 0 && !fallbackName ? learnedCat(shop, mem) : "";
+        var plain = String(m.text || "").length > 40 ? m.text : ((window.MailParse && MailParse.htmlToText) ? MailParse.htmlToText(String(m.html || "").slice(0, 300000)) : "");
+        var caution = cautionOf(m.subject, plain);
         state.inbox.push({ id:m.id, amount:Math.round(t.amount * 100) / 100, currency:t.currency || "MAD",
           kind:t.kind || "debit", merchant:String(t.merchant || senderName(m.from)).slice(0, 40),
           sender:senderName(m.from), subject:String(m.subject || "").slice(0, 120),
           date: ISO_RE.test(String(t.date || "")) && t.date <= today ? t.date : today,
           cat: usual || (INBOX_CATS.indexOf(t.cat) >= 0 ? t.cat : ""),
-          learned: usual ? 1 : 0, verified: ver, source:t.source || "", confidence:t.confidence,
+          learned: usual ? 1 : 0, verified: ver, caution: caution, source:t.source || "", confidence:t.confidence,
           status:"new", expenseId:"", ts:Date.now() });
         found++;
       });
@@ -5009,6 +5029,8 @@
       else if(!auto && !sheet.classList.contains("show") && (found || failed || more)) openInbox();
       if(auto && !found) return;
       if(auto){ toastAction(found + " new from Gmail", "Review", openInbox, 10000); return; }
+      var undoUp = $("#toast") && $("#toast").classList.contains("action") && $("#toast").classList.contains("show");
+      if(undoUp) return;                   /* the inbox already shows it; keep the Undo */
       toast(found ? found + " new transaction" + (found === 1 ? "" : "s") + " from Gmail"
                   : failed || more ? "Gmail check not finished"
                   : "Gmail checked — nothing new" + (msgs.length ? " (" + msgs.length + " email" + (msgs.length === 1 ? "" : "s") + " weren’t transactions)" : ""));
@@ -5165,6 +5187,7 @@
         '<div class="inbox-sub">'+esc(fromIso(x.date).toLocaleDateString(undefined, { weekday:"short", day:"numeric", month:"short" }))+
           (x.sender && x.sender.toLowerCase() !== x.merchant.toLowerCase() ? ' · '+esc(x.sender) : '')+
           (x.verified === 0 ? ' · <span class="warn-txt">sender not verified by Gmail</span>'
+            : x.caution ? ' · <span class="warn-txt">'+esc(cautionText(x.caution))+'</span>'
             : x.confidence < 0.7 ? ' · <span class="warn-txt">check the amount</span>' : '')+'</div>' +
         (function(){
           var tw = inboxTwins(x);
@@ -5173,7 +5196,8 @@
         (x.subject ? '<div class="inbox-subject">'+esc(x.subject)+'</div>' : '') +
         (foreign ? '<div class="inbox-subject warn-txt">In '+esc(x.currency)+' — change the amount to '+esc(state.currency)+' when you add it</div>' : '') +
         '<div class="inbox-actions">' + (moneyIn
-          ? '<span class="inbox-cat muted">Money in — not an expense</span>'
+          ? '<span class="inbox-cat muted">Money in</span>' +
+            '<button class="btn ghost sm" data-inbox-edit="'+esc(x.id)+'" aria-label="'+esc(x.merchant)+' was really an expense — open it">It was an expense</button>'
           : inboxCatChip(x) +
             /* one tap when everything is known; otherwise Add opens the form */
             (oneTapOK(x)
@@ -5239,7 +5263,28 @@
      you do not have) goes to the form instead. */
   /* one tap only when nothing needs a second look */
   function oneTapOK(x){
-    return !!liveCat(x.cat) && x.currency === state.currency && x.kind === "debit" && x.verified !== 0 && x.confidence >= 0.8;
+    return !!liveCat(x.cat) && x.currency === state.currency && x.kind === "debit" && x.verified !== 0 && x.confidence >= 0.8 && !x.caution;
+  }
+  /* Independent of the parser, on purpose: wording that says the money did
+     not (yet) leave -- declined, blocked, cancelled, pending, a bill still to
+     pay, a charge to come. A match never drops the email; it only takes
+     away the one-tap Add and says what to check. Returns a short reason. */
+  var CAUTION = [
+    ["declined", /non\s+autoris|refus[ée]|rejet[ée]|d[ée]clin|declined|unsuccessful|not\s+(?:been\s+)?processed|could\s*n.?t\s+process|n.?a\s+(?:pas\s+)?pu\s+[êe]tre|n.?est\s+pas\s+pass|[ée]chou[ée]|[ée]chec\s+(?:de|du)\s+paiement|payment\s+failed|failed\s+payment|(?:^|[^déa-z])bloqu[ée]|blocked|probl[èe]me\s+avec\s+votre\s+(?:moyen|mode)\s+de\s+paiement|problem\s+with\s+your\s+payment|impay[ée]/i],
+    ["cancelled", /annul[ée]e?s?\b|cancel+ed|will\s+not\s+be\s+charged|ne\s+sera\s+pas\s+d[ée]bit|no\s+charge\s+(?:was|will\s+be)\s+made/i],
+    ["pending", /en\s+attente|pending|pr[ée][\s-]?autoris|empreinte\s+bancaire|authori[sz]ation\s+hold|hold\s+of/i],
+    ["not paid yet", /montant\s+(?:[àa]\s+payer|d[ûu])|reste\s+[àa]\s+payer|total\s+[àa]\s+payer[^.\n]{0,80}(?:avant|date\s+limite|[ée]ch[ée]ance)|amount\s+due|balance\s+due|date\s+limite|due\s+date|facture\s+(?:est\s+)?disponible|your\s+bill\s+is\s+ready|sera\s+pr[ée]lev|will\s+be\s+(?:charged|debited)|prochain\s+pr[ée]l[èe]vement|upcoming\s+(?:payment|charge)|paierez|pay\s+(?:at|on)\s+(?:the\s+)?(?:property|arrival|pickup)|on\s+arrival|(?:payer|r[ée]gler|paiement)\s+sur\s+place|[àa]\s+la\s+livraison|on\s+delivery/i]
+  ];
+  function cautionText(c){
+    return c === "declined" ? "may say the payment was declined"
+         : c === "cancelled" ? "may say it was cancelled"
+         : c === "pending" ? "may say it is still pending"
+         : "may not be paid yet";
+  }
+  function cautionOf(subject, text){
+    var t = (String(subject || "") + "\n" + String(text || "")).slice(0, 30000).replace(/[\u2019\u2018\u02bc]/g, "'");
+    for(var i = 0; i < CAUTION.length; i++) if(CAUTION[i][1].test(t)) return CAUTION[i][0];
+    return "";
   }
   function quickAddFromInbox(x){
     var catId = liveCat(x.cat);
@@ -5397,8 +5442,9 @@
       /* tell Google too, so the token stops working now rather than in an hour */
       if(tok && tok.token && window.fetch){
         try{
-          fetch("https://oauth2.googleapis.com/revoke", { method:"POST",
-            headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body:"token=" + encodeURIComponent(tok.token) }).catch(function(){});
+          /* through the fetch gmail.js captured at load, like every token use */
+          (GmailSync.revoke ? GmailSync.revoke(tok.token) : fetch("https://oauth2.googleapis.com/revoke", { method:"POST",
+            headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body:"token=" + encodeURIComponent(tok.token) })).catch(function(){});
         }catch(e){}
       }
       render(); toast("Gmail disconnected");
@@ -7344,6 +7390,7 @@ function importBackupFile(input){
         var fx = src.currency !== state.currency;
         return '<div class="mail-src">'+IC.receipt+'<span>From Gmail · '+esc(src.sender || src.merchant)+(src.subject ? ' — '+esc(src.subject) : '')+'</span></div>' +
           '<span data-prefilled hidden></span>' +
+          (src.caution ? '<div class="mail-fx" role="note">This email '+esc(cautionText(src.caution))+' — check the money really left before saving.</div>' : '') +
           (src.verified === 0 ? '<div class="mail-fx" role="note">Gmail could not verify this sender — check it really comes from '+esc(src.sender || src.merchant)+' before saving.</div>' : '') +
           (fx ? '<div class="mail-fx" role="note">The receipt says <b>'+esc(src.currency)+' '+src.amount.toFixed(2)+'</b> — type what it cost in '+esc(state.currency)+' (your bank alert shows it).</div>' : '');
       })() +

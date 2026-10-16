@@ -376,6 +376,18 @@
     });
   }
 
+  /* Disconnect: tell Google the token is finished -- through the same fetch
+     captured at load, never one a later script could have wrapped */
+  function revoke(token, opts) {
+    var f = pickFetch(opts);
+    if (!f || !token) return Promise.resolve(false);
+    return f("https://oauth2.googleapis.com/revoke", {
+      method: "POST", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "token=" + encodeURIComponent(token)
+    }).then(function (r) { return !!(r && r.ok); }, function () { return false; });
+  }
+
   function getMessage(token, id, opts) {
     if (!id) return Promise.reject(err("http", "Message id is required", 0));
     var url = API + "/" + encodeURIComponent(id) + "?format=full";
@@ -490,6 +502,7 @@
     buildQuery: buildQuery,
     listIds: listIds,
     getProfile: getProfile,
+    revoke: revoke,
     getMessage: getMessage,
     fetchNew: fetchNew,
     /* internals, exposed for tests */
