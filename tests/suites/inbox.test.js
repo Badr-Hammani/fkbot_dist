@@ -697,4 +697,18 @@ exports.run = async function (t, env) {
     t.ok("a read the app is only fairly sure of goes through the form", await app.page.evaluate(() => !!document.querySelector("#f-save")));
     await app.close();
   }
+
+  /* ---- a newer parser gets a second look at what an older one ignored ---- */
+  {
+    const app = await boot(browser, connected({ gmail: { clientId: CLIENT, lastSec: Math.floor(Date.parse(NOW) / 1000) - 3600, parserVer: "3" },
+      mailSeen: { g1: -1790000000000, c1: 1790000000000 } }), { now: NOW });
+    const calls = await fakeGoogle(app, { ids: ["g1", "c1"] });
+    await returnFromGoogle(app, "p".repeat(40));
+    const s = await app.stored();
+    t.eq("the email the old parser ignored is fetched again", calls.get, 1);
+    t.ok("and offered now", s.inbox.some(x => x.id === "g1"));
+    t.eq("the parser version is recorded", s.gmail.parserVer, require(require("path").join(require("../harness").APP_DIR, "mail-parse.js")).VERSION);
+    t.ok("and the window reached back a month for it", calls.urls.some(u => { const m = decodeURIComponent(u).match(/after:(\d+)/); return m && +m[1] < Date.parse(NOW) / 1000 - 20 * 86400; }));
+    await app.close();
+  }
 };

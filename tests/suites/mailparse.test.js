@@ -313,7 +313,9 @@ exports.run = async function (t) {
     ["Virement en votre faveur de 4 000,00 MAD.", 4000],
     ["Virement entrant de 2 500,00 MAD.", 2500],
     ["Réception d'un virement de 900,00 MAD.", 900],
-    ["Un virement de 750,00 MAD a été reçue.", 750]
+    /* a bare "a été reçu" is ambiguous ("votre paiement … a bien été reçu" is a
+       debit), so the seventh phrasing names the receiving side */
+    ["Virement de 750,00 MAD reçu sur votre compte.", 750]
   ];
   for (const [text, amt] of incoming) {
     const r = parseMail(cihMail(text));
@@ -366,6 +368,58 @@ exports.run = async function (t) {
   const recharge = parseMail(mail({ from: "inwi <noreply@inwi.ma>", subject: "Confirmation de recharge",
     text: "Votre recharge de 50 DH a été effectuée avec succès. 10 DH offerts !" }));
   t.eq("R3.4 inwi recharge with '10 DH offerts' → 50", recharge && recharge.amount + " " + recharge.merchant, "50 inwi");
+
+  /* ===== round 4: loop-2 QA corpus (synthetic, constructed by QA) ===== */
+  t.eq("R4 VERSION is the string '4'", M.VERSION, "4");
+  const R4CIH = "CIH Bank <alertes@cihbank.ma>";
+  const r4 = (from, subject, text) => parseMail(mail({ from, subject, text }));
+  const r4kind = (r) => (r ? r.kind + " " + r.amount + " " + r.currency : "null");
+  const r4cases = [
+    /* credit over-firing: each is a debit */
+    [R4CIH, "Virement émis", "Reçu de virement : votre virement de 1 500,00 MAD vers M. KARIM ALAMI a été envoyé le 14/10/2026.", "debit 1500 MAD"],
+    [R4CIH, "Confirmation de virement", "Votre virement de 2 000,00 MAD a été effectué avec succès, reçu n° 88123 disponible dans CIH Mobile.", "debit 2000 MAD"],
+    [R4CIH, "Transfer", "Your transfer of MAD 900.00 to YOUSSEF has been sent. Receipt received by beneficiary bank.", "debit 900 MAD"],
+    [R4CIH, "Virement instantané", "Votre virement instantané de 400,00 MAD a été reçu par le bénéficiaire HAMZA.", "debit 400 MAD"],
+    [R4CIH, "Virement permanent", "Le virement permanent de 1 000,00 MAD en faveur de LOYER RIAD a été exécuté le 14/10/2026.", "debit 1000 MAD"],
+    [R4CIH, "Paiement", "Nous avons reçu votre ordre de virement de 600,00 MAD vers RACHID.", "debit 600 MAD"],
+    [R4CIH, "Alerte", "Paiement de 250,00 MAD reçu par CARREFOUR le 14/10/2026.", "debit 250 MAD"],
+    [R4CIH, "Virement", "Virement de 500,00 MAD vers SALMA : reçu disponible.", "debit 500 MAD"],
+    ["Lydec <noreply@lydec.ma>", "Paiement de facture", "Votre paiement par carte de 350,00 MAD a bien été reçu. Merci.", "debit 350 MAD"],
+    /* real credits stay credits */
+    [R4CIH, "Virement reçu", "Un virement de 3 000,00 MAD a été reçu sur votre compte de la part de ATLAS SARL.", "credit 3000 MAD"],
+    [R4CIH, "Avis de crédit", "Votre compte a été crédité de 1 200,00 MAD (virement de M. TAZI).", "credit 1200 MAD"],
+    [R4CIH, "Avis d'opération", "Votre compte a été crédité d'un virement de 4 200,00 MAD émis par ONEE.", "credit 4200 MAD"],
+    [R4CIH, "Avis d'opération", "Versement espèces de 2 000,00 MAD sur votre compte le 14/10/2026.", "credit 2000 MAD"],
+    /* failed payments: the conditional exemption covers only the what-if sub-clause */
+    ["Jumia <noreply@jumia.ma>", "Votre commande Jumia n° 22113", "Malheureusement, votre paiement de 450,00 Dhs a été refusé, si le problème persiste contactez votre banque.", "null"],
+    ["Netflix <info@mailer.netflix.com>", "Update your account", "Your payment of €13.49 was declined — if you'd like to keep watching, update your card.", "null"],
+    ["Netflix <info@mailer.netflix.com>", "Your account", "We couldn't process your payment of €13.49, so if you want to keep watching please update it.", "null"],
+    [R4CIH, "Alerte", "Votre paiement de 89,00 MAD chez KFC a échoué, si besoin contactez le 0522 47 47 47.", "null"],
+    [R4CIH, "Opération rejetée", "Votre paiement de 300,00 MAD chez MARJANE n'a pas été accepté lorsque le solde était insuffisant.", "null"],
+    [R4CIH, "Alerte", "Tentative de paiement de 1 200,00 MAD chez JUMIA rejetée.", "null"],
+    [R4CIH, "Alerte", "Paiement de 89,00 MAD chez KFC non abouti.", "null"],
+    ["Jumia <noreply@jumia.ma>", "Votre commande", "Votre commande n° 223 de 450,00 Dhs est annulée car le paiement a été refusé, lorsque vous serez prêt réessayez.", "null"],
+    ["Spotify <no-reply@spotify.com>", "Votre reçu Spotify", "Total 59,99 DH. Payé avec Visa ****1234. En cas de paiement refusé, votre abonnement sera suspendu.", "debit 59.99 MAD"],
+    ["Glovo <no-reply@glovoapp.com>", "Votre reçu Glovo", "Total payé 94,00 MAD. Si votre paiement a échoué, aucun montant ne sera débité.", "debit 94 MAD"],
+    ["Uber Receipts <noreply@uber.com>", "Your trip receipt", "Total 45,00 MAD. If your card is declined, we will retry the charge.", "debit 45 MAD"],
+    /* deposits and balances */
+    ["Booking.com <noreply@booking.com>", "Réservation confirmée", "Prix total 1 500,00 MAD. Payé aujourd'hui 500,00 MAD. Reste à payer à l'hôtel 1 000,00 MAD.", "debit 500 MAD"],
+    ["Riad Yasmine <contact@riadyasmine.ma>", "Confirmation de réservation", "Montant réglé : 400,00 MAD. Reste à payer : 800,00 MAD.", "debit 400 MAD"],
+    ["Amazon.fr <confirmation-commande@amazon.fr>", "Votre commande Amazon.fr", "Total de la commande : EUR 45,90. Solde restant de votre carte cadeau : EUR 10,00.", "debit 45.9 EUR"],
+    ["Amazon.com <auto-confirm@amazon.com>", "Your Amazon.com order", "Order Total: $59.99. Gift card balance remaining: $15.00.", "debit 59.99 USD"],
+    ["Careem <no-reply@careem.com>", "Your ride receipt", "Total MAD 32.50. Careem Pay balance remaining MAD 12.00.", "debit 32.5 MAD"],
+    ["Hotel Atlas <reservations@hotelatlas.ma>", "Confirmation", "Total séjour : 3 000,00 MAD. Arrhes : 900,00 MAD. Solde à régler sur place : 2 100,00 MAD.", "debit 900 MAD"],
+    ["Jumia <noreply@jumia.ma>", "Paiement en plusieurs fois", "Première échéance payée : 300,00 Dhs. Montant restant : 600,00 Dhs.", "debit 300 MAD"],
+    ["Jumia <noreply@jumia.ma>", "Confirmation de commande", "Total 1 200,00 Dhs. Acompte versé 200,00 Dhs. Reste à payer à la livraison 1 000,00 Dhs.", "debit 200 MAD"],
+    /* not yet paid */
+    ["Booking.com <noreply@booking.com>", "Booking confirmed", "Total price MAD 2,400. You'll pay MAD 2,400 at the property.", "null"],
+    ["Jumia <noreply@jumia.ma>", "Commande confirmée", "Merci pour votre commande. Montant à payer à la livraison : 349,00 Dhs.", "null"],
+    ["inwi <noreply@inwi.ma>", "Votre facture", "Votre facture de 199,00 DH sera prélevée le 25/10/2026.", "null"],
+    ["Spotify <no-reply@spotify.com>", "Your invoice", "Your invoice of 59,99 DH will be charged on 20/10/2026.", "null"],
+    ["Apple <no_reply@email.apple.com>", "Your subscription is ending soon", "Your free trial of Apple TV+ ends on Oct 20. You'll be charged $9.99 per month.", "null"],
+    ["Apple <no_reply@email.apple.com>", "Your receipt from Apple.", "Apple TV+ Monthly $9.99. Renews 14 Nov 2026. TOTAL $9.99", "debit 9.99 USD"]
+  ];
+  for (const [from, subject, text, want] of r4cases) t.eq("R4 " + subject + " | " + text.slice(0, 50), r4kind(r4(from, subject, text)), want);
 
   /* --- robustness --- */
   const weird = [undefined, null, 42, "x", {}, { from: null, subject: null, text: null, html: null },
