@@ -145,7 +145,7 @@ exports.run = async function (t) {
 
   /* --- amount formats --- */
   const nb = parseMail(mail({ from: "inwi <factures@inwi.ma>", subject: "Votre facture",
-    text: "Votre facture du mois est disponible.\nMontant total : 1 234,56 DH" }));
+    text: "Merci pour votre paiement.\nMontant total : 1 234,56 DH" }));
   t.eq("'1 234,56 DH' with NBSP thousands", field(nb, "amount"), 1234.56);
   const thin = parseMail(mail({ from: "Jumia <noreply@jumia.ma>", subject: "Confirmation de commande",
     text: "Votre commande a été confirmée.\nTotal payé : 2 499,00 Dhs" }));
@@ -204,7 +204,9 @@ exports.run = async function (t) {
   t.eq("R2.2 'Montant TTC' beats 'Montant HT'", field(parseMail(mail({ from: "Lydec <facture@lydec.example>", subject: "Votre facture d'électricité",
     text: "Facture n° 123456\nMontant HT : 250,00 MAD\nMontant TTC : 287,50 MAD" })), "amount"), 287.5);
   t.eq("R2.2 'Montant à régler'", field(parseMail(mail({ from: "Orange <noreply@orange.ma>", subject: "Votre facture",
-    text: "Votre facture est disponible\nMontant à régler : 149,00 DH" })), "amount"), 149);
+    text: "Paiement reçu, merci.\nMontant à régler : 149,00 DH" })), "amount"), 149);
+  t.eq("R2.2 (round 5) the same bill merely 'disponible' is not a payment → null", parseMail(mail({ from: "Orange <noreply@orange.ma>", subject: "Votre facture",
+    text: "Votre facture est disponible\nMontant à régler : 149,00 DH" })), null);
 
   /* 3. bank phrasings */
   const ecom = parseMail(mail({ from: "Alertes <alertes@banque-exemple.example>", subject: "Alerte opération",
@@ -370,7 +372,7 @@ exports.run = async function (t) {
   t.eq("R3.4 inwi recharge with '10 DH offerts' → 50", recharge && recharge.amount + " " + recharge.merchant, "50 inwi");
 
   /* ===== round 4: loop-2 QA corpus (synthetic, constructed by QA) ===== */
-  t.eq("R4 VERSION is the string '4'", M.VERSION, "4");
+  t.eq("VERSION is the string '5'", M.VERSION, "5");
   const R4CIH = "CIH Bank <alertes@cihbank.ma>";
   const r4 = (from, subject, text) => parseMail(mail({ from, subject, text }));
   const r4kind = (r) => (r ? r.kind + " " + r.amount + " " + r.currency : "null");
@@ -420,6 +422,58 @@ exports.run = async function (t) {
     ["Apple <no_reply@email.apple.com>", "Your receipt from Apple.", "Apple TV+ Monthly $9.99. Renews 14 Nov 2026. TOTAL $9.99", "debit 9.99 USD"]
   ];
   for (const [from, subject, text, want] of r4cases) t.eq("R4 " + subject + " | " + text.slice(0, 50), r4kind(r4(from, subject, text)), want);
+
+  /* ===== round 5: loop-3 QA corpus (synthetic, written by QA) — money not
+     taken, by meaning; transfer direction; missed top-ups and transfers ===== */
+  const R5CIH = "CIH BANK <notifications@cihbank.ma>";
+  const r5cases = [
+    /* declined / blocked / unauthorised / not completed */
+    [R5CIH, "Transaction non autorisée", "Transaction non autorisée : 899,00 MAD chez AMAZON EU SARL. Carte temporairement bloquée.", "null"],
+    [R5CIH, "Alerte", "Votre paiement de 250,00 MAD chez KFC a été bloqué par mesure de sécurité.", "null"],
+    [R5CIH, "Opération", "Le prélèvement de 312,40 MAD n'a pu être effectué.", "null"],
+    [R5CIH, "Prélèvement impossible", "Votre prélèvement de 312,40 MAD (LYDEC) n'a pas pu être exécuté faute de provision suffisante.", "null"],
+    ["Netflix <info@account.netflix.com>", "Problème avec votre paiement", "Votre paiement de 65,00 MAD n'est pas passé. Merci de vérifier vos informations bancaires.", "null"],
+    ["Netflix <info@account.netflix.com>", "Mettez à jour vos informations de paiement", "Nous rencontrons un problème avec votre mode de paiement. Montant dû : 65,00 MAD.", "null"],
+    ["Netflix <info@account.netflix.com>", "Votre abonnement est suspendu", "Nous n'avons pas reçu votre paiement de 65,00 MAD. Votre compte est suspendu.", "null"],
+    /* cancelled */
+    ["Glovo <receipts@glovoapp.com>", "Ta commande a été annulée", "Ta commande chez Tacos de Lyon a été annulée. Aucun montant n'a été débité de ta carte (78,00 MAD).", "null"],
+    ["Glovo <receipts@glovoapp.com>", "Order cancelled", "Your order has been cancelled. Total 78.00 MAD will not be charged.", "null"],
+    [R5CIH, "Opération", "Votre paiement de 300,00 MAD chez MARJANE a été annulé.", "null"],
+    [R5CIH, "Annulation d'opération", "L'opération de 250,00 MAD chez MARJANE a été annulée et recréditée sur votre compte.", "refund 250 MAD"],
+    /* pending / held */
+    [R5CIH, "Paiement en attente", "Votre paiement de 1 500,00 MAD chez HOTEL SOFITEL est en attente de validation 3D Secure.", "null"],
+    [R5CIH, "Opération", "Paiement de 300,00 MAD chez MARJANE en cours de traitement.", "null"],
+    [R5CIH, "Opération", "Pré-autorisation de 2 000,00 MAD chez HERTZ AEROPORT.", "null"],
+    /* unpaid bills */
+    ["inwi <facturation@inwi.ma>", "Votre facture est disponible", "Votre facture de septembre est disponible dans votre espace client.\nMontant à payer : 199,00 DH\nDate limite de paiement : 30/10/2026", "null"],
+    ["Maroc Telecom <noreply@iam.ma>", "Rappel facture", "Rappel : votre facture de 349,00 DH arrive à échéance le 20/10/2026. Payez-la sur l'application MT Cash.", "null"],
+    ["inwi <facturation@inwi.ma>", "Votre facture est prête", "Total à payer : 199,00 DH", "null"],
+    ["Orange Maroc <service.client@orange.ma>", "Votre facture Orange", "Votre facture d'octobre d'un montant de 249,00 DH est disponible. Payez-la avant le 10/11.", "null"],
+    /* pay later */
+    ["Booking.com <customer.service@booking.com>", "Confirmation de réservation", "Votre réservation à Riad Les Orangers est confirmée.\nPrix total : 1 200,00 MAD\nVous paierez l'établissement lors de votre séjour.", "null"],
+    ["Booking.com <customer.service@booking.com>", "Your booking is confirmed", "Your stay at Dar Anika is confirmed. Total MAD 2,150. Payment will be taken by the property on arrival.", "null"],
+    /* outgoing transfers stay debits; "Motif : remboursement" never flips them */
+    [R5CIH, "Exécution de virement", "Votre ordre de virement d'un montant de 2 500,00 MAD au profit de M. OTHMANE BERRADA a été exécuté le 13/10/2026. Motif : remboursement voiture.", "debit 2500 MAD"],
+    [R5CIH, "Virement", "Votre virement de 900,00 MAD en faveur de RACHID (motif : remboursement prêt) a été exécuté.", "debit 900 MAD"],
+    [R5CIH, "Virement", "Montant : 900,00 MAD\nBénéficiaire : RACHID\nMotif : remboursement", "debit 900 MAD"],
+    [R5CIH, "Virement reçu", "Vous avez reçu un virement de 300,00 MAD de la part de AHMED. Motif : remboursement resto", "credit 300 MAD"],
+    /* missed transactions */
+    [R5CIH, "Virement salaire", "Virement salaire reçu : 9 200,00 MAD.\nDonneur d'ordre : ACME MAROC SA", "credit 9200 MAD"],
+    ["CIH Mobile <no-reply@cih.co.ma>", "Transfert envoyé", "Votre transfert CIH Pay de 500,00 MAD vers SALMA a été envoyé avec succès.", "debit 500 MAD"],
+    ["CIH Mobile <no-reply@cih.co.ma>", "Recharge téléphonique", "Recharge inwi de 50,00 MAD effectuée depuis CIH Mobile pour le 06 61 23 45 67.", "debit 50 MAD"],
+    ["Careem <receipts@careem.com>", "You sent money with Careem Pay", "You sent MAD 100.00 to Yassine Alaoui. Careem Pay balance: MAD 54.00.", "debit 100 MAD"],
+    ["Careem <receipts@careem.com>", "Money received in Careem Pay", "Imane sent you MAD 75.00. It has been added to your Careem Pay wallet.", "credit 75 MAD"],
+    ["Maroc Telecom <noreply@iam.ma>", "Recharge *3", "Recharge réussie : 30 DH ont été ajoutés à votre solde. Nouveau solde 41,20 DH.", "debit 30 MAD"],
+    ["Orange Maroc <service.client@orange.ma>", "Recharge effectuée", "Votre recharge de 100 DH a bien été effectuée. Bonus : 10 Go offerts valables 7 jours.", "debit 100 MAD"],
+    ["Le Petit Rocher <contact@lepetitrocher.ma>", "Votre addition – Le Petit Rocher", "Merci de votre visite !\n2 Tajines 140,00 DH\nJus d'orange 30,00 DH\nTotal à payer 170,00 DH\nPourboire 15,00 DH\nMontant réglé 185,00 DH", "debit 185 MAD"],
+    /* earlier what-if receipts still count */
+    ["Glovo <no-reply@glovoapp.com>", "Votre reçu Glovo", "Total payé 94,00 MAD. Si votre paiement a échoué, aucun montant ne sera débité.", "debit 94 MAD"]
+  ];
+  for (const [from, subject, text, want] of r5cases) t.eq("R5 " + subject + " | " + text.replace(/\n/g, " / ").slice(0, 50), r4kind(r4(from, subject, text)), want);
+  /* merchant names never carry status words */
+  t.eq("R5 merchant cut at ':' / 'montant'", field(r4(R5CIH, "Opération carte", "Paiement chez MARJANE : montant 345,60 MAD"), "merchant"), "Marjane");
+  t.eq("R5 merchant cut at a status word", field(r4(R5CIH, "Opération carte", "Paiement de 120,00 MAD chez ZARA effectué avec succès."), "merchant"), "Zara");
+  t.eq("R5 top-up merchant is the operator", field(r4("CIH Mobile <no-reply@cih.co.ma>", "Recharge", "Recharge inwi de 50,00 MAD effectuée depuis CIH Mobile."), "merchant"), "inwi");
 
   /* --- robustness --- */
   const weird = [undefined, null, 42, "x", {}, { from: null, subject: null, text: null, html: null },

@@ -196,6 +196,10 @@
      times, percentages, Moroccan phone numbers. Replaced by a "~" so the
      pieces on either side can never fuse into one fake thousands group. */
   var SCRUB = [
+    /* "Motif : remboursement voiture" is the sender's own note, not what the
+       bank did: it must never decide credit vs debit (or refund) */
+    /(?:motif|libell[eé]|objet|memo|reference|r[eé]f[eé]rence|description)\s{0,3}:\s{0,3}[^\n.;)]{0,80}/gi,
+    /\b0[5-8](?:[\s.\-]?\d{2}){4}\b/g,
     /\d{4,6}[*xX•]{3,24}\d{2,4}/g,                                    /* 457123XXXXXX1234 */
     /* ****1234, XXXX XXXX 1234. Groups need a separator between them: the
        old /(?:[*x]{2,}[\s-]?){1,4}\d/ could split one run of mask characters
@@ -258,8 +262,8 @@
      end after "payé" so it outranks the payment verb */
   var TOTAL_RE = /total\s+(?:[aà]\s+payer|pay[eé]|ttc|factur[eé]|r[eé]gl[eé]|de\s+la\s+commande)|\btotal\b|montant\s+(?:ttc|[aà]\s+r[eé]gler)|amount\s+charged|amount\s+paid|montant\s+(?:total|pay[eé]|d[eé]bit[eé]|factur[eé]|r[eé]gl[eé]|[aà]\s+payer)|you\s+paid|vous\s+avez\s+pay[eé]|net\s+[aà]\s+payer|charged|pay[eé]\s+(?:par|avec)|paid\s+(?:with|by)/i;
   var AMOUNT_RE = /montant|amount|somme|recharge/i;
-  var DEBIT_RE = /d[eé]bit|paiement|payment|achat|purchase|retrait|withdrawal|virement\s+(?:[eé]mis|sortant|effectu)|votre\s+virement|virement(?:\s+[a-zéè]{3,12}){0,2}\s+de\s*(?=[\d~]|$)|transfert\s+de\s*(?=[\d~]|$)|transfer\s+of|your\s+transfer|transfer\s+sent|pr[eé]l[eè]vement|charged|pay[eé]|paid|transaction|op[eé]ration|spent|d[eé]pense/i;
-  var CREDIT_RE = /cr[eé]dit[eé]|cr[eé]dit\s+de\s*(?=[\d~]|mad|dh|$)|virement\s+(?:re[cç]u|entrant|en\s+votre\s+faveur)|vous\s+avez\s+re[cç]u|you\s+(?:have\s+)?received|credited|incoming|versement|rembours|refund/i;
+  var DEBIT_RE = /d[eé]bit|paiement|payment|achat|purchase|retrait|withdrawal|virement\s+(?:[eé]mis|sortant|effectu)|votre\s+virement|ordre\s+de\s+virement|(?:virement|transfert|recharge)(?:\s+[^\s\d~]{1,15}){0,3}\s+de\s*(?=[\d~]|$)|transfer\s+of|your\s+transfer|transfer\s+sent|you\s+sent|vous\s+avez\s+envoy|top[\s-]?up|b[eé]n[eé]ficiaire\s*:|pr[eé]l[eè]vement|charged|pay[eé]|paid|transaction|op[eé]ration|spent|d[eé]pense/i;
+  var CREDIT_RE = /cr[eé]dit[eé]|cr[eé]dit\s+de\s*(?=[\d~]|mad|dh|$)|virement\s+(?:re[cç]u|entrant|en\s+votre\s+faveur)|vous\s+avez\s+re[cç]u|you\s+(?:have\s+)?received|sent\s+you|virement(?:\s+[^\s\d~]{1,15}){0,2}\s+re[cç]u(?![a-z])|virement\s+(?:de\s+)?salaire|credited|incoming|versement|rembours|refund/i;
   var REFUND_RE = /rembours|refund|reversal|annulation|annul[eé]|avoir\s+de/i;
   var INCLUDED_RE = /\([^()]{0,60}(?:incl|compris)[^()]{0,60}\)|\b(?:tva|taxes?|vat|livraison|delivery|frais|fees?)\s+(?:incl\w*|compris\w*)|(?:incl\w*|including)\s+(?:tva|tax\w*|vat|fees?|delivery|livraison)/gi;
   /* an amount next to these is a discount or a voucher, never spending:
@@ -272,7 +276,7 @@
      (reçu par le bénéficiaire, nous avons reçu votre ordre). Outgoing
      markers win. "émis par" / "envoyé par" name the payer, so they are not
      outgoing. */
-  var RECEIVING_RE = /vous\s+avez\s+re[cç]u|re[cç]ue?s?\s+sur\s+votre\s+compte|re[cç]ue?s?\s+de\s+la\s+part\s+d|en\s+votre\s+faveur|cr[eé]dit[eé]e?s?(?![a-z])|virement\s+(?:entrant|re[cç]u(?![a-z])(?!\s+par))|r[eé]ception\s+d'un\s+(?:virement|versement|transfert)|vous\s+a\s+(?:envoy|vir)|versement\s+esp[eè]ces|you\s+(?:have\s+)?received|received\s+(?:in|into|on)\s+your\s+account|has\s+been\s+credited|credited\s+(?:to|with)|incoming\s+(?:transfer|payment)/i;
+  var RECEIVING_RE = /vous\s+avez\s+re[cç]u|re[cç]ue?s?\s+sur\s+votre\s+compte|re[cç]ue?s?\s+de\s+la\s+part\s+d|en\s+votre\s+faveur|cr[eé]dit[eé]e?s?(?![a-z])|virement(?:\s+[^\s\d~]{1,15}){0,2}\s+(?:entrant|re[cç]u(?![a-z])(?!\s+par))|virement\s+(?:de\s+)?salaire|salary\s+(?:payment|credit)|sent\s+you|added\s+to\s+your(?:\s+\S{1,15}){0,3}\s+wallet|r[eé]ception\s+d'un\s+(?:virement|versement|transfert)|vous\s+a\s+(?:envoy|vir)|versement\s+esp[eè]ces|you\s+(?:have\s+)?received|received\s+(?:in|into|on)\s+your\s+account|has\s+been\s+credited|credited\s+(?:to|with)|incoming\s+(?:transfer|payment)/i;
   var OUTGOING_RE = /(?:^|[^a-z])vers\s+(?!votre)|au\s+profit\s+(?:de|d')|(?:^|[^a-z])[eé]mise?s?(?![a-z])(?!\s*par)|(?:a\s+[eé]t[eé]|est|been|was|avez|avons)\s+(?:bien\s+)?envoy|has\s+been\s+sent|\bsent\s+to|sortante?s?(?![a-z])|ordre\s+de\s+virement|re[cç]ue?s?\s+par|b[eé]n[eé]ficiaire|beneficiary|en\s+faveur\s+d|transmise?s?(?![a-z])|transfer\s+(?:of\s+\S{1,12}\s+\S{1,12}\s+)?to\s/i;
   var REFUND_WORD_RE = /rembours|refund/i;
   /* what is still owed, never what was spent: "Reste à payer 1 500 MAD".
@@ -300,7 +304,7 @@
     post = post.slice(0, 80);
     /* only the words glued to the amount ("3 450 MAD de solde"), not the
        next clause after a comma ("débité de 250 MAD, solde 3 450 MAD") */
-    if (BAL_RE.test(tail) || BAL_RE.test(post.split(/[,;:]/)[0].slice(0, 30))) return "bal";
+    if (BAL_RE.test(tail) || BAL_RE.test(post.split(/[,;:]/)[0].slice(0, 14))) return "bal";
     if (PROMO_AMT_RE.test(post.replace(INCLUDED_RE, " ").split(/[,;:]/)[0].slice(0, 30))) return "promo";
     tail = tail.replace(INCLUDED_RE, " ");
     var fams = [["promo", PROMO_AMT_RE], ["sub", SUB_RE], ["total", TOTAL_RE], ["credit", CREDIT_RE], ["debit", DEBIT_RE], ["amount", AMOUNT_RE]];
@@ -563,12 +567,16 @@
 
   var MERCH_LABEL_RE = /(^|[^A-Za-zÀ-ÿ])(chez|aupr[eè]s\s+d(?:e\s|u\s|')|marchand\s*[:|]|commer[cç]ant\s*[:|]|merchant(?:\s+name)?\s*[:|]|b[eé]n[eé]ficiaire\s*[:|]|payee\s*[:|]|de\s+la\s+part\s+de|au\s+profit\s+de|[eé]metteur\s*[:|]|donneur\s+d'ordre\s*[:|])\s*/gi;
   var MERCH_AT_RE = /\s(?:at|@)\s+(?=[A-Z0-9])/g;
+  /* status words that follow a merchant name: "ZARA non autorisée : carte
+     bloquée", "MARJANE : montant 345,60", "KFC en cours de traitement" */
+  var MERCH_STATUS_RE = /\s+(?:non|pas|n'|ne|refus|rejet|annul|bloqu|suspendu|en\s+(?:cours|attente)|carte|card|montant|amount|declined|pending|r[eé]ussi|effectu|ex[eé]cut|accept|valid|autoris)[\s\S]*$/i;
   var MERCH_STOP_RE = /\s+(?:le|on|du|pour|for|avec|with|via|par|by|soit|d'un|d'une|dated|using|en\s+date|ce|this|au|aux|à|a|is|est|was|a\s+[eé]t[eé])(?=\s|$)[\s\S]*$/i;
   var MERCH_BAD_RE = /^(?:vous|votre|vos|nous|notre|your|you|the|un|une|le|la|les|ce|cette|this|our|carte|card|compte|account)(?![A-Za-zÀ-ÿ])/i;
 
   function cleanMerchant(rest) {
-    var v = rest.slice(0, 160).split(/[\n|;~()]|,\s|\.\s|\.$|\s[-–—]\s/)[0];
+    var v = rest.slice(0, 160).split(/[\n|;~():]|,\s|\.\s|\.$|\s[-–—]\s/)[0];
     v = v.replace(MERCH_STOP_RE, "");
+    v = v.replace(MERCH_STATUS_RE, "");
     v = v.replace(/\s+-?\d[\d\s.,]*(?:mad|dhs?|eur|usd|€|\$)?[\s\S]*$/i, "");
     v = v.replace(/\s+(?:mad|dhs?|eur|usd)(?![A-Za-z])[\s\S]*$/i, "");
     v = v.replace(/^[\s:"'«]+|[\s.,:;"'»]+$/g, "");
@@ -637,8 +645,13 @@
      "votre paiement a été refusé, si le problème persiste…" still counts,
      "si votre paiement a échoué, aucun montant…" does not. A sub-clause
      matching neg (a negation) is skipped too. */
-  var SUBCLAUSE_RE = /[,:;()\u2013\u2014]|\s-\s/;
+  /* a decimal comma ("300,00") or a time ("14:22") is not a clause break */
+  var SUBCLAUSE_RE = /,(?!\d)|:(?!\d)|[;()\u2013\u2014]|\s-\s/;
+  /* a sentence that OPENS with a condition ("Si X, Y", "If X, Y") is a
+     what-if all the way through, consequence included */
+  var COND_START_RE = /^\s*(?:en\s+cas\s+d|si\s|s'il|if\s|in\s+case|should\s|unless\s|lorsqu|when\s|au\s+cas\s+o)/i;
   function liveMatch(re, sent, neg) {
+    if (COND_START_RE.test(sent)) return false;
     var subs = sent.slice(0, MAX_LINE).split(SUBCLAUSE_RE);
     for (var i = 0; i < subs.length; i++) {
       var sub = subs[i];
@@ -669,6 +682,40 @@
     return false;
   }
 
+  /* Money NOT taken, grouped by meaning. Each family is checked per sentence
+     with liveMatch, so a what-if ("si…", "en cas de…") never triggers it. */
+  /* declined, blocked, unauthorised, not completed (negated completion) */
+  var DECLINED_RE = /non[\s-]autoris|unauthori[sz]ed|not\s+authori[sz]ed|bloqu[eé]e?s?(?![a-z])|\bblocked\b|n'(?:a|ont|est|sont|avons|avez)\s+(?:pas\s+|jamais\s+)?(?:pu\s+)?(?:[eê]tre\s+|[eé]t[eé]\s+)?(?:ex[eé]cut|effectu|trait|accept|abouti|valid|pass|autoris|d[eé]bit|pr[eé]lev|encaiss|re[cç]u)|(?:could\s+not|couldn't|cannot|can't|was\s+not|wasn't|were\s+not|has\s+not|hasn't|have\s+not|haven't|did\s+not|didn't)\s+(?:be\s+|been\s+)?(?:processed|completed|charged|authori[sz]ed|accepted|approved|taken|debited|received|go\s+through)|probl[eè]me\s+(?:est\s+survenu\s+)?(?:avec|sur|concernant)\s+(?:votre|ton|ta|your)\s+(?:mode\s+de\s+|moyen\s+de\s+)?(?:paiement|payment|carte)|problem\s+with\s+your\s+(?:payment|card)|faute\s+de\s+provision|insuffisance\s+de\s+provision|(?:abonnement|compte|account|subscription)\s+(?:est\s+|is\s+|a\s+[eé]t[eé]\s+|has\s+been\s+)?(?:suspendu|suspended|on\s+hold)/i;
+  /* cancelled: nothing will be (or was) charged */
+  var CANCELLED_RE = /(?:commande|order|r[eé]servation|booking|paiement|payment|transaction|op[eé]ration|course|trip|ride)(?:\s+[^\s.]{1,20}){0,6}?\s+(?:a\s+[eé]t[eé]\s+|est\s+|has\s+been\s+|have\s+been\s+|was\s+|is\s+)?(?:annul[eé]e?s?|cancell?ed)|(?:annulation|cancellation)\s+de\s+(?:votre|ta|la)\s+(?:commande|r[eé]servation|transaction)|will\s+not\s+be\s+charged|won't\s+be\s+charged|(?:have|has)\s+not\s+been\s+charged|ne\s+sera\s+pas\s+(?:d[eé]bit|pr[eé]lev|factur)|aucun\s+(?:montant|d[eé]bit|frais|paiement)/i;
+  /* pending, held, pre-authorised */
+  var PENDING_RE = /en\s+attente(?:\s+de)?\s+(?:validation|confirmation|paiement|autorisation|traitement|3d)|est\s+en\s+attente|\bpending\b|pr[eé][\s-]?autoris|empreinte\s+(?:bancaire|de\s+(?:votre\s+)?carte)|authori[sz]ation\s+hold|\bhold\s+(?:of|on\s+your)|en\s+cours\s+de\s+(?:traitement|validation|v[eé]rification)|being\s+processed|caution\s+(?:de|bancaire)|d[eé]p[oô]t\s+de\s+garantie|security\s+deposit/i;
+  /* a bill that is available or due, not paid */
+  var UNPAID_BILL_RE = /date\s+limite|[aà]\s+(?:r[eé]gler|payer)\s+avant|pay(?:ez|er)(?:[\s-](?:la|le|les))?\s+avant|avant\s+le\s+\d|arrive\s+[aà]\s+[eé]ch[eé]ance|date\s+d'[eé]ch[eé]ance|[eé]ch[eé]ance\s*:|due\s+(?:date|on|by)|amount\s+due|(?:montant|total)\s+d[uû](?![a-z])|your\s+(?:bill|invoice)\s+is\s+(?:ready|available)|facture(?:\s+[^\s.]{1,20}){0,8}?\s+(?:est\s+)?(?:disponible|pr[eê]te)|nouvelle\s+facture/i;
+  /* the mail itself says it was paid: overrides the unpaid-bill family */
+  var PAID_CONFIRM_RE = /pay[eé]e?s?\s+(?:avec|par|le)\s|paid\s+(?:with|by|on)\s|montant\s+r[eé]gl[eé]|r[eé]gl[eé]e?\s+(?:le|par|avec)\s|paiement\s+(?:re[cç]u|effectu[eé]|accept[eé]|confirm[eé])|merci\s+pour\s+votre\s+(?:paiement|r[eè]glement)|thank\s+you\s+for\s+your\s+payment|payment\s+(?:received|confirmed)|vous\s+avez\s+pay[eé]|you\s+paid|d[eé]j[aà]\s+pay[eé]/i;
+  var REFUNDISH_RE = /rembours|refund|recr[eé]dit/i;
+
+  /* any sentence (or the subject) asserting one of the families */
+  function notTaken(subject, body, all) {
+    var refundish = REFUNDISH_RE.test(all);
+    if (DECLINED_RE.test(subject) || PENDING_RE.test(subject) || (!refundish && CANCELLED_RE.test(subject))) return "subject";
+    var paid = PAID_CONFIRM_RE.test(all);
+    if (!paid && UNPAID_BILL_RE.test(subject)) return "subject";
+    for (var i = 0; i < body.length; i++) {
+      var sents = clausesOf(body[i]);
+      for (var j = 0; j < sents.length; j++) {
+        var t = sents[j];
+        var claims = ASSERT_RE.test(t) || scanClause(scrub(t)).length > 0;
+        if (claims && DECLINED_RE.test(t) && liveMatch(DECLINED_RE, t)) return "declined";
+        if (claims && !refundish && CANCELLED_RE.test(t) && liveMatch(CANCELLED_RE, t)) return "cancelled";
+        if (PENDING_RE.test(t) && liveMatch(PENDING_RE, t)) return "pending";
+        if (!paid && UNPAID_BILL_RE.test(t) && liveMatch(UNPAID_BILL_RE, t)) return "unpaid";
+      }
+    }
+    return "";
+  }
+
   var NEG_RE = /(?:^|[^a-z])(?:aucun|ne\s|n'|won't|will\s+not|not\s)/i;
   /* a reminder sentence outside a what-if and not negated ("si…, aucun
      montant ne sera débité") */
@@ -683,13 +730,13 @@
   /* a debit announced for later: null even when the subject says facture */
   var FUTURE_DEBIT_RE = /sera\s+(?:pr[eé]lev[eé]e?|d[eé]bit[eé]e?|factur[eé]e?)|will\s+be\s+(?:charged|debited|billed)|you'll\s+be\s+(?:charged|billed)/i;
   /* nothing paid yet: pay on arrival, at the property, on delivery */
-  var NOT_YET_RE = /you'll\s+pay|you\s+will\s+pay|[aà]\s+payer\s+sur\s+place|[aà]\s+r[eé]gler\s+(?:sur\s+place|[aà]\s+l'h[oô]tel|[aà]\s+l'arriv[eé]e)|pay\s+at\s+(?:the\s+)?(?:property|hotel|pick-?up|counter)|payable\s+[aà]\s+la\s+livraison|paiement\s+[aà]\s+la\s+livraison|cash\s+on\s+delivery|pay(?:able)?\s+on\s+(?:delivery|arrival)/i;
+  var NOT_YET_RE = /you'll\s+pay|you\s+will\s+pay|[aà]\s+payer\s+sur\s+place|[aà]\s+r[eé]gler\s+(?:sur\s+place|[aà]\s+l'h[oô]tel|[aà]\s+l'arriv[eé]e)|pay\s+at\s+(?:the\s+)?(?:property|hotel|pick-?up|counter)|payable\s+[aà]\s+la\s+livraison|paiement\s+[aà]\s+la\s+livraison|cash\s+on\s+delivery|pay(?:able)?\s+on\s+(?:delivery|arrival)|vous\s+paierez|tu\s+paieras|will\s+be\s+(?:taken|collected)\s+by|(?:on|upon)\s+arrival|[aà]\s+l'arriv[eé]e|lors\s+de\s+votre\s+s[eé]jour|paiement\s+sur\s+place|paid\s+(?:directly\s+)?(?:to|at)\s+the\s+(?:property|hotel)/i;
   /* notices about a charge that has not happened (yet) */
   var REMINDER_RE = /renews?\s+on|free\s+trial|essai\s+gratuit|ending\s+soon|expire\s+bient[oô]t|price\s+(?:is\s+)?chang|prix\s+(?:va\s+)?chang|changement\s+de\s+(?:prix|tarif)|nouveaux?\s+(?:prix|tarifs?)|new\s+price|sera\s+renouvel|will\s+(?:auto[\s-]?)?renew|renewal\s+reminder|upcoming\s+(?:payment|charge|renewal|bill)|prochain\s+(?:paiement|pr[eé]l[eè]vement)|rappel\s+de\s+paiement|payment\s+reminder|facture\s+[aà]\s+venir|will\s+be\s+charged|sera\s+(?:d[eé]bit[eé]|pr[eé]lev[eé])|trial\s+(?:ends|is\s+ending)|essai\s+(?:se\s+termine|prend\s+fin)|you'll\s+be\s+charged/i;
   var STATEMENT_SUBJ_RE = /relev[eé]|statement|extrait\s+de\s+compte/i;
   var PROMO_RE = /promo|\boffre|\boffer|%\s?off|-\s?\d+\s?%|\d+\s?%\s+(?:de\s+)?(?:r[eé]duction|off|discount)|newsletter|unsubscribe|d[eé]sabonn|d[eé]sinscri|profitez|bon\s+plan|\bdeals?\b|black\s+friday|[eé]conomisez|\bsave\s+(?:up|\d)|gratuit|free\s+delivery|nouveaut[eé]s/i;
   var FAILED_RE = /[eé]chec|[eé]chou[eé]|failed|declined|refus[eé]|rejet[eé]|non\s+abouti|impay[eé]|unsuccessful|not\s+(?:been\s+)?processed|(?:paiement|payment|transaction|pr[eé]l[eè]vement)\s+(?:a\s+[eé]t[eé]\s+|est\s+|was\s+|has\s+been\s+)?(?:annul[eé]|cancell?ed)|couldn'?t\s+(?:process|charge|complete)|could\s+not\s+(?:process|charge|complete)|unable\s+to\s+(?:process|charge)|n'avons\s+pas\s+pu|impossible\s+de\s+(?:traiter|d[eé]biter|pr[eé]lever)|payment\s+(?:didn'?t|did\s+not)\s+go\s+through|n'a\s+pas\s+(?:pu\s+)?(?:[eé]t[eé]\s+)?(?:effectu|accept|trait|abouti)|could\s+not\s+be\s+(?:processed|charged|completed)|insufficient|insuffisant|update\s+your\s+payment|mettre\s+[aà]\s+jour\s+votre\s+(?:moyen|mode)\s+de\s+paiement/i;
-  var RECEIPT_RE = /re[cç]u(?![a-z])|receipt|facture|invoice|\bcommande\b|\border\b|achat|purchase|paiement|payment|merci\s+pour\s+votre|thank\s+you\s+for\s+your|thanks\s+for\s+(?:riding|your)|your\s+trip|votre\s+course|confirmation|abonnement|subscription|recharge|total\s+pay[eé]|you\s+paid|amount\s+paid|billets?|e-?tickets?|r[eé]servation|booking/i;
+  var RECEIPT_RE = /re[cç]u(?![a-z])|receipt|facture|invoice|\bcommande\b|\border\b|achat|purchase|paiement|payment|merci\s+pour\s+votre|thank\s+you\s+for\s+your|thanks\s+for\s+(?:riding|your)|your\s+trip|votre\s+course|confirmation|abonnement|subscription|recharge|total\s+pay[eé]|you\s+paid|amount\s+paid|billets?|e-?tickets?|r[eé]servation|booking|addition|merci\s+de\s+votre\s+visite|thank\s+you\s+for\s+(?:dining|visiting)|you\s+sent/i;
   /* shipping and delivery notices repeat the order total; only the order or
      receipt mail itself counts */
   var SHIP_RE = /exp[eé]di[eé]e?s?(?![a-z])|shipped|out\s+for\s+delivery|livr[eé]e?s?(?![a-z])|delivered|en\s+route|on\s+(?:its|the)\s+way|en\s+cours\s+de\s+livraison|en\s+chemin|dispatched/i;
@@ -738,6 +785,13 @@
     return remain ? paid : undefined;
   }
 
+  /* "Votre recharge de 100 DH": a top-up reads as a debit verb, but on an
+     operator's own mail it is the amount line */
+  function rechargeOf(cands) {
+    for (var i = 0; i < cands.length; i++) if (cands[i].label === "debit" && /recharge|top[\s-]?up/i.test(cands[i].pre || "")) return cands[i];
+    return null;
+  }
+
   function lastOf(cands, label) {
     var hit = null;
     for (var i = 0; i < cands.length; i++) if (cands[i].label === label) hit = cands[i];
@@ -749,6 +803,7 @@
     var pd = paidOf(cands);
     if (pd !== undefined) { c = pd; why = "amount paid (rest still owed)"; if (!c) return null; }
     if (!c) { c = lastOf(cands, "amount"); conf = 0.8; why = "amount line"; }
+    if (!c) { c = rechargeOf(cands); conf = 0.8; why = "top-up line"; }
     if (!c) {
       /* no label at all: only a mail that names one single sum is trusted */
       var vals = {}, n = 0, only = null;
@@ -764,11 +819,15 @@
       for (var q = 0; q < cands.length; q++) if (cands[q].label === "credit" && cands[q].verb === "credit") { c = cands[q]; break; }
       if (c) { credit = true; conf = 0.8; why = "money received"; }
     }
+    if (!c) {   /* Careem Pay "You sent MAD 100.00 to Yassine" */
+      for (var q2 = 0; q2 < cands.length; q2++) if (cands[q2].label === "debit" && cands[q2].verb === "debit" && /you\s+sent|vous\s+avez\s+envoy/i.test(cands[q2].pre)) { c = cands[q2]; break; }
+      if (c) { conf = 0.75; why = "money sent"; }
+    }
     if (!c || failedSentence(c.clause)) return null;
     var merchant = known.name, cat = known.cat;
     if (known.slug === "uber" && /uber\s*eats|ubereats/i.test(all + " " + sender.domain)) { merchant = "Uber Eats"; cat = "food"; }
     if (known.slug === "careem" && /careem\s*pay/i.test(all)) merchant = "Careem Pay";
-    if (credit) cat = "";
+    if (credit || why === "money sent") cat = "";
     base.merchant = merchant;
     base.cat = cat;
     base.source = known.slug;
@@ -787,7 +846,7 @@
       if (k.label === "bal" || k.label === "sub" || k.label === "promo" || k.fee) continue;
       if (k.verb) { c = k; conf = isCih ? 0.85 : bank ? 0.8 : 0.75; break; }
     }
-    var globalVerb = verbOf(all);
+    var globalVerb = verbOf(scrub(all));
     /* table layouts: "Montant | 350,00 MAD" with "Paiement par carte" in another row */
     if (!c && bank && globalVerb) {
       for (var j = 0; j < cands.length; j++) {
@@ -804,19 +863,23 @@
       }
     }
     /* a bare "votre virement de X" does not say which way the money went */
-    if (c && c.verb === "debit" && /virement/i.test(c.pre) && !/[eé]mis|sortant|effectu|paiement|achat|retrait|d[eé]bit|pr[eé]l[eè]v/i.test(c.pre)) conf = Math.min(conf, 0.7);
+    if (c && c.verb === "debit" && /virement/i.test(c.pre) && !/[eé]mis|sortant|effectu|ex[eé]cut|ordre\s+de|paiement|achat|retrait|d[eé]bit|pr[eé]l[eè]v/i.test(c.pre)) conf = Math.min(conf, 0.7);
     if (!c || failedSentence(c.clause)) return null;
     var verb = c.verb || globalVerb;
     var ctx = subject + " " + c.clause;
     var kind = verb === "credit" ? "credit" : "debit";
     if (REFUND_RE.test(ctx)) kind = "refund";
     var merchant, cat = "";
+    var topup = /recharge\s+(inwi|orange|iam|maroc\s+telecom)/i.exec(c.clause);
     if (feeOnly) {
       kind = "debit";
       merchant = (isCih ? "CIH Bank" : (sender.name || "Bank")) + " fees";
       cat = "bills";
     } else if (kind === "debit" && CASH_RE.test(ctx)) {
       merchant = "Cash withdrawal";
+    } else if (kind === "debit" && topup) {
+      merchant = /inwi/i.test(topup[1]) ? "inwi" : /orange/i.test(topup[1]) ? "Orange" : "Maroc Telecom";
+      cat = "bills";
     } else {
       merchant = extractMerchant(lines, c.line);
       if (kind === "debit") cat = guessCat(merchant);
@@ -872,6 +935,7 @@
        subject, or in the body unless the subject says it is a receipt
        (Apple receipts print "Renews 20 Nov") */
     if (failedMail(subject, body)) return null;
+    if (notTaken(subject, body, all)) return null;
     if (REMINDER_RE.test(subject) || FUTURE_DEBIT_RE.test(subject) || bodyHas(FUTURE_DEBIT_RE, body)) return null;
     if (!RECEIPT_STRONG_RE.test(subject) && bodyHas(REMINDER_RE, body)) return null;
 
@@ -889,7 +953,7 @@
     var bd = bodyDate(all, ref);
     var base = { date: ymd(bd || ref || new Date()) };
 
-    var hasTotal = !!(lastOf(cands, "total") || lastOf(cands, "amount")) && RECEIPT_RE.test(all);
+    var hasTotal = !!(lastOf(cands, "total") || lastOf(cands, "amount") || rechargeOf(cands)) && RECEIPT_RE.test(all);
     var hasVerbAmt = false;
     for (var i = 0; i < cands.length; i++) if (cands[i].verb && cands[i].label !== "bal" && cands[i].label !== "sub" && cands[i].label !== "promo") hasVerbAmt = true;
     var bankish = hasVerbAmt && BANK_CTX_RE.test(all);
@@ -934,7 +998,7 @@
 
   /* bumped when parsing changes, so the app can re-check mails an older
      parser ignored */
-  var api = { VERSION: "4", htmlToText: htmlToText, parseMail: parseMail, SENDERS: SENDERS, KEYWORDS: KEYWORDS };
+  var api = { VERSION: "5", htmlToText: htmlToText, parseMail: parseMail, SENDERS: SENDERS, KEYWORDS: KEYWORDS };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MailParse = api;
 })(typeof window !== "undefined" ? window : this);
