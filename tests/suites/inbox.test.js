@@ -771,4 +771,32 @@ exports.run = async function (t, env) {
     t.eq("a pass written inside a comment does not count", ver("w2"), 0);
     await app.close();
   }
+
+  /* ---- final panel UX: Review must REVIEW (it saved in one tap) ---- */
+  {
+    const app = await boot(browser, connected({ inbox: [
+      { id: "cz", amount: 62, currency: "MAD", date: "2026-10-13", merchant: "Glovo", sender: "Glovo", status: "new", kind: "debit", cat: "food", confidence: 0.9, verified: 1, caution: "declined" } ] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    t.eq("a caution row says Review", (await app.page.textContent('[data-inbox-add="cz"]')).trim(), "Review");
+    await app.page.click('[data-inbox-add="cz"]'); await app.page.waitForTimeout(450);
+    t.ok("and tapping it opens the form", await app.page.evaluate(() => !!document.querySelector("#f-save")));
+    t.eq("saving nothing behind your back", (await app.stored()).expenses.length, 0);
+    t.has("the form says what to check", norm(await app.page.evaluate(() => document.querySelector("#sheet").innerText)), "check your bank shows this payment");
+    await app.page.click(".sheet-x"); await app.page.waitForTimeout(400);
+    t.ok("✕ goes back to the inbox, not Home", await app.page.evaluate(() => !!document.querySelector("#inbox-list")));
+    await app.close();
+  }
+  {
+    /* a normal CIH alert with the bank's standard footer stays one tap */
+    MAILS.bf = msg("bf", "CIH Bank <alertes@cihbank.ma>", "Paiement par carte",
+      "<p>Paiement par carte ****4521 d'un montant de 120,00 MAD chez MARJANE le 13/10/2026.</p><p>En cas d'opération non autorisée, bloquez votre carte au 0522 47 47 47. CIH décline toute responsabilité.</p>");
+    MAILS.bf.payload.headers.push({ name: "Authentication-Results", value: "mx.google.com; dkim=pass header.i=@cihbank.ma" });
+    const app = await boot(browser, connected(), { now: NOW });
+    await fakeGoogle(app, { ids: ["bf"] });
+    await returnFromGoogle(app, "b".repeat(40));
+    delete MAILS.bf;
+    const it = (await app.stored()).inbox.find(x => x.id === "bf");
+    t.eq("the bank's footer does not raise a false alarm", it && it.caution, "");
+    await app.close();
+  }
 };

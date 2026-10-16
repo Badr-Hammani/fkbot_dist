@@ -525,18 +525,24 @@
      Verified = dkim=pass with header.i=@d / header.d=d, or spf=pass with
      smtp.mailfrom=[user@]d, on the matched domain. Every quantifier bounded. */
   function senderVerified(auth, td) {
+    /* comments "(...)" can hold any text: drop them, nested too */
+    auth = String(auth || "").slice(0, 4000);
+    for (var c = 0; c < 10 && /\([^()]*\)/.test(auth); c++) auth = auth.replace(/\([^()]*\)/g, " ");
+    auth = auth.replace(/[()]/g, " ");
     var parts = auth.split(";");
+    /* a result counts only when its ";" section STARTS with method=pass, and
+       only its own property token -- never text echoed from an address */
     for (var i = 0; i < parts.length && i < 40; i++) {
-      var p = parts[i], m;
-      if (/(?:^|\s)dkim\s{0,3}=\s{0,3}pass(?![a-z])/i.test(p)) {
-        m = /header\.i\s{0,3}=\s{0,3}[^\s@;]{0,64}@([a-z0-9.\-]{1,253})/i.exec(p) || /header\.d\s{0,3}=\s{0,3}([a-z0-9.\-]{1,253})/i.exec(p);
-        if (m && sameSite(m[1].toLowerCase(), td)) return true;
-        m = /header\.d\s{0,3}=\s{0,3}([a-z0-9.\-]{1,253})/i.exec(p);
-        if (m && sameSite(m[1].toLowerCase(), td)) return true;
-      }
-      if (/(?:^|\s)spf\s{0,3}=\s{0,3}pass(?![a-z])/i.test(p)) {
-        m = /smtp\.mailfrom\s{0,3}=\s{0,3}(?:[^\s@;]{0,64}@)?([a-z0-9.\-]{1,253})/i.exec(p);
-        if (m && sameSite(m[1].toLowerCase(), td)) return true;
+      var p = parts[i].replace(/^\s+/, ""), mm = /^(dkim|spf)\s{0,3}=\s{0,3}pass(?![a-z])/i.exec(p);
+      if (!mm) continue;
+      var dkim = mm[1].toLowerCase() === "dkim", toks = p.split(/\s+/);
+      for (var t = 1; t < toks.length && t < 30; t++) {
+        var kv = /^(header\.d|header\.i|smtp\.mailfrom)=(.{1,260})$/i.exec(toks[t]);
+        if (!kv) continue;
+        var key = kv[1].toLowerCase();
+        if (dkim ? key === "smtp.mailfrom" : key !== "smtp.mailfrom") continue;
+        var d = (key === "header.d" ? kv[2] : kv[2].slice(kv[2].lastIndexOf("@") + 1)).toLowerCase();
+        if (/^[a-z0-9.\-]{1,253}$/.test(d) && sameSite(d, td)) return true;
       }
     }
     return false;
