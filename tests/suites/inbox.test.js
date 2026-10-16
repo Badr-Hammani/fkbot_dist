@@ -668,4 +668,33 @@ exports.run = async function (t, env) {
     t.eq("the real Glovo, checked by Gmail, is verified", ver("v3"), 1);
     await app.close();
   }
+
+  /* ---- loop 2 QA, app side ---- */
+  {
+    MAILS.h1 = msg("h1", "Glovo <no-reply@glovoapp.com>", "Votre commande Glovo", "<p>Total : 52,00 MAD</p>");
+    MAILS.h1.payload.headers.push({ name: "Authentication-Results", value: "mx.google.com; dkim=pass header.i=noreply@glovoapp.com header.s=s1" });
+    const app = await boot(browser, connected(), { now: NOW });
+    await fakeGoogle(app, { ids: ["h1"] });
+    await returnFromGoogle(app, "j".repeat(40));
+    delete MAILS.h1;
+    t.eq("a DKIM pass written header.i=user@domain counts as verified", ((await app.stored()).inbox.find(x => x.id === "h1") || {}).verified, 1);
+    await app.close();
+  }
+  {
+    const app = await boot(browser, connected({ lastCat: "health", inbox: [
+      { id: "lc", amount: 30, currency: "MAD", date: "2026-10-13", merchant: "Careem", sender: "Careem", status: "new", kind: "debit", cat: "transport", confidence: 0.9 } ] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    await app.page.click('[data-inbox-add="lc"]'); await app.page.waitForTimeout(400);
+    await app.page.click("#toast button"); await app.page.waitForTimeout(400);
+    t.eq("Undo also puts your last-used category back", (await app.stored()).lastCat, "health");
+    await app.close();
+  }
+  {
+    const app = await boot(browser, connected({ inbox: [
+      { id: "mc", amount: 30, currency: "MAD", date: "2026-10-13", merchant: "Shop", sender: "Shop", status: "new", kind: "debit", cat: "food", confidence: 0.75 } ] }), { now: NOW });
+    await app.page.click("#h-inbox"); await app.page.waitForTimeout(300);
+    await app.page.click('[data-inbox-add="mc"]'); await app.page.waitForTimeout(400);
+    t.ok("a read the app is only fairly sure of goes through the form", await app.page.evaluate(() => !!document.querySelector("#f-save")));
+    await app.close();
+  }
 };

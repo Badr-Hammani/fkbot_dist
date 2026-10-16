@@ -1292,7 +1292,8 @@
              email: String(g.email || "").slice(0, 120),
              auto: g.auto ? 1 : 0, autoTs: +g.autoTs > 0 ? Math.floor(+g.autoTs) : 0,
              autoFails: +g.autoFails > 0 ? Math.min(Math.floor(+g.autoFails), 20) : 0,
-             autoNote: String(g.autoNote || "").slice(0, 200) };
+             autoNote: String(g.autoNote || "").slice(0, 200),
+             parserVer: String(g.parserVer || "").slice(0, 12) };
   }
   /* Places you saved yourself. A coordinate pair and a name, nothing else --
      what you buy there is read from the expenses filed under it. */
@@ -4893,7 +4894,7 @@
     if(!auth) return -1;
     var bases = (brand.domains || []).map(function(d){ return String(d).toLowerCase(); });
     function ok(d){ d = String(d || "").toLowerCase(); return bases.some(function(b){ return under(d, b); }); }
-    var m, re = /dkim=pass[^;]{0,300}?header\.(?:i=@?|d=)([a-z0-9.-]{1,190})/gi;
+    var m, re = /dkim=pass[^;]{0,300}?header\.(?:i=(?:[^@\s;]{0,64}@)?|d=)([a-z0-9.-]{1,190})/gi;
     while((m = re.exec(auth))) if(ok(m[1])) return 1;
     re = /spf=pass[^;]{0,300}?smtp\.mailfrom=(?:[^@\s;]{0,64}@)?([a-z0-9.-]{1,190})/gi;
     while((m = re.exec(auth))) if(ok(m[1])) return 1;
@@ -4916,6 +4917,14 @@
     var cfg = gmailCfg(), nowSec = Math.floor(Date.now() / 1000);
     /* first time: the last 30 days; after that from the last check, with two
        days of overlap for late emails -- ids already seen are skipped */
+    /* a newer parser gets a second look at what an older one ignored: the
+       ignored ids are forgotten and the window reaches back 30 days again */
+    var pv = String((MailParse && MailParse.VERSION) || "");
+    if(pv && cfg.parserVer !== pv){
+      Object.keys(state.mailSeen || {}).forEach(function(k){ if(state.mailSeen[k] < 0) delete state.mailSeen[k]; });
+      if(cfg.parserVer && cfg.lastSec) cfg.lastSec = Math.min(cfg.lastSec, nowSec - 30 * 86400);
+      cfg.parserVer = pv;
+    }
     var after = cfg.lastSec ? cfg.lastSec - 2 * 86400 : nowSec - 30 * 86400;
     var known = {};
     Object.keys(state.mailSeen || {}).forEach(function(k){ known[k] = 1; });
@@ -4947,7 +4956,10 @@
             from:String(m.from || "").slice(0, 1024), subject:String(m.subject || "").slice(0, 1024),
             text:String(m.text || "").slice(0, 50000), html:String(m.html || "").slice(0, 300000) });
         }catch(e){ t = null; }
-        if(!t || !(t.amount > 0) || !(t.confidence >= 0.5) || inboxItem(m.id)) return;
+        if(!t || !(t.amount > 0) || !(t.confidence >= 0.5) || inboxItem(m.id)){
+          if(!inboxItem(m.id)) state.mailSeen[m.id] = -Date.now();   /* ignored, not offered */
+          return;
+        }
         var ver = senderVerified(m.from, m.authResults);
         /* memory is only consulted for a real shop name from a sender Gmail
            did not flag -- never for "CIH Bank" or a forged lookalike */
@@ -4974,7 +4986,7 @@
       state.inbox = state.inbox.filter(function(x){ return x.status === "new" || (x.ts || 0) > cutoff; });
       var seenIds = Object.keys(state.mailSeen);
       if(seenIds.length > 1500){
-        seenIds.sort(function(a, b){ return state.mailSeen[a] - state.mailSeen[b]; })
+        seenIds.sort(function(a, b){ return Math.abs(state.mailSeen[a]) - Math.abs(state.mailSeen[b]); })
           .slice(0, seenIds.length - 1500).forEach(function(k){ delete state.mailSeen[k]; });
       }
       cfg.autoFails = 0; cfg.autoNote = "";
@@ -4992,7 +5004,7 @@
       render();
       /* refresh the inbox if it is what you are looking at; open it only if
          you asked for this check and nothing else is open */
-      if(sheet.classList.contains("show") && $("#inbox-list")) openInbox();
+      if(sheet.classList.contains("show") && $("#inbox-list")){ inboxDrawnAt = Date.now(); keepInboxPlace(); openInbox(); }
       else if(!auto && !sheet.classList.contains("show") && (found || failed || more)) openInbox();
       if(auto && !found) return;
       if(auto){ toastAction(found + " new from Gmail", "Review", openInbox, 10000); return; }
@@ -5221,11 +5233,12 @@
     var catId = liveCat(x.cat);
     /* anything the app is unsure of goes through the form: no category, a
        foreign amount, a sender Gmail did not verify, a low-confidence read */
-    if(!catId || x.currency !== state.currency || x.kind !== "debit" || x.verified === 0 || x.confidence < 0.7){ editFromInbox(x); return; }
+    if(!catId || x.currency !== state.currency || x.kind !== "debit" || x.verified === 0 || x.confidence < 0.8){ editFromInbox(x); return; }
     var e = { id:uid(), ts:Date.now(), amount:x.amount, cat:catId, note:x.merchant, date:x.date, photo:null,
               loanId:"", loanAdded:0, fundingType:"", fundingPersonId:"", fundingPersonName:"", fundingAmount:0, fundingLogId:"",
               placeId:"", fuelLiters:0, odometer:0, mailId:x.id };
     if(expenseFundingProposal(e.amount, null, e.date).shortfall > 0){ editFromInbox(x); return; }
+    var lastCatBefore = state.lastCat;
     var result = commitExpense(e, null, { type:"none", amount:0 });
     if(!result.ok){ if(!save.explained) toast("Could not save — your money data was not changed"); return; }
     inboxDrawnAt = Date.now();
@@ -5235,8 +5248,9 @@
     toastAction("Added " + fmt(e.amount) + " · " + cat(catId).name + (more ? " · " + more + " left" : ""), "Undo", function(){
       var it = inboxItem(x.id), before = state.expenses.slice();
       state.expenses = state.expenses.filter(function(y){ return y.id !== e.id; });
+      var lastNow = state.lastCat; state.lastCat = lastCatBefore;
       if(it){ it.status = "new"; it.expenseId = ""; }
-      if(!save()){ state.expenses = before; if(it){ it.status = "added"; it.expenseId = e.id; } toast("Could not undo — try again"); return; }
+      if(!save()){ state.expenses = before; state.lastCat = lastNow; if(it){ it.status = "added"; it.expenseId = e.id; } toast("Could not undo — try again"); return; }
       render();
       if(sheet.classList.contains("show") && $("#inbox-list")) openInbox();
       toast("Undone — it’s back in the inbox");
